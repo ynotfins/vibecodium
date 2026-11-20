@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -38,6 +38,8 @@ test('goal runner: sandboxed, secrets removed, governance-gated, no raw event lo
   assert.match(s, /Remove-Item -LiteralPath "Env:/);
   assert.ok(s.indexOf('governance.mjs') < s.indexOf('$p = Start-Process'), 'governance check must run before Codex starts');
   assert.match(s, /AddDays\(-14\)/);
+  assert.match(s, /while \(-not \$p\.WaitForExit\(30000\)\) \{\n\s+Set-TreeBelowNormal \$p\.Id/, 'session tree must be kept below normal priority');
+  assert.match(s, /Get-FileHash -LiteralPath \$PSCommandPath\)\.Hash -ne \$selfHash/, 'runner must exit when its script changes');
 });
 
 test('task registration: hidden, headless, low priority, validates the checkout', () => {
@@ -56,21 +58,42 @@ test('PowerShell scripts parse without errors', { skip: !PWSH && 'pwsh not avail
   }
 });
 
-test('goal runner dry run removes secrets and confines writes', { skip: (process.platform !== 'win32' || !PWSH) && 'Windows + pwsh only' }, () => {
+// A throwaway trunk with its own genesis lock over the runner, so these tests exercise the runner
+// itself and do not depend on the repository's current lock state.
+function runnerFixture() {
   const fx = mkdtempSync(path.join(tmpdir(), 'vibe-runner-'));
   cleanup.push(fx, `${fx}.worktrees`);
-  for (const rel of ['vibe/tools', 'vibe/goal', '.vibe/governance', '.vibe/agents']) cpSync(path.join(ROOT, rel), path.join(fx, rel), { recursive: true });
-  for (const rel of ['AGENTS.md', 'docs/vibe/VISION.md', 'docs/vibe/PRODUCT_SPEC.md', 'docs/vibe/ARCHITECTURE.md', 'docs/vibe/GOVERNANCE.md', '.github/workflows/vibe-governance.yml']) {
-    mkdirSync(path.dirname(path.join(fx, rel)), { recursive: true });
-    cpSync(path.join(ROOT, rel), path.join(fx, rel));
-  }
+  for (const rel of ['vibe/tools', 'vibe/goal']) cpSync(path.join(ROOT, rel), path.join(fx, rel), { recursive: true });
+  mkdirSync(path.join(fx, 'docs/vibe'), { recursive: true });
   writeFileSync(path.join(fx, 'docs/vibe/STATUS.md'), 'Goal state: active\n');
-  const logs = path.join(fx, 'logs');
+  const g = spawnSync(process.execPath, [path.join(fx, 'vibe/tools/governance.mjs'), 'genesis', '--root', fx, '--path', 'vibe/goal/run-goal.ps1', '--path', 'vibe/goal/continue.prompt.md'], { encoding: 'utf8' });
+  assert.equal(g.status, 0, g.stdout + g.stderr);
   const codexHome = path.join(fx, 'codex-home');
   mkdirSync(codexHome);
+  return { fx, codexHome, logs: path.join(fx, 'logs') };
+}
+
+function dryRun({ fx, codexHome, logs }) {
   const env = { ...process.env, CODEX_HOME: codexHome, FAKE_TEST_API_KEY: 'not-a-real-secret-123', VIBECODIUM_GH_TOKEN: 'scoped-test-token-456' };
   const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', path.join(fx, 'vibe/goal/run-goal.ps1'), '-Root', fx, '-LogDir', logs, '-Codex', 'codex-not-started', '-DryRun'], { encoding: 'utf8', env });
-  const out = r.stdout + r.stderr;
+  return r.stdout + r.stderr;
+}
+
+const WIN_PWSH = (process.platform !== 'win32' || !PWSH) && 'Windows + pwsh only';
+
+test('goal runner refuses to start when its lock fails', { skip: WIN_PWSH }, () => {
+  const f = runnerFixture();
+  writeFileSync(path.join(f.fx, 'vibe/goal/continue.prompt.md'), 'tampered prompt\n');
+  const out = dryRun(f);
+  assert.doesNotMatch(out, /DRYRUN/);
+  const log = readFileSync(path.join(f.logs, readdirSync(f.logs).find((n) => n.startsWith('run-'))), 'utf8');
+  assert.match(log, /governance check failed on trunk; refusing to start a session/);
+});
+
+test('goal runner dry run removes secrets and confines writes', { skip: WIN_PWSH }, () => {
+  const f = runnerFixture();
+  const { fx, codexHome } = f;
+  const out = dryRun(f);
   assert.match(out, /DRYRUN args=.*-p vibecodium-goal -s workspace-write/, out);
   const profile = readFileSync(path.join(codexHome, 'vibecodium-goal.config.toml'), 'utf8');
   assert.match(profile, /^sandbox_mode = "workspace-write"$/m);

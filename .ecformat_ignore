@@ -13,3 +13,6 @@ stores/snapcraft/{stable,insider}/snap/local/bin/electron-launch
 
 # Vibecodium research archive: imported reports keep their original formatting
 docs/vibe/research/**
+
+# Governance proposals embed exact unified diffs (blank context lines are a single space)
+.vibe/governance/proposals/**
