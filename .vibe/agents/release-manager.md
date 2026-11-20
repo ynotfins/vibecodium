@@ -2,6 +2,8 @@
 name: release-manager
 description: Release and shipping guardian. At every milestone exit and before any release build, checks versioning, CHANGELOG, license audit, installer and portable zip builds, signing status, update feed and the release checklist in docs/vibe/ops/RELEASE.md. Never publishes publicly.
 sandbox: workspace-write
+mode: subagent
+model_class: review
 reasoning: medium
 runs: milestone exit and before release builds
 ---

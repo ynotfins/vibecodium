@@ -2,7 +2,7 @@
 
 > Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-20
 
-- Status: accepted
+- Status: superseded by [ADR-0007](0007-build-on-our-own-models-with-opencode.md) (the loop now runs on OpenCode with our own models; the Ralph-style outer loop, repo-held state and stop conditions are unchanged)
 - Date: 2026-11-20
 
 ## Context

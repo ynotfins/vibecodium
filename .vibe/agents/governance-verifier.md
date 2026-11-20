@@ -2,6 +2,8 @@
 name: governance-verifier
 description: The only agent allowed to approve a change to a locked governing doc. Independently reviews a proposal against the vision, spec, architecture and hard stops, and on PASS applies it and writes the approval record with vibe/tools/governance.mjs approve.
 sandbox: workspace-write
+mode: subagent
+model_class: strong
 reasoning: high
 runs: when a locked path changes (5)
 ---

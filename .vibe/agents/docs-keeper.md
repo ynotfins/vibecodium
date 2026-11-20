@@ -2,6 +2,8 @@
 name: docs-keeper
 description: Documentation guardian run after every task. Keeps the full professional docs suite under docs/vibe accurate against the actual code and state, updates living docs, proposes (never applies) changes to locked docs, and makes the docs check pass.
 sandbox: workspace-write
+mode: subagent
+model_class: cheap
 reasoning: medium
 runs: after-every-task (4)
 ---

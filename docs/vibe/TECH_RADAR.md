@@ -32,6 +32,10 @@ Rings: `adopt` (in use, keep), `trial` (in use, under evaluation), `assess` (wat
 | Build toolchain: 7-Zip | 7-Zip | installed (Program Files) | — | 2026-11-20 | — | adopt | 2026-12-04 |
 | Build toolchain: MSVC | Visual Studio Build Tools 2022, C++ workload | 17.14 | — | 2026-11-20 | Build Tools 2026 (assess) | adopt | 2026-12-04 |
 | Build toolchain: Spectre libraries | MSVC Spectre-mitigated runtimes component | missing on workstation (parked) | — | 2026-11-20 | — | adopt | 2026-11-27 |
-| Build orchestrator agent | Codex CLI | 0.154.0 | 0.154.0 | 2026-11-20 | OpenHands automations, Kilo Agent Manager | adopt | 2026-11-27 |
+| Build orchestrator agent | OpenCode (same harness as the product) | 1.19.5 | 1.19.6 (2026-11-17, waiting out 7 days); 2.3.2 (2026-11-18) | 2026-11-20 | Codex CLI (owner decision: not used for this build), OpenHands automations | adopt | 2026-11-27 |
+| Agent harness major version | OpenCode 2.x (new config format: `agents`, `permissions` lists) | — | v2.3.2 (2026-11-18) | 2026-11-20 | stay on 1.19.x | assess | 2026-11-27 |
+| Build models: primary | OmniRoute combos `agent`, `reasoning`, `review`, `cheap` | 3.8.53 (workstation) | — | 2026-11-20 | Bifrost routing rules | adopt | 2026-11-27 |
+| Build models: second option | Morph API (`morph-kimik31`, `morph-glm53-744b`, `morph-dsv41flash`) | live model list 2026-11-20 | — | 2026-11-20 | DeepInfra DeepSeek V4 Pro (third option) | adopt | 2026-11-27 |
+| Morph agent tools | `@morphllm/morphmcp` (MIT): WarpGrep, Fast Apply, GitHub search | 0.8.222 (2026-11-11) | 0.8.222 | 2026-11-20 | morph CLI (no native Windows binary) | adopt | 2026-11-27 |
 | Build toolchain: Rust | rustup stable | cargo 1.100.0 | 1.100.0 | 2026-11-20 | — | adopt | 2026-12-04 |
 | Build toolchain: Python | CPython 3.11 (node-gyp) | 3.11.9 | — | 2026-11-20 | — | adopt | 2026-12-04 |

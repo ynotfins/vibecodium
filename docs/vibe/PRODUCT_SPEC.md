@@ -20,11 +20,12 @@ Status values in `ROADMAP.md` and `STATUS.md` refer to these IDs. "Acceptance" l
 
 | ID | Must-have | Acceptance |
 |---|---|---|
-| B1 | Providers: kie.ai (Responses API, `gpt-6-1-sol`), DeepInfra, Abliteration, OpenRouter, Requesty, any OpenAI-compatible endpoint, local llama.cpp / Ollama | Each preset passes chat, streaming and tool-call tests against a mock server; live smoke where a key exists |
+| B1 | Providers: OmniRoute (when the user runs it), Morph, kie.ai (Responses API, `gpt-6-1-sol`), DeepInfra, Abliteration, OpenRouter, Requesty, any OpenAI-compatible endpoint, local llama.cpp / Ollama | Each preset passes chat, streaming and tool-call tests against a mock server; live smoke where a key exists |
 | B2 | Automatic fallback when a provider fails (timeouts, 429/5xx, empty streams) | Forced failure of the primary returns an answer from the fallback within the same turn or a clean retry |
 | B3 | Smart routing by task class (plan, code edit, quick edit, review, summarize, embed) with per-task and per-day budgets | Policy table drives the model choice; budget hard-stop is enforced |
 | B4 | Cache-aware prompt assembly and sticky routing so provider prompt caching works | Repeated turns in one session show cached-input tokens in the usage dashboard |
 | B5 | Point-and-click provider setup with an env-var picker; secrets in OS secret storage only | A provider can be added and switched with no file editing; no secret value appears in any file or log |
+| B6 | Morph as the direct second option when OmniRoute is unavailable, with its features: Fast Apply edits, WarpGrep code search, Compact (verbatim-preserving history pruning, an option for the context engine), the Router (prompt difficulty → model tier), and Morph-hosted open models including the approval-gated abliterated model | With OmniRoute stopped, an agent task completes on Morph models; Fast Apply and WarpGrep are available as agent tools; Compact output keeps every surviving line byte-identical |
 
 ## C. Codebase intelligence
 

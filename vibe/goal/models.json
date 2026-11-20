@@ -1,0 +1,25 @@
+{
+  "$comment": "Model routing for the autonomous build loop (ADR-0007). The runner health-checks providers in 'order' and uses the first that answers. Each agent in .vibe/agents declares a model_class; 'classes' maps it to a model on the chosen provider. keyEnv must be one of the provider keys the runner allows (OMNIROUTE_API_KEY, MORPH_API_KEY, DEEPINFRA_API_KEY). Tuned by tech-scout; no governance approval needed for model names.",
+  "order": ["omniroute", "morph", "deepinfra"],
+  "morphMcpVersion": "0.8.222",
+  "providers": {
+    "omniroute": {
+      "name": "OmniRoute (local smart router)",
+      "baseURL": "http://127.0.0.1:20128/v1",
+      "keyEnv": "OMNIROUTE_API_KEY",
+      "classes": { "strong": "reasoning", "standard": "agent", "review": "review", "cheap": "cheap" }
+    },
+    "morph": {
+      "name": "Morph (direct)",
+      "baseURL": "https://api.morphllm.com/v1",
+      "keyEnv": "MORPH_API_KEY",
+      "classes": { "strong": "morph-kimik31", "standard": "morph-glm53-744b", "review": "morph-glm53-744b", "cheap": "morph-dsv41flash" }
+    },
+    "deepinfra": {
+      "name": "DeepInfra (direct)",
+      "baseURL": "https://api.deepinfra.com/v1/openai",
+      "keyEnv": "DEEPINFRA_API_KEY",
+      "classes": { "strong": "deepseek-ai/DeepSeek-V4-Pro", "standard": "deepseek-ai/DeepSeek-V4-Pro", "review": "deepseek-ai/DeepSeek-V4-Pro", "cheap": "deepseek-ai/DeepSeek-V4-Pro" }
+    }
+  }
+}

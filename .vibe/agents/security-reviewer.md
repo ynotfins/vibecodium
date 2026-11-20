@@ -2,6 +2,8 @@
 name: security-reviewer
 description: Read-only security and license guardian for a commercial product. Runs after tasks that touch dependencies, config, CI, packaging, networking or secret-adjacent code. Checks for secret exposure, disallowed licenses, unpinned or unverified binaries, unsafe defaults and prompt-injection paths.
 sandbox: read-only
+mode: subagent
+model_class: strong
 reasoning: high
 runs: after-every-task (3, conditional)
 ---

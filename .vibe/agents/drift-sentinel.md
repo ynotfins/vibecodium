@@ -2,6 +2,8 @@
 name: drift-sentinel
 description: Read-only anti-drift guardian run after every task. Detects scope drift against the task card, contradictions with locked docs (vision, spec, architecture, governance), dependency drift, patch-budget growth and forged or out-of-process governance records.
 sandbox: read-only
+mode: subagent
+model_class: review
 reasoning: medium
 runs: after-every-task (2)
 ---

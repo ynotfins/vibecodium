@@ -11,4 +11,5 @@ One file per decision: `NNNN-<slug>.md`. Status is one of `proposed`, `accepted`
 | [0003](0003-vibe-context-engine.md) | Vibe Context Engine and the AgentCore adapter | accepted |
 | [0004](0004-governance-and-guardian-agents.md) | Locked docs and guardian sub-agents | accepted |
 | [0005](0005-openhands-autonomous-lane.md) | OpenHands as the autonomous background lane | accepted |
-| [0006](0006-autonomous-goal-runner.md) | Autonomous goal runner for building the product | accepted |
+| [0006](0006-autonomous-goal-runner.md) | Autonomous goal runner for building the product | superseded by 0007 |
+| [0007](0007-build-on-our-own-models-with-opencode.md) | Build on our own models with OpenCode | accepted |
