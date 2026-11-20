@@ -89,6 +89,26 @@ function Get-GoalState {
   if ($m) { return $m.Matches[0].Groups[1].Value } else { return 'missing' }
 }
 
+function Get-TreeIds([int]$RootId) {
+  $all = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId)
+  $ids = [System.Collections.Generic.HashSet[int]]::new()
+  [void]$ids.Add($RootId)
+  do {
+    $added = $false
+    foreach ($x in $all) { if ($ids.Contains([int]$x.ParentProcessId) -and $ids.Add([int]$x.ProcessId)) { $added = $true } }
+  } while ($added)
+  return $ids
+}
+
+function Set-TreeBelowNormal([int]$RootId) {
+  foreach ($id in (Get-TreeIds $RootId)) {
+    try {
+      $pr = Get-Process -Id $id -ErrorAction Stop
+      if ($pr.PriorityClass -notin 'BelowNormal', 'Idle') { $pr.PriorityClass = 'BelowNormal' }
+    } catch { }
+  }
+}
+
 function Get-TodayCount {
   $f = Join-Path $LogDir ("count-{0}.txt" -f (Get-Date -Format 'yyyyMMdd'))
   if (Test-Path $f) { return [int](Get-Content $f) } else { return 0 }
@@ -97,6 +117,8 @@ function Add-TodayCount {
   $f = Join-Path $LogDir ("count-{0}.txt" -f (Get-Date -Format 'yyyyMMdd'))
   Set-Content -Path $f -Value ((Get-TodayCount) + 1)
 }
+
+$selfHash = (Get-FileHash -LiteralPath $PSCommandPath).Hash
 
 try {
   $failures = 0
@@ -116,6 +138,12 @@ try {
     else {
       git -C $Root fetch --quiet origin 2>&1 | Out-Null
       git -C $Root merge --ff-only --quiet origin/vibe/main 2>&1 | Out-Null
+    }
+
+    # A merged change to this script takes effect on the next scheduled start, not mid-loop.
+    if ((Get-FileHash -LiteralPath $PSCommandPath).Hash -ne $selfHash) {
+      Write-Log 'runner script changed on trunk; exiting so the scheduler starts the new version'
+      break
     }
 
     if (-not $DryRun) { Add-TodayCount }
@@ -158,10 +186,17 @@ try {
     }
     $p = Start-Process -FilePath $Codex -ArgumentList ($codexArgs -join ' ') -RedirectStandardInput $promptFile `
       -RedirectStandardOutput (Join-Path $tmp 'out.txt') -RedirectStandardError (Join-Path $tmp 'err.txt') -WindowStyle Hidden -PassThru
-    try { $p.PriorityClass = 'BelowNormal' } catch { }
-    if (-not $p.WaitForExit($IterationTimeoutMinutes * 60 * 1000)) {
-      Write-Log "iteration timed out after $IterationTimeoutMinutes min; stopping process tree"
-      & taskkill.exe /PID $p.Id /T /F | Out-Null
+    # codex.exe raises its own priority; keep the whole session tree below normal.
+    $deadline = (Get-Date).AddMinutes($IterationTimeoutMinutes)
+    Start-Sleep -Seconds 5
+    Set-TreeBelowNormal $p.Id
+    while (-not $p.WaitForExit(30000)) {
+      Set-TreeBelowNormal $p.Id
+      if ((Get-Date) -gt $deadline) {
+        Write-Log "iteration timed out after $IterationTimeoutMinutes min; stopping process tree"
+        & taskkill.exe /PID $p.Id /T /F | Out-Null
+        break
+      }
     }
 
     # Keep only a short, redacted summary; raw streams never persist.
