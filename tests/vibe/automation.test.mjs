@@ -32,7 +32,9 @@ test('goal runner: sandboxed, secrets removed, governance-gated, no raw event lo
   assert.match(s, /'-s', 'workspace-write'/);
   assert.doesNotMatch(s, /danger-full-access/);
   assert.doesNotMatch(s, /'--json'/);
-  assert.match(s, /sandbox_workspace_write\.writable_roots=/);
+  assert.match(s, /'\[sandbox_workspace_write\]'/);
+  assert.match(s, /writable_roots = \[/);
+  assert.match(s, /'-p', \$profileName/);
   assert.match(s, /Remove-Item -LiteralPath "Env:/);
   assert.ok(s.indexOf('governance.mjs') < s.indexOf('$p = Start-Process'), 'governance check must run before Codex starts');
   assert.match(s, /AddDays\(-14\)/);
@@ -64,11 +66,16 @@ test('goal runner dry run removes secrets and confines writes', { skip: (process
   }
   writeFileSync(path.join(fx, 'docs/vibe/STATUS.md'), 'Goal state: active\n');
   const logs = path.join(fx, 'logs');
-  const env = { ...process.env, FAKE_TEST_API_KEY: 'not-a-real-secret-123', VIBECODIUM_GH_TOKEN: 'scoped-test-token-456' };
+  const codexHome = path.join(fx, 'codex-home');
+  mkdirSync(codexHome);
+  const env = { ...process.env, CODEX_HOME: codexHome, FAKE_TEST_API_KEY: 'not-a-real-secret-123', VIBECODIUM_GH_TOKEN: 'scoped-test-token-456' };
   const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', path.join(fx, 'vibe/goal/run-goal.ps1'), '-Root', fx, '-LogDir', logs, '-Codex', 'codex-not-started', '-DryRun'], { encoding: 'utf8', env });
   const out = r.stdout + r.stderr;
-  assert.match(out, /DRYRUN args=.*-s workspace-write/, out);
-  assert.ok(out.includes(`${fx.replace(/\\/g, '/')}.worktrees`), 'task worktree folder must be a writable root');
+  assert.match(out, /DRYRUN args=.*-p vibecodium-goal -s workspace-write/, out);
+  const profile = readFileSync(path.join(codexHome, 'vibecodium-goal.config.toml'), 'utf8');
+  assert.match(profile, /^sandbox_mode = "workspace-write"$/m);
+  const posix = fx.replace(/\\/g, '/');
+  assert.ok(profile.includes(`writable_roots = ["${posix}", "${posix}.worktrees"]`), profile);
   assert.match(out, /secret_vars_left=0 /);
   assert.match(out, /gh_token_scoped=True/);
   assert.doesNotMatch(out, /not-a-real-secret-123|scoped-test-token-456/);
