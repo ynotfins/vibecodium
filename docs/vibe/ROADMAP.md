@@ -9,7 +9,7 @@ Status values: `done`, `in progress`, `next`, `planned`, `parked`.
 | M | Name | Depends | Must-haves | Status |
 |---|---|---|---|---|
 | F0 | Foundation: governance, docs suite, guardian agents, checks, goal runner, build preflight | — | F1, F2, F4, F5, F7 (process level) | done (this repo); in-product versions land in M9 |
-| M0 | Rebrand + reproducible Windows build (`Vibecodium` names, IDs, icons, own update feed repo, CI on Windows) | F0 | A1, G4 | next |
+| M0 | Rebrand + reproducible Windows build (`Vibecodium` names, IDs, icons, own update feed repo, CI on Windows) | F0 | A1, G4 | in progress |
 | M1 | AI surfaces enabled without Copilot; Microsoft-endpoint audit and stubs; weekly upstream-compat compile job | M0 | A2 | planned |
 | M2 | Sidecar supervisor + Bifrost gateway + provider presets (incl. kie Responses, fallback, budgets) + point-and-click provider setup | M1 | B1, B2, B3, B5 | planned |
 | M3 | Local runtime (llama-server) + model downloader + first-run wizard | M2 | B1 (local) | planned |

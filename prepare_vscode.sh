@@ -42,10 +42,10 @@ setpath "product" "introductoryVideosUrl" "https://go.microsoft.com/fwlink/?link
 setpath "product" "keyboardShortcutsUrlLinux" "https://go.microsoft.com/fwlink/?linkid=832144"
 setpath "product" "keyboardShortcutsUrlMac" "https://go.microsoft.com/fwlink/?linkid=832143"
 setpath "product" "keyboardShortcutsUrlWin" "https://go.microsoft.com/fwlink/?linkid=832145"
-setpath "product" "licenseUrl" "https://github.com/VSCodium/vscodium/blob/master/LICENSE"
+setpath "product" "licenseUrl" "https://github.com/ynotfins/vibecodium/blob/vibe/main/LICENSE"
 setpath_json "product" "linkProtectionTrustedDomains" '["https://open-vsx.org"]'
 setpath "product" "releaseNotesUrl" "https://go.microsoft.com/fwlink/?LinkID=533483#vscode"
-setpath "product" "reportIssueUrl" "https://github.com/VSCodium/vscodium/issues/new"
+setpath "product" "reportIssueUrl" "https://github.com/ynotfins/vibecodium/issues/new"
 setpath "product" "requestFeatureUrl" "https://go.microsoft.com/fwlink/?LinkID=533482"
 setpath "product" "tipsAndTricksUrl" "https://go.microsoft.com/fwlink/?linkid=852118"
 setpath "product" "twitterUrl" "https://go.microsoft.com/fwlink/?LinkID=533687"
@@ -93,32 +93,33 @@ if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
   setpath "product" "win32ContextMenu.x64.clsid" "90AAD229-85FD-43A3-B82D-8598A88829CF"
   setpath "product" "win32ContextMenu.arm64.clsid" "7544C31C-BDBF-4DDF-B15E-F73A46D6723D"
 else
-  setpath "product" "nameShort" "VSCodium"
-  setpath "product" "nameLong" "VSCodium"
-  setpath "product" "applicationName" "codium"
-  setpath "product" "linuxIconName" "vscodium"
+  setpath "product" "nameShort" "Vibecodium"
+  setpath "product" "nameLong" "Vibecodium"
+  setpath "product" "applicationName" "vibecodium"
+  setpath "product" "dataFolderName" ".vibecodium"
+  setpath "product" "linuxIconName" "vibecodium"
   setpath "product" "quality" "stable"
-  setpath "product" "urlProtocol" "vscodium"
-  setpath "product" "serverApplicationName" "codium-server"
-  setpath "product" "serverDataFolderName" ".vscodium-server"
-  setpath "product" "darwinBundleIdentifier" "com.vscodium"
-  setpath "product" "win32AppUserModelId" "VSCodium.VSCodium"
-  setpath "product" "win32DirName" "VSCodium"
-  setpath "product" "win32MutexName" "vscodium"
-  setpath "product" "win32NameVersion" "VSCodium"
-  setpath "product" "win32RegValueName" "VSCodium"
-  setpath "product" "win32ShellNameShort" "VSCodium"
-  setpath "product" "win32AppId" "{{763CBF88-25C6-4B10-952F-326AE657F16B}"
-  setpath "product" "win32x64AppId" "{{88DA3577-054F-4CA1-8122-7D820494CFFB}"
-  setpath "product" "win32arm64AppId" "{{67DEE444-3D04-4258-B92A-BC1F0FF2CAE4}"
-  setpath "product" "win32UserAppId" "{{0FD05EB4-651E-4E78-A062-515204B47A3A}"
-  setpath "product" "win32x64UserAppId" "{{2E1F05D1-C245-4562-81EE-28188DB6FD17}"
-  setpath "product" "win32arm64UserAppId" "{{57FD70A5-1B8D-4875-9F40-C5553F094828}"
-  setpath "product" "tunnelApplicationName" "codium-tunnel"
-  setpath "product" "win32TunnelServiceMutex" "vscodium-tunnelservice"
-  setpath "product" "win32TunnelMutex" "vscodium-tunnel"
-  setpath "product" "win32ContextMenu.x64.clsid" "D910D5E6-B277-4F4A-BDC5-759A34EEE25D"
-  setpath "product" "win32ContextMenu.arm64.clsid" "4852FC55-4A84-4EA1-9C86-D53BE3DF83C0"
+  setpath "product" "urlProtocol" "vibecodium"
+  setpath "product" "serverApplicationName" "vibecodium-server"
+  setpath "product" "serverDataFolderName" ".vibecodium-server"
+  setpath "product" "darwinBundleIdentifier" "com.ynotfins.vibecodium"
+  setpath "product" "win32AppUserModelId" "Vibecodium.Vibecodium"
+  setpath "product" "win32DirName" "Vibecodium"
+  setpath "product" "win32MutexName" "vibecodium"
+  setpath "product" "win32NameVersion" "Vibecodium"
+  setpath "product" "win32RegValueName" "Vibecodium"
+  setpath "product" "win32ShellNameShort" "Vibecodium"
+  setpath "product" "win32AppId" "{{47F5B123-8E21-4FF1-9652-EA78C1CC7473}"
+  setpath "product" "win32x64AppId" "{{D41EA55C-BE3E-413F-9210-2D6D9355C541}"
+  setpath "product" "win32arm64AppId" "{{479062A3-BB02-4F30-B7C6-B671170F17DE}"
+  setpath "product" "win32UserAppId" "{{A6880127-81CD-416B-B752-04A4E079CA60}"
+  setpath "product" "win32x64UserAppId" "{{E1E359BA-7AD7-4AC3-8AF3-B366DCF9A93C}"
+  setpath "product" "win32arm64UserAppId" "{{910FD302-45AF-40DE-9EF8-7F40E5223339}"
+  setpath "product" "tunnelApplicationName" "vibecodium-tunnel"
+  setpath "product" "win32TunnelServiceMutex" "vibecodium-tunnelservice"
+  setpath "product" "win32TunnelMutex" "vibecodium-tunnel"
+  setpath "product" "win32ContextMenu.x64.clsid" "F81D3C13-4AEA-4CAB-B42E-56B7B9BFF523"
+  setpath "product" "win32ContextMenu.arm64.clsid" "E5CB0F94-DFA4-445F-8C53-2BC8901CE45B"
 fi
 
 setpath_json "product" "tunnelApplicationConfig" '{}'
@@ -228,7 +229,7 @@ cp package.json{,.bak}
 
 setpath "package" "version" "${RELEASE_VERSION%-insider}"
 
-replace 's|Microsoft Corporation|VSCodium|' package.json
+replace 's|Microsoft Corporation|Vibecodium|' package.json
 replace "s|--max-old-space-size=8192|--max-old-space-size=${MAX_OLD_SPACE_SIZE}|" package.json
 
 cp resources/server/manifest.json{,.bak}
@@ -237,8 +238,8 @@ if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
   setpath "resources/server/manifest" "name" "VSCodium - Insiders"
   setpath "resources/server/manifest" "short_name" "VSCodium - Insiders"
 else
-  setpath "resources/server/manifest" "name" "VSCodium"
-  setpath "resources/server/manifest" "short_name" "VSCodium"
+  setpath "resources/server/manifest" "name" "Vibecodium"
+  setpath "resources/server/manifest" "short_name" "Vibecodium"
 fi
 
 # announcements
@@ -246,8 +247,8 @@ replace "s|\\[\\/\\* BUILTIN_ANNOUNCEMENTS \\*\\/\\]|$( tr -d '\n' < ../announce
 
 ../undo_telemetry.sh
 
-replace 's|Microsoft Corporation|VSCodium|' build/lib/electron.ts
-replace 's|([0-9]) Microsoft|\1 VSCodium|' build/lib/electron.ts
+replace 's|Microsoft Corporation|Vibecodium|' build/lib/electron.ts
+replace 's|([0-9]) Microsoft|\1 Vibecodium|' build/lib/electron.ts
 
 if [[ "${OS_NAME}" == "linux" ]]; then
   # microsoft adds their apt repo to sources
@@ -284,8 +285,8 @@ if [[ "${OS_NAME}" == "linux" ]]; then
   sed -i 's|Visual Studio Code|VSCodium|' resources/linux/rpm/code.spec.template
 elif [[ "${OS_NAME}" == "windows" ]]; then
   # code.iss
-  sed -i 's|https://code.visualstudio.com|https://vscodium.com|' build/win32/code.iss
-  sed -i 's|Microsoft Corporation|VSCodium|' build/win32/code.iss
+  sed -i 's|https://code.visualstudio.com|https://github.com/ynotfins/vibecodium|' build/win32/code.iss
+  sed -i 's|Microsoft Corporation|Vibecodium|' build/win32/code.iss
 fi
 
 cd ..
