@@ -4,11 +4,22 @@
 
 Goal state: active
 
-Current milestone: M0 (next)
+Current milestone: M0 (in progress)
 
 ## Task log
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
+
+### 2026-11-20 — M0 product identity metadata
+
+- Branch: `vibe/m0/product-identity` → PR into `vibe/main`.
+- Goal / must-haves: establish the stable Windows product identity for A1 and G4 without changing upstream source, icons, dependencies, or release infrastructure.
+- Delivered: stable build defaults now use `Vibecodium` / `vibecodium`, separate user-data, server, protocol, mutex, application, and context-menu identities; package, server-manifest, Electron, support-link, and Windows installer publisher substitutions are also branded for Vibecodium.
+- Tests: `node --test tests/vibe/branding.test.mjs` PASS (covers all changed transformations and replacement Windows identifiers); `node vibe/tools/verify.mjs` PASS (governance, agents, docs, 26 tests).
+- Guardians: qa-verifier PASS (after strengthening per-transformation assertions); drift-sentinel PASS; security-reviewer PASS; docs-keeper PASS; tech-scout PASS. No locked path or dependency changed, so governance-verifier was not applicable.
+- Technology note: verified upstream VS Code `1.147.0` is only two days old; it is recorded in `TECH_RADAR.md` and deferred to 2026-11-25 under the seven-day policy.
+- Remaining M0 evidence: a full Windows build and installer smoke remain blocked on the parked MSVC Spectre libraries. Update-feed activation and icon work are separate M0 slices.
+- Delivery: the unattended session could not push (its sandbox removed the GitHub token from its environment). The bootstrapping session pushed the branch and opened the PR on 2026-11-20; the loop's GitHub access is fixed in the OpenCode runner change.
 
 ### 2026-11-20 — F0 foundation
 

@@ -8,4 +8,8 @@ All notable user-visible changes to Vibecodium. Format: [Keep a Changelog](https
 
 ### Added
 
-- Project foundation: locked governing docs, documentation suite, guardian sub-agents, governance and docs checks, Windows build preflight. No user-facing IDE changes yet.
+- Project foundation: locked governing docs, documentation suite, guardian sub-agents, governance and docs checks, Windows build preflight.
+
+### Changed
+
+- Stable-build product identity defaults now use Vibecodium, including a distinct Windows application identity and artifact base name.
