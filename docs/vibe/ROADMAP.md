@@ -1,0 +1,28 @@
+# Vibecodium Roadmap
+
+> Doc class: living · Owner: vibe-overseer · Last reviewed: 2026-11-20
+
+Milestones are dependency-ordered. Each milestone's acceptance tests are written before its implementation and must pass (exit 0) before the milestone is marked done. Must-have IDs refer to `PRODUCT_SPEC.md`. The detailed per-milestone acceptance commands from the research plan (§7) are the starting point; the milestone owner refines them into `tests/vibe/` when the milestone starts.
+
+Status values: `done`, `in progress`, `next`, `planned`, `parked`.
+
+| M | Name | Depends | Must-haves | Status |
+|---|---|---|---|---|
+| F0 | Foundation: governance, docs suite, guardian agents, checks, goal runner, build preflight | — | F1, F2, F4, F5, F7 (process level) | done (this repo); in-product versions land in M9 |
+| M0 | Rebrand + reproducible Windows build (`Vibecodium` names, IDs, icons, own update feed repo, CI on Windows) | F0 | A1, G4 | next |
+| M1 | AI surfaces enabled without Copilot; Microsoft-endpoint audit and stubs; weekly upstream-compat compile job | M0 | A2 | planned |
+| M2 | Sidecar supervisor + Bifrost gateway + provider presets (incl. kie Responses, fallback, budgets) + point-and-click provider setup | M1 | B1, B2, B3, B5 | planned |
+| M3 | Local runtime (llama-server) + model downloader + first-run wizard | M2 | B1 (local) | planned |
+| M4 | Index: tree-sitter / ast-grep / LSP, embeddings, LanceDB, hybrid retrieval, multi-project registry and watchers | M3 | C1, C2, C5 | planned |
+| M5 | Graph + context + memory: cross-project edge layer, built-in graph panel, Understand-Anything integration, Vibe Context Engine (lossless store, summary DAG, recall tools, cache-stable assembly), project and user memory, AgentCore adapter, docs-mcp | M4 | C3, C4, D1–D5, B4 | planned |
+| M6 | Agent harness: `vibe` agent provider, ACP client, OpenCode sidecar, Bifrost MCP Code Mode, sandbox-runtime, autonomy dial | M2, M4 | E2, E4 | planned |
+| M7 | Editing UX: next-edit / Tab provider with model ladder, inline edit routing, multi-file diff review | M3, M6 | A3, A4 | planned |
+| M8 | Multi-agent orchestration, worktrees, merge and conflict cards; OpenHands lane (stable / edge) | M6 | E3, E5 | planned |
+| M9 | Vibe Agent + Prompt Studio + in-product governance: docs suite generator, locks, guardians, tech radar for user projects | M5, M8 | E1, F1–F7 | planned |
+| M10 | Self-verification: preview panel, browser and test tools in the loop, local traces and cost / cache dashboard | M6 | B4, F4 | planned |
+| M11 | Scenario end-to-end suite (mock model + nightly real model), upstream rebase dry-run | M7–M10 | all | planned |
+| M12 | Ship: Inno installer `.exe` + portable zip, update feed, signing, license audit, winget manifest draft | M11 | G1–G3, F6, A5 | planned |
+
+## Parked for owner
+
+See `STATUS.md` → "Parked for owner". Parked items never block unrelated milestones.
