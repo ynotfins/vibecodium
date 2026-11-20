@@ -25,6 +25,18 @@ Bundle Bifrost as the product gateway. Support OmniRoute as an optional upstream
 - OmniRoute compression, when used, is limited to tool output and logs; it must never touch prompts or specs.
 - Sessions stick to one provider so provider prompt caching stays warm.
 
+## Morph as the direct second option (added 2026-11-20)
+
+The owner uses Morph through OmniRoute today and wants it available directly when OmniRoute is not running. Provider order for such users: OmniRoute → Morph direct → other direct providers, as Bifrost fallbacks. Morph is also more than a model source:
+
+- Fast Apply (`morph-v3-fast`, `morph-v3-large`) merges lazy edit snippets into files; used for agent edits (A4).
+- WarpGrep (`morph-warp-grep-v2.1`) searches a repository in its own context and returns file/line spans; complements the local index for agent search (C5).
+- Compact (`morph-compactor`) drops irrelevant lines from history while keeping every surviving line byte-identical; a candidate backend for the Vibe Context Engine (ADR-0003, D2).
+- Router (`/v1/router/multimodel`, ~$0.005 per request) returns the model tier a prompt needs; an option next to Bifrost's own routing rules (B3).
+- Morph-hosted open models (Kimi K3.1, GLM-5.3, DeepSeek V4.1 Flash, and an approval-gated abliterated DeepSeek variant) on an OpenAI-compatible API.
+
+Morph is a hosted service; the product talks to it with the user's key and the MIT `@morphllm/morphmcp` tools. PRODUCT_SPEC B6.
+
 ## Revisit
 
 `tech-scout` re-evaluates this choice at every milestone start. OmniRoute's license (MIT) allows bundling later if the evidence favours it.

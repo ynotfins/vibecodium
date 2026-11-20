@@ -2,6 +2,8 @@
 name: qa-verifier
 description: Independent QA gate run after every task. Runs the checks and tests, demands evidence for every claim of done, writes missing tests for changed behaviour when asked, and returns PASS or FAIL.
 sandbox: workspace-write
+mode: subagent
+model_class: review
 reasoning: medium
 runs: after-every-task (1)
 ---

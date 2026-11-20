@@ -20,7 +20,7 @@ Every Markdown file under `docs/vibe/` starts with a header line: `Doc class: <c
 - `.vibe/governance/locks.json` lists every locked path and its SHA-256 (computed on LF-normalized content).
 - `.vibe/governance/approvals/NNNN-<slug>.md` is the approval chain. Each record names the verifier, the verdict and one or more lines `lock: <path> <old-sha|-> -> <new-sha>`.
 - `node vibe/tools/governance.mjs check` fails when a locked file's content does not match the latest approved hash, when `locks.json` disagrees with the chain, or when a record is malformed or not a PASS.
-- The check runs in `node vibe/tools/verify.mjs`, in the Codex Stop hook (`.codex/validate.ps1`) and in CI (`.github/workflows/vibe-governance.yml`).
+- The check runs in `node vibe/tools/verify.mjs`, before every goal-loop session (the runner refuses to start when it fails) and in CI (`.github/workflows/vibe-governance.yml`).
 - The lock covers the check itself and the autonomous loop: the governance tool and its helper library, the governance-verifier definition, the CI workflow, the goal runner, its prompt, its registration script, `vibe/goal/GOAL.md`, this file and `AGENTS.md` are locked. The runner refuses to start a session when the governance check fails.
 
 Honest limit: this is a process lock, not a security boundary. A determined agent could forge a record. Forgery is detectable because records must be created in their own commit and must reference a proposal; `drift-sentinel` and CI review this on every change.
@@ -35,7 +35,7 @@ Honest limit: this is a process lock, not a security boundary. A determined agen
 
 ## 4. The after-every-task chain
 
-Every task slice, by any agent, ends with this chain before it is committed. Each guardian is a separate sub-agent defined in `.vibe/agents/` (Codex copies are generated into `.codex/agents/`).
+Every task slice, by any agent, ends with this chain before it is committed. Each guardian is a separate sub-agent defined in `.vibe/agents/` (OpenCode copies are generated into `.opencode/agent/`; each declares a model class that the runner maps to one of our models).
 
 | Order | Guardian | Runs when | Blocks on |
 |---|---|---|---|
@@ -59,19 +59,22 @@ The owner granted full autonomy for the build (UNLOCK of `D:\vscodium\AGENTS.md`
 
 ### Enforcement
 
-Instructions alone are not a boundary, so the loop is also constrained mechanically:
+Instructions alone are not a boundary, so the loop is also constrained mechanically. The loop runs on our own models through OpenCode (ADR-0007); OpenCode has no operating-system sandbox, so the controls are:
 
-- The goal loop runs in a dedicated clone used by nothing else. The runner starts Codex in the `workspace-write` sandbox with writes limited to that clone and its `<clone>.worktrees` folder; the owner's other checkouts and files cannot be modified.
-- Secret-looking environment variables (API keys, tokens, passwords, database URLs) are removed from the runner before Codex starts, so the agent cannot read them. GitHub access uses a fine-grained token scoped to this repository (`VIBECODIUM_GH_TOKEN`) when the owner has created one; otherwise it falls back to the owner's GitHub CLI login and the runner logs a warning.
+- The goal loop runs in a dedicated clone used by nothing else, so a mistake cannot touch the owner's other checkouts through git.
+- Secret-looking environment variables (API keys, tokens, passwords, database URLs) are removed from the runner before OpenCode starts. Only the model-provider keys the runner allows (OmniRoute, Morph, DeepInfra) and `GH_TOKEN` are passed on. `GH_TOKEN` comes from a fine-grained token scoped to this repository (`VIBECODIUM_GH_TOKEN`) when the owner has created one; otherwise the runner falls back to the owner's `GITHUB_TOKEN` and logs a warning.
+- OpenCode runs with its own generated config and data folders, so the owner's MCP servers, global rules and session history are neither loaded nor modified.
+- Hard-stop shell commands are denied by OpenCode permission rules: force-push and remote branch deletion, release creation or editing, repository deletion or settings, GitHub auth and secrets, package publishing, software installs, environment dumps, global git config, scheduled tasks, registry edits and recursive deletes of system paths.
 - GitHub branch protection on `master` and `vibe/main` forbids force-pushes and branch deletion.
 - Runner logs keep only short summaries with secret values redacted; raw agent event streams are never written to disk. Logs are deleted after 14 days.
 
-Accepted residual risks (reviewed by `security-reviewer` on 2026-11-20):
+Accepted residual risks (owner decision 2026-11-20: run the build on our own models instead of a sandboxed vendor agent):
 
-- Network access is open, not allowlisted, because research, package registries and provider docs are part of the work. Prompt injection from web content could cause outbound requests; it cannot reach machine secrets (removed) or files outside the loop's clone.
-- The loop's GitHub credential is readable by the agent. Scope it to this repository with `VIBECODIUM_GH_TOKEN` to limit the blast radius.
+- No operating-system sandbox: a shell command that the deny list does not anticipate can write anywhere the owner's account can. `tech-scout` evaluates sandbox-runtime for the loop at M6 start, when the product needs it anyway.
+- Network access is open, not allowlisted, because research, package registries and provider docs are part of the work. Prompt injection from web content could cause outbound requests.
+- The model-provider keys and the GitHub credential are readable by the agent. Scope GitHub with `VIBECODIUM_GH_TOKEN` to limit the blast radius; provider keys should carry spending limits at the provider.
 - The runner and the lock live in the same user-writable clone and the scheduled task uses `-ExecutionPolicy Bypass` (required by the workstation's silent-automation policy). A process already running as the owner could replace both; that attacker already controls the account, so script signing would add little.
-- The in-product quarantine of untrusted content (SECURITY.md) lands with M6; until then the build loop relies on the sandbox, secret removal and server-side branch protection.
+- The in-product quarantine of untrusted content (SECURITY.md) lands with M6; until then the build loop relies on secret removal, the deny list and server-side branch protection.
 
 ### Hard stops (always pause, in every mode)
 

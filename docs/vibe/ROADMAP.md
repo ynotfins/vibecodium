@@ -11,7 +11,7 @@ Status values: `done`, `in progress`, `next`, `planned`, `parked`.
 | F0 | Foundation: governance, docs suite, guardian agents, checks, goal runner, build preflight | — | F1, F2, F4, F5, F7 (process level) | done (this repo); in-product versions land in M9 |
 | M0 | Rebrand + reproducible Windows build (`Vibecodium` names, IDs, icons, own update feed repo, CI on Windows) | F0 | A1, G4 | in progress |
 | M1 | AI surfaces enabled without Copilot; Microsoft-endpoint audit and stubs; weekly upstream-compat compile job | M0 | A2 | planned |
-| M2 | Sidecar supervisor + Bifrost gateway + provider presets (incl. kie Responses, fallback, budgets) + point-and-click provider setup | M1 | B1, B2, B3, B5 | planned |
+| M2 | Sidecar supervisor + Bifrost gateway + provider presets (incl. OmniRoute, Morph direct with Fast Apply / WarpGrep / Compact / Router, kie Responses, fallback, budgets) + point-and-click provider setup | M1 | B1, B2, B3, B5, B6 | planned |
 | M3 | Local runtime (llama-server) + model downloader + first-run wizard | M2 | B1 (local) | planned |
 | M4 | Index: tree-sitter / ast-grep / LSP, embeddings, LanceDB, hybrid retrieval, multi-project registry and watchers | M3 | C1, C2, C5 | planned |
 | M5 | Graph + context + memory: cross-project edge layer, built-in graph panel, Understand-Anything integration, Vibe Context Engine (lossless store, summary DAG, recall tools, cache-stable assembly), project and user memory, AgentCore adapter, docs-mcp | M4 | C3, C4, D1–D5, B4 | planned |

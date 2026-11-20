@@ -26,7 +26,8 @@ The AI layer reuses VS Code core's MIT agent surfaces (chat, inline chat, Agents
 | Concern | Choice | ADR |
 |---|---|---|
 | Agent harness | OpenCode over ACP behind the `vibe` agent provider; ACP keeps the harness swappable (Goose, Cline) | 0001 |
-| Gateway, routing, MCP | Bifrost (Apache-2.0, Go single binary) bundled as the gateway, router and MCP gateway (Code Mode). OmniRoute (MIT) supported as an optional upstream provider for users who run it | 0002 |
+| Gateway, routing, MCP | Bifrost (Apache-2.0, Go single binary) bundled as the gateway, router and MCP gateway (Code Mode). Provider order for users who run OmniRoute (MIT): OmniRoute first, Morph direct second, other direct providers after | 0002 |
+| Morph services | Fast Apply (edits), WarpGrep (agentic code search), Compact (verbatim history pruning), Router and Morph-hosted open models, through the Morph API and the MIT `@morphllm/morphmcp` tools | 0002 |
 | Context and memory | Vibe Context Engine: local, lossless, DAG-summarized rolling context plus project and user memory. Optional AgentCore adapter | 0003 |
 | Code index | tree-sitter (WASM) + ast-grep + VS Code LSP providers + embeddings, vectors in LanceDB, graph tables in SQLite | research §B, M4 |
 | Cross-project graph | Per-project graphs plus a cross-project edge layer (packages, routes ↔ callers, env names, ports, DB tables, MCP tools, containers). Understand-Anything (MIT) as the semantic and visual layer | M5 |

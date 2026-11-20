@@ -1,0 +1,14 @@
+# Governance approval 0003: own-models-opencode-harness
+
+verifier: governance-verifier
+verdict: PASS
+date: 2026-11-20
+proposal: .vibe/governance/proposals/2026-11-20-own-models-opencode-harness.md
+
+lock: AGENTS.md eb75d27b8bccdbb6469654cc824082b084d59dba2b0aa0a95b5403ed97e31b34 -> aa1d417a9d8b50c31831a18d36492c882fe3708a6cd36d340b7079032d25e7e5
+lock: docs/vibe/GOVERNANCE.md 9ea4946714a670492208b044e8e6494fd2858b181785bcf0e84c2d8204e48bf2 -> 1394fa4469060ac7b4a2eb008acd969303db8404728885909eb9c8cea4b33490
+lock: docs/vibe/ARCHITECTURE.md 0aec24e9a730ac2c0461f67475f58c7fd2609975560fac3bf5549cf39eac470b -> 35eda383c206112e690952fa28d5479915cc8b35cb5ea7d2e862765528bbe6e3
+lock: docs/vibe/PRODUCT_SPEC.md 7198c44f0039ce46a241255696c7c80089bae5ad2c9a8cfa73f90a4d51c3c26b -> 94ade199abbbb4adf4be948fad348e5d4dcb65a2a063b80d2af5c9470bfc579d
+lock: .vibe/agents/governance-verifier.md f464776623ffac9ff6ae6e072a29c361bc1a80f6128cd09530fd90daa3e7655e -> bd0a07d6b5102c52a7c6ada7ed859ff427e6db46c3c7ccadf781449964cf45cd
+lock: vibe/goal/run-goal.ps1 f59db47ff37208015f02bde0566cb56f2d46d220a1466eccb2caf5effa570a81 -> bab4dd319b72bbd25a54080524c2fabd6c7b8c56a39a140ed5a229943d506189
+lock: vibe/goal/continue.prompt.md 659753fc40c0408c05dc0a82a283fd24e36a0c66b0b985e163f068489a9b9928 -> 47d31d5f22913713a8ccc345cb8bd9b9a214ced028b8d588262e3c4cd6906d90

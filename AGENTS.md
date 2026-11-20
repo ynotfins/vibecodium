@@ -4,7 +4,7 @@ Operating rules for every agent working in this repository. This file is locked 
 
 ## What this repo is
 
-`ynotfins/vibecodium`: the build scripts and patch set for **Vibecodium**, a standalone Windows-first AI IDE built on VSCodium. Product intent: `docs/vibe/VISION.md`. Must-haves: `docs/vibe/PRODUCT_SPEC.md`. Architecture: `docs/vibe/ARCHITECTURE.md`. Everything outside `docs/vibe/`, `.vibe/`, `vibe/`, `tests/vibe/`, `patches/vibe/`, `src/stable/` and `.codex/` is upstream VSCodium; change it only when a milestone requires it, and keep such changes small.
+`ynotfins/vibecodium`: the build scripts and patch set for **Vibecodium**, a standalone Windows-first AI IDE built on VSCodium. Product intent: `docs/vibe/VISION.md`. Must-haves: `docs/vibe/PRODUCT_SPEC.md`. Architecture: `docs/vibe/ARCHITECTURE.md`. Everything outside `docs/vibe/`, `.vibe/`, `vibe/`, `tests/vibe/`, `patches/vibe/`, `src/stable/` and `.opencode/` is upstream VSCodium; change it only when a milestone requires it, and keep such changes small.
 
 ## Read first, every session
 
@@ -32,7 +32,7 @@ The owner granted full autonomy to build to completion. Do not stop between task
 |---|---|
 | All repo checks (required before commit) | `node vibe/tools/verify.mjs` |
 | Governance lock status | `node vibe/tools/governance.mjs status` |
-| Regenerate Codex agent files after editing `.vibe/agents/` | `node vibe/tools/sync-agents.mjs` |
+| Regenerate OpenCode agent files after editing `.vibe/agents/` | `node vibe/tools/sync-agents.mjs` |
 | Build toolchain check (Git Bash) | `bash vibe/dev/preflight.sh` |
 | Build the IDE (Git Bash) | `bash vibe/dev/build-windows.sh` (add `-p` for installer and zip) |
 
@@ -40,7 +40,8 @@ The owner granted full autonomy to build to completion. Do not stop between task
 
 - Never write, print, log or commit a secret value. Environment variable names are fine.
 - Never edit a `locked` doc or locked file except through `governance-verifier` (GOVERNANCE §3).
-- Never hand-edit `.codex/agents/*.toml`; edit `.vibe/agents/*.md` and regenerate.
+- Never hand-edit `.opencode/agent/*.md`; edit `.vibe/agents/*.md` and regenerate.
+- The build runs on our own models (OmniRoute first, Morph direct second, DeepInfra third; `vibe/goal/models.json`). Use the Morph tools for code search (WarpGrep) and edits (Fast Apply) when available.
 - `master` mirrors `VSCodium/vscodium` only. Product work lands on `vibe/main` by PR.
 - Library and API facts come from live sources (release pages, registries, official docs), not memory. Record versions in `docs/vibe/TECH_RADAR.md`.
 - New dependencies: permissive license, pinned version and checksum, public for at least 7 days, radar row added.

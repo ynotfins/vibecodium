@@ -10,8 +10,8 @@
 From the first commit, the repo carries:
 
 - A professional docs suite under `docs/vibe/` with doc classes (locked, living, generated, archive).
-- A light lock on governing docs: a hash manifest plus an append-only approval chain, verified by a dependency-free Node script in the local loop, the Codex Stop hook and CI.
-- Eight sub-agents defined once in `.vibe/agents/*.md` (host-neutral, the product's own format) and generated into `.codex/agents/*.toml` for the build runner: `vibe-overseer`, `qa-verifier`, `drift-sentinel`, `security-reviewer`, `docs-keeper`, `governance-verifier`, `tech-scout`, `release-manager`.
+- A light lock on governing docs: a hash manifest plus an append-only approval chain, verified by a dependency-free Node script in the local loop, before every goal-loop session and in CI.
+- Eight sub-agents defined once in `.vibe/agents/*.md` (host-neutral, the product's own format) and generated into `.opencode/agent/*.md` for the build runner (ADR-0007): `vibe-overseer`, `qa-verifier`, `drift-sentinel`, `security-reviewer`, `docs-keeper`, `governance-verifier`, `tech-scout`, `release-manager`.
 
 The same mechanism becomes product features F1–F7: user projects get the same docs, locks and guardians.
 

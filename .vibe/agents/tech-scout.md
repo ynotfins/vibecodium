@@ -2,6 +2,8 @@
 name: tech-scout
 description: The Best-Technology guardian. Keeps TECH_RADAR.md current by checking every component against its latest releases and newer alternatives, so the product never builds on outdated technology. Runs on every new or changed dependency, at every milestone start, and weekly.
 sandbox: workspace-write
+mode: subagent
+model_class: strong
 reasoning: high
 runs: on dependency change, milestone start, weekly (6)
 ---

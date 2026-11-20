@@ -2,6 +2,8 @@
 name: vibe-overseer
 description: The VibeCoding overseer. Coordinates every task slice end to end, turns long vibe prompts into checkable task cards, runs the after-every-task guardian chain, keeps STATUS.md current, commits, opens and merges PRs, and picks the next task toward the goal.
 sandbox: workspace-write
+mode: primary
+model_class: standard
 reasoning: high
 runs: always (coordinator)
 ---

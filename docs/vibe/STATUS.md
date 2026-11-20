@@ -10,6 +10,13 @@ Current milestone: M0 (in progress)
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
 
+### 2026-11-20 — F0 build harness: our own models (OpenCode + OmniRoute + Morph)
+
+- Branch: `vibe/f0/opencode-harness` → PR into `vibe/main`. Owner decision: the build must not use Codex as its primary agent; it runs on our own models (ADR-0007).
+- Delivered: runner starts OpenCode 1.19.5 with the `vibe-overseer` agent; providers health-checked in order OmniRoute → Morph direct → DeepInfra (`vibe/goal/models.json`); per-agent model classes; Morph MCP tools (WarpGrep, Fast Apply, GitHub search) always on; isolated OpenCode config and data folders; hard-stop deny list; `.codex/` removed; agents generated into `.opencode/agent/`. Morph added to the product spec as the direct second option (B6) with Fast Apply, WarpGrep, Compact, Router and hosted open models.
+- Evidence: `node vibe/tools/verify.mjs` PASS; live smoke on OmniRoute: overseer on `omniroute/agent` launched docs-keeper on `omniroute/cheap` (docs check PASS), Morph tools listed, `git push --force` blocked by the deny list; Morph direct answered on `morph-glm53-744b` and `morph-dsv41flash`.
+- Governance: changes to locked files go through the governance-verifier subagent running on our own models (record in `.vibe/governance/approvals/`).
+
 ### 2026-11-20 — M0 product identity metadata
 
 - Branch: `vibe/m0/product-identity` → PR into `vibe/main`.
@@ -36,7 +43,7 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 
 | Item | Why it needs the owner | Default until decided |
 |---|---|---|
-| Create a fine-grained GitHub token for the goal loop | Only the owner can mint tokens. Scope: repository `ynotfins/vibecodium`, permissions Contents and Pull requests read/write; store as User environment variable `VIBECODIUM_GH_TOKEN` | Loop uses the owner's GitHub CLI login and logs a warning |
+| Create a fine-grained GitHub token for the goal loop | Only the owner can mint tokens. Scope: repository `ynotfins/vibecodium`, permissions Contents and Pull requests read/write; store as User environment variable `VIBECODIUM_GH_TOKEN` | Loop uses the owner's broad `GITHUB_TOKEN` and logs a warning |
 | Install MSVC Spectre-mitigated libraries | Needs an elevated (administrator) PowerShell; command in `dev/BUILD.md` §1 | M0 build acceptance waits; other work continues |
 | Code-signing route | Paid certificate vs SignPath Foundation (free for open source, needs an application) | Unsigned builds; Windows SmartScreen shows "More info → Run anyway" |
 | Public repository | `ynotfins/vibecodium` is a public fork; GitHub forks cannot be made private. A closed-source product needs a separate private repository | Continue in the public fork; no secrets or machine details in the repo |
