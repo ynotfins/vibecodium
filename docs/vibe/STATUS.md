@@ -19,7 +19,7 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 - Guardians: qa-verifier PASS (after strengthening per-transformation assertions); drift-sentinel PASS; security-reviewer PASS; docs-keeper PASS; tech-scout PASS. No locked path or dependency changed, so governance-verifier was not applicable.
 - Technology note: verified upstream VS Code `1.147.0` is only two days old; it is recorded in `TECH_RADAR.md` and deferred to 2026-11-25 under the seven-day policy.
 - Remaining M0 evidence: a full Windows build and installer smoke remain blocked on the parked MSVC Spectre libraries. Update-feed activation and icon work are separate M0 slices.
-- Delivery blocker: GitHub authentication is unavailable in this unattended session (`git push` exited 128; GitHub CLI reports its active token invalid; no `VIBECODIUM_GH_TOKEN` is present). The local commit cannot be pushed and no PR can be opened or merged until the loop receives valid repository-scoped GitHub authentication.
+- Delivery: the unattended session could not push (its sandbox removed the GitHub token from its environment). The bootstrapping session pushed the branch and opened the PR on 2026-11-20; the loop's GitHub access is fixed in the OpenCode runner change.
 
 ### 2026-11-20 — F0 foundation
 
