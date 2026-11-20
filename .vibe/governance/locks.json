@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "locked": [
+    {
+      "path": ".github/workflows/vibe-governance.yml",
+      "sha256": "87ebd82add9350d053bf90453112c6240663a973b896e4014a69a1b9fb5a43b1"
+    },
+    {
+      "path": ".vibe/agents/governance-verifier.md",
+      "sha256": "f464776623ffac9ff6ae6e072a29c361bc1a80f6128cd09530fd90daa3e7655e"
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "eb75d27b8bccdbb6469654cc824082b084d59dba2b0aa0a95b5403ed97e31b34"
+    },
+    {
+      "path": "docs/vibe/ARCHITECTURE.md",
+      "sha256": "0aec24e9a730ac2c0461f67475f58c7fd2609975560fac3bf5549cf39eac470b"
+    },
+    {
+      "path": "docs/vibe/GOVERNANCE.md",
+      "sha256": "9ea4946714a670492208b044e8e6494fd2858b181785bcf0e84c2d8204e48bf2"
+    },
+    {
+      "path": "docs/vibe/PRODUCT_SPEC.md",
+      "sha256": "7198c44f0039ce46a241255696c7c80089bae5ad2c9a8cfa73f90a4d51c3c26b"
+    },
+    {
+      "path": "docs/vibe/VISION.md",
+      "sha256": "3da65353df5004bd17476a9265d5df963928b1943483d707ce3413a56ed8bf25"
+    },
+    {
+      "path": "vibe/goal/continue.prompt.md",
+      "sha256": "659753fc40c0408c05dc0a82a283fd24e36a0c66b0b985e163f068489a9b9928"
+    },
+    {
+      "path": "vibe/goal/GOAL.md",
+      "sha256": "6822cbc04c37395d860edf40b34028aa153b7ce7b00bf241c9a22776aafb2f29"
+    },
+    {
+      "path": "vibe/goal/Register-GoalRunner.ps1",
+      "sha256": "8f1e20f15e1cb3c61e758248d34fe2692a2bdf7c62c31dc6dcff375e4bdf1fb5"
+    },
+    {
+      "path": "vibe/goal/run-goal.ps1",
+      "sha256": "b81e479012ff807673eac29b39986f98bdd110e12fcd84b2d5071f89b42e70de"
+    },
+    {
+      "path": "vibe/tools/governance.mjs",
+      "sha256": "74a6609ce1639ee9ac9825a3daf195925896cd41fe42b7e7551eceb50183659b"
+    },
+    {
+      "path": "vibe/tools/lib.mjs",
+      "sha256": "f610c2add64d7ca5524e1b1c04a8887b12abc8fa42af23f7ea059148834a5fb2"
+    }
+  ]
+}
