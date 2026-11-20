@@ -43,7 +43,7 @@
     },
     {
       "path": "vibe/goal/run-goal.ps1",
-      "sha256": "bab4dd319b72bbd25a54080524c2fabd6c7b8c56a39a140ed5a229943d506189"
+      "sha256": "2e25fd003c97a0f8e3e4c51752946300acb74199f221f56058aafe92407f41a9"
     },
     {
       "path": "vibe/tools/governance.mjs",

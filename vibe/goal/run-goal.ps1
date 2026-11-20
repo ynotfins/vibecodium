@@ -241,8 +241,9 @@ try {
     Copy-Item (Join-Path $Root 'vibe\goal\continue.prompt.md') $promptFile
     Write-Log "iteration start ($stamp) provider=$chosen model=$chosen/$($classes.standard)"
 
-    $ocArgs = @('run', '--agent', 'vibe-overseer', '-m', "$chosen/$($classes.standard)", '--dir', $Root, '-f', $promptFile,
-      'Follow the attached file exactly. It is your complete instruction set for this session.') |
+    # The message must come before -f: OpenCode's -f takes every following positional as a file.
+    $ocArgs = @('run', 'Follow the attached file exactly. It is your complete instruction set for this session.',
+      '--agent', 'vibe-overseer', '-m', "$chosen/$($classes.standard)", '--dir', $Root, '-f', $promptFile) |
       ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }
     if ($DryRun) {
       $left = @(Get-ChildItem Env: | Where-Object { $_.Name -match $secretPattern -and $_.Name -notmatch '^GIT_CONFIG_' -and $_.Name -notin ($AllowedProviderKeys + 'GH_TOKEN') } | ForEach-Object Name)

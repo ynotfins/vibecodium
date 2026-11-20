@@ -30,7 +30,7 @@ test('CI workflow: no default permissions, actions pinned by SHA, no persisted c
 
 test('goal runner: OpenCode on our models, isolated config, secrets removed, governance-gated', () => {
   const s = read('vibe/goal/run-goal.ps1');
-  assert.ok(s.includes("@('run', '--agent', 'vibe-overseer'"), 'must start OpenCode with the overseer agent');
+  assert.ok(s.includes("'--agent', 'vibe-overseer'"), 'must start OpenCode with the overseer agent');
   assert.ok(!/codex/i.test(s), 'the build loop must not use Codex');
   assert.ok(s.includes('$env:XDG_CONFIG_HOME') && s.includes('$env:XDG_DATA_HOME'), 'OpenCode must use its own config and data folders');
   assert.ok(s.includes('Remove-Item -LiteralPath "Env:'), 'secret env vars must be removed');
@@ -101,7 +101,7 @@ test('goal runner dry run: own models per agent, Morph tools, deny rules, secret
   const f = runnerFixture();
   const out = dryRun(f);
   assert.match(out, /DRYRUN provider=morph /, out);
-  assert.match(out, /DRYRUN args=run --agent vibe-overseer -m morph\/morph-glm53-744b /);
+  assert.match(out, /DRYRUN args=run "Follow the attached file exactly\.[^"]*" --agent vibe-overseer -m morph\/morph-glm53-744b --dir \S+ -f \S+continue\.prompt\.md\s*$/m, 'the message must come before -f');
   assert.match(out, /secret_vars_left=0 gh_token_source=VIBECODIUM_GH_TOKEN/);
   assert.doesNotMatch(out, /not-a-real-secret-123|scoped-test-token-456|morph-test-key-789/);
   const cfg = JSON.parse(readFileSync(out.match(/config=(\S+)/)[1], 'utf8'));
