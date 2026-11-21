@@ -11,6 +11,12 @@ Current milestone: M0 (in progress)
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
 
+### 2026-11-21 — F0 loop uses the repository-scoped GitHub token
+
+- Branch: `vibe/f0/token-from-registry` → PR into `vibe/main`.
+- Problem: the owner created `VIBECODIUM_GH_TOKEN`, but the loop's scheduled-task process received a stale environment block and fell back to the account-wide `GITHUB_TOKEN`.
+- Delivered: the runner reads that one name from the user registry when the environment lacks it; the value stays in memory and is redacted like every other secret. Verified in a dry run (`gh_token_source=VIBECODIUM_GH_TOKEN`, `secret_vars_left=0`); approval record 0006, written by the verifier running on Codex BYOK.
+
 ### 2026-11-20 — F0 harness v2: Codex BYOK on OmniRoute + OpenCode fallback
 
 - Branch: `vibe/f0/codex-byok` → PR into `vibe/main`. Owner clarified Codex is wanted for the loop — on our own models (BYOK), never the ChatGPT subscription (ADR-0008).
