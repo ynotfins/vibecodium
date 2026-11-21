@@ -25,6 +25,7 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 - Blocked artifact smoke: the three attempts stopped in environment/cache setup before compilation, so the `-p` build and this smoke remain unverified; no product-code dependency is known to be missing. The full acceptance still requires a successful `-p` build plus the packaging smoke command above.
 - Guardians: qa-verifier PASS after fixing a false-pass CLI guard and adding the nonzero-exit test; drift-sentinel PASS after removing build cache, enforcing packaged commit identity, and adding the “Parked for owner” row; security-reviewer PASS; docs-keeper PASS after correcting the smoke command to build-stamped values and documenting the 7-Zip prerequisite; governance-verifier PASS as not applicable (no locked path changed); tech-scout PASS as not applicable (no new dependency); release-manager PASS as not applicable (no release checkpoint).
 - Final verdict: PASS for the delivered packaging-smoke tooling; the actual `-p` installer/zip smoke remains parked and must be rerun after a writable build-cache environment fix.
+- Merge blocker: GitHub Actions run 44922794480 completed as cancelled because `build (macos-14, arm64)` was cancelled at 1s without job logs; every other reported check passed. PR #14 remains unmerged because the loop requires green CI. Rerun or replace that macOS matrix leg when Actions permissions allow.
 
 ### 2026-11-21 — M0 release-feed tooling (staging)
 
