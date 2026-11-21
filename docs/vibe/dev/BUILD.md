@@ -71,6 +71,20 @@ bash vibe/dev/build-windows.sh       # app only
 bash vibe/dev/build-windows.sh -p    # app plus installer .exe and zip (not yet verified in this slice)
 ```
 
+After a stable `-p` build, verify the Windows system installer, user installer, and portable zip:
+
+```bash
+source dev/build.env
+node vibe/tools/windows-packaging-smoke.mjs --assets assets \
+   --name Vibecodium \
+   --version "$RELEASE_VERSION" \
+   --commit "$BUILD_SOURCEVERSION"
+```
+
+Run this in Git Bash with 7-Zip on `PATH` (source `vibe/dev/preflight.sh` in the same session; it adds `C:\Program Files\7-Zip` when present). `dev/build.sh` writes the generated `RELEASE_VERSION` and the stamped `BUILD_SOURCEVERSION` to `dev/build.env`. `--commit` is the value the build stamps into `resources/app/product.json`; it is `BUILD_SOURCEVERSION`, not the upstream VS Code commit (`MS_COMMIT`).
+
+The command fails if any required artifact is missing, if a SHA-256 cannot be computed, if `7z` cannot list or extract the portable zip, or if the packaged app does not carry the expected Vibecodium name, version, commit, executable, launcher, and product metadata. It does not install anything.
+
 *Verified 2026-11-20 for the app-only build on the build workstation (preflight PASS including `spectre`; full build from clean clone through `npm ci`, native modules, compile and `vscode-win32-x64-min-packing`, producing `VSCode-win32-x64/` in the repository root, branded as Vibecodium).* The wrapper runs the preflight, pins node-gyp to Python 3.11 and calls `dev/build.sh` with the same flags. The `-p` installer/zip smoke remains pending. Output appears in the repository root (`VSCode-win32-x64/`, beside the `vscode` checkout).
 
 ## 3. Checks before committing
