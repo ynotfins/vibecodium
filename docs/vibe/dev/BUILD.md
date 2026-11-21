@@ -16,7 +16,7 @@ Vibecodium builds with VSCodium's scripts. Run everything in **Git Bash** from t
 | Visual Studio Build Tools | 2022 with the C++ workload | |
 | MSVC Spectre-mitigated libraries | component `Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre` | Required by VS Code's native modules (MSB8040 without it). Install from an **elevated** PowerShell, see below |
 
-Add the Spectre libraries (one time, needs administrator rights). *Not yet verified: operator-only step, waiting for the owner.*
+Add the Spectre libraries (one time, needs administrator rights) — *not yet verified: operator-only step, waiting for the owner.*
 
 ```powershell
 & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe" modify --installPath "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools" --add Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre --passive --norestart
@@ -28,7 +28,7 @@ Check everything:
 bash vibe/dev/preflight.sh
 ```
 
-Every line must say `PASS`. *Verified 2026-11-20 (all PASS except `spectre`).*
+Every line must say `PASS` — *verified 2026-11-20 (all PASS except `spectre`).*
 
 ## 2. Build
 
