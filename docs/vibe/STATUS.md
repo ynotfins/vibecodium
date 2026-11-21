@@ -3,13 +3,27 @@
 > Doc class: living · Owner: vibe-overseer · Last reviewed: 2026-11-21
 
 Goal state: active
-Owner priorities (2026-11-20): alongside M0/M1, begin the standalone engine packages (Vibe Context Engine, multi-project indexer/graph) — they are testable without the IDE build. Build-dependent work stays parked until the MSVC Spectre component is installed. Milestone numbering is unchanged.
+Owner priorities (2026-11-20): alongside M0/M1, begin the standalone engine packages (Vibe Context Engine, multi-project indexer/graph) — they are testable without the IDE build. Build-dependent work continues now that the MSVC Spectre component is installed. Milestone numbering is unchanged.
 
 Current milestone: M0 (in progress)
 
 ## Task log
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
+
+### 2026-11-21 — M5 lossless session store
+
+- Goal / must-haves: implement the standalone M5 context-engine session store so messages, tool calls, and tool results remain recoverable verbatim after compaction. This is the owner-priority standalone engine work that does not depend on the M0 IDE build.
+- Must-have IDs: D1.
+- Files allowed: `src/stable/context-engine/**`, `tests/vibe/context-engine.test.mjs`, `docs/vibe/STATUS.md`, `docs/vibe/dev/BUILD.md`, `docs/vibe/ROADMAP.md`.
+- Files forbidden: upstream files, release infrastructure, locked docs, dependencies, installer assets.
+- Acceptance commands: `node --test tests/vibe/context-engine.test.mjs`, `node vibe/tools/verify.mjs`.
+- Out of scope: summary DAG construction, recall tools, embeddings, AgentCore adapter, UI, provider integration, Windows session-root ACL integration, ADR changes.
+- Branch: `vibe/m5/lossless-session-store` → PR into `vibe/main`.
+- Delivered: `src/stable/context-engine/session-store.mjs` adds an append-only JSONL `SessionStore` for `user`, `assistant`, `system`, `tool_call` and `tool_result` records. Payloads are captured into a canonical JSON-safe snapshot; `Map`, `Date`, `undefined`, `NaN`, functions, symbols, cycles and `toJSON` are rejected. Appends are serialized per instance with contiguous sequence numbers, and the store enforces path containment plus file, record, payload and nesting limits. `compact({ tailCount })` returns the retained tail and removed count without rewriting the append-only log, so the raw transcript stays byte-identical.
+- Tests: `node --test tests/vibe/context-engine.test.mjs` PASS (4/4); `node vibe/tools/verify.mjs` PASS (4/4 steps, 39 tests).
+- Guardians: qa-verifier PASS; drift-sentinel PASS; security-reviewer PASS (Windows session-root ACL hardening deferred to product integration as a Low note); docs-keeper PASS; governance-verifier PASS (no locked path changed); tech-scout PASS (Node built-ins only; ADR-0003 product design remains separate); release-manager PASS (not a milestone exit or release build).
+- Next step: continue M5 with the summary DAG, recall tools, cache-stable assembly, project/user memory, AgentCore adapter and docs-mcp.
 
 ### 2026-11-21 — M0 update-feed contract
 
@@ -27,11 +41,42 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 - Guardians: qa-verifier PASS; drift-sentinel PASS; security-reviewer PASS after resolving its initial findings (upstream checksum field, credential-bearing URL rejection, SemVer validation, writer path validation); docs-keeper PASS after resolving its initial CLI argument mismatch and correcting the must-have mapping to G2. No locked path changed, so governance-verifier was not applicable. No dependency changed, so tech-scout was not applicable.
 - Next step: create or select the own update-feed repository and wire the generated feed into release infrastructure; that remains outside this task card.
 
+### 2026-11-21 — F0 guard test avoids an empty-remote false failure
+
+- Branch: `vibe/f0/gh-pr-list-guard-test` → PR into `vibe/main`.
+- Goal / must-haves: make the Codex hard-stop guard test prove that ordinary `gh pr list` remains allowed even when a task fixture has no git remote. Foundation process correctness only; no must-have ID.
+- Files allowed: `tests/vibe/automation.test.mjs`, `docs/vibe/STATUS.md`.
+- Files forbidden: `vibe/goal/run-goal.ps1`, `.vibe/agents/`, `.opencode/agent/`, locked docs, dependency manifests, upstream paths.
+- Acceptance commands: `node --test tests/vibe/automation.test.mjs`, `node vibe/tools/verify.mjs`.
+- Delivered: the guard-allowlist regression now invokes `gh pr list --repo ynotfins/vibecodium` explicitly instead of relying on `GH_REPO` injected by the shim, so an empty task fixture cannot hide a false failure.
+- Evidence: `node --test tests/vibe/automation.test.mjs` PASS (9/9); `node vibe/tools/verify.mjs` PASS (4/4 steps, 31/31 tests).
+- Guardians: qa-verifier PASS; drift-sentinel PASS; security-reviewer PASS after correcting the test to exercise the explicit repository argument; docs-keeper PASS. No locked path, dependency, milestone exit, or release build changed, so governance-verifier, tech-scout, and release-manager were not applicable.
+
+### 2026-11-21 — M0 windows-build delivery + guard hotfix (A1, G4)
+
+- Branch: `vibe/m0/windows-build` → PR #7 into `vibe/main`.
+- Delivered: resolved the PR #8 merge conflicts; fixed the guard shim so hyphen arguments pass through and `git push --force` still reports the hard-stop message; gave the GitHub CLI shim non-secret repository context; accepted an ASCII `-` docs header separator for ASCII-only files; and reconciled STATUS, BUILD, CHANGELOG, TECH_RADAR, and related docs/tests. Locked changes are covered by governance approvals 0006 and 0007.
+- Tests: `node vibe/tools/verify.mjs --strict` PASS (31/31 tests); new docs-check regression covers ASCII headers; the codex harness test confirms `git push --force` is blocked and `gh pr list` is not. Local `ecformat` is unavailable, so CI remains the final format gate.
+- Guardians: qa-verifier PASS after format fixes; drift-sentinel PASS after scope/proposal-location corrections; security-reviewer PASS; docs-keeper PASS; governance-verifier PASS for approvals 0006 and 0007. tech-scout not applicable (no dependency change); release-manager not applicable (not a milestone exit or release build).
+- Next: push this branch, wait for PR #7 CI green, merge it, then continue M0 with the own update feed, icons, CI Windows parity, and `-p` installer/zip smoke.
+
 ### 2026-11-21 — F0 loop uses the repository-scoped GitHub token
 
 - Branch: `vibe/f0/token-from-registry` → PR into `vibe/main`.
 - Problem: the owner created `VIBECODIUM_GH_TOKEN`, but the loop's scheduled-task process received a stale environment block and fell back to the account-wide `GITHUB_TOKEN`.
-- Delivered: the runner reads that one name from the user registry when the environment lacks it; the value stays in memory and is redacted like every other secret. Verified in a dry run (`gh_token_source=VIBECODIUM_GH_TOKEN`, `secret_vars_left=0`); approval record 0006, written by the verifier running on Codex BYOK.
+- Delivered: the runner reads that one name from the user registry when the environment lacks it; the value stays in memory and is redacted like every other secret. Verified in a dry run (`gh_token_source=VIBECODIUM_GH_TOKEN`, `secret_vars_left=0`); approval record 0008, written by the verifier running on Codex BYOK.
+
+### 2026-11-20 — M0 reproducible Windows build (A1, G4)
+
+- Branch: `vibe/m0/windows-build` → PR into `vibe/main`.
+- Goal: the parked MSVC Spectre-mitigated libraries are installed on the workstation (vswhere reports the component; `lib\spectre\x64\msvcrt.lib` present), so run the first full Vibecodium-branded Windows build and capture A1 acceptance evidence.
+- Must-haves: A1 (rebranded build reports its own name and version), G4 evidence baseline (local build script runs end to end on Windows).
+- Delivered: `dev/build.sh` identity exports (`APP_NAME`, `ASSETS_REPOSITORY`, `BINARY_NAME`, `GH_REPO_PATH`, `ORG_NAME`) now use `${VAR:-default}` form, defaulting to the Vibecodium identity from `utils.sh` instead of upstream's hardcoded VSCodium values, so patch placeholders (`!!APP_NAME!!`, `!!ORG_NAME!!`, `!!GH_REPO_PATH!!`) and artifact names stamp Vibecodium branding. Insider flag keeps insider identity (`vibecodium-insiders`). `ASSETS_REPOSITORY` stays on the upstream assets repo until the update-feed slice (deferred by task card).
+- Tests: new `dev/build.sh must not defeat the branded identity defaults` in `tests/vibe/branding.test.mjs` (written first, red, then green); `node vibe/tools/verify.mjs` PASS (governance, agents, docs, 29 tests).
+- Build evidence (A1, G4 baseline): `bash vibe/dev/preflight.sh` all PASS including `spectre`; full `bash vibe/dev/build-windows.sh` from clean clone of VS Code 1.143.1 → EXIT=0 in ~37 min (npm ci incl. native modules with Spectre libs, compile, `vscode-win32-x64-min-packing` 5.73 min, REH 2.72 min). Output `VSCode-win32-x64/`: `Vibecodium.exe` (FileVersion/ProductVersion 1.143.17795, ProductName/FileDescription/CompanyName Vibecodium), `bin/vibecodium{,.cmd,-tunnel.exe}`, `resources/app/product.json` reports nameShort/nameLong `Vibecodium`, `applicationName vibecodium`, `dataFolderName .vibecodium`, `serverApplicationName vibecodium-server`, `urlProtocol vibecodium`, `win32AppUserModelId Vibecodium.Vibecodium`, quality stable; `policies/Vibecodium.admx` (group policy namespace `Software\Policies\Vibecodium`); CLI smoke: `bin/vibecodium --version` → `1.143.17795`, `bin/vibecodium-tunnel.exe --version` → `vibecodium 1.143.17795`.
+- Branding scan: only remaining `VSCodium` strings in `product.json` are `updateUrl`/`downloadUrl`/`serverDownloadUrlTemplate` (update feed — separate M0 slice); the built `package.json` keeps `@vscodium/*` npm dependency names (not user-visible).
+- Guardians: qa-verifier PASS (independently reproduced test-first red/green, verify suite 29/29, build evidence from log and artifacts); drift-sentinel PASS (scope inside card, no locked-doc contradiction, no dependency drift; notes: keep build-windows.log out of the commit, reh-URL hybrid resolves in the update-feed slice); security-reviewer PASS (no secrets, no new dependencies; residuals: update-feed trust concern until the own-feed slice, env identity values interpolated into sed unsanitized — hardening note); docs-keeper FAIL then PASS (five fixes applied: TECH_RADAR spectre row now truthful, resolved parked row removed, CHANGELOG ASSETS_REPOSITORY caveat, BUILD.md output path corrected, branding-scan attribution fixed); governance-verifier not applicable (no locked path changed — confirmed by governance.mjs status); tech-scout PASS (radar row truthful, version scheme 1.143.1+7795 explained, no missing rows); release-manager PASS (light review: no release created, CHANGELOG and evidence citable for RELEASE.md later).
+- Next M0 slices: own update feed repo activation, icons, then CI Windows build parity (G4) and `-p` installer/zip packaging smoke.
 
 ### 2026-11-20 — F0 harness v2: Codex BYOK on OmniRoute + OpenCode fallback
 
@@ -73,8 +118,6 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 
 | Item | Why it needs the owner | Default until decided |
 |---|---|---|
-| Create a fine-grained GitHub token for the goal loop | Only the owner can mint tokens. Scope: repository `ynotfins/vibecodium`, permissions Contents and Pull requests read/write; store as User environment variable `VIBECODIUM_GH_TOKEN` | Loop uses the owner's broad `GITHUB_TOKEN` and logs a warning |
-| Install MSVC Spectre-mitigated libraries | Needs an elevated (administrator) PowerShell; command in `dev/BUILD.md` §1 | M0 build acceptance waits; other work continues |
 | Code-signing route | Paid certificate vs SignPath Foundation (free for open source, needs an application) | Unsigned builds; Windows SmartScreen shows "More info → Run anyway" |
 | Public repository | `ynotfins/vibecodium` is a public fork; GitHub forks cannot be made private. A closed-source product needs a separate private repository | Continue in the public fork; no secrets or machine details in the repo |
 | Product name and trademark check for "Vibecodium" | Legal decision | Working name stays "Vibecodium" |
