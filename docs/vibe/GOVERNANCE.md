@@ -6,7 +6,7 @@
 
 ## 1. Document classes
 
-Every Markdown file under `docs/vibe/` starts with a header line: `Doc class: <class> · Owner: <agent> · Last reviewed: <YYYY-MM-DD>`.
+Every Markdown file under `docs/vibe/` starts with a header line: `Doc class: <class> · Owner: <agent> · Last reviewed: <YYYY-MM-DD>`. An ASCII `-` may replace either `·` separator when the file must remain ASCII-only.
 
 | Class | Meaning | Who may change it |
 |---|---|---|

@@ -1,6 +1,6 @@
 # Changelog
 
-> Doc class: living · Owner: release-manager · Last reviewed: 2026-11-20
+> Doc class: living · Owner: release-manager · Last reviewed: 2026-11-21
 
 All notable user-visible changes to Vibecodium. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow the VSCodium scheme `<vscode-version>.<build>` plus a Vibecodium revision once releases start.
 
@@ -13,3 +13,4 @@ All notable user-visible changes to Vibecodium. Format: [Keep a Changelog](https
 ### Changed
 
 - Stable-build product identity defaults now use Vibecodium, including a distinct Windows application identity and artifact base name.
+- `dev/build.sh` identity exports (`APP_NAME`, `BINARY_NAME`, `GH_REPO_PATH`, `ORG_NAME`) now respect pre-set environment values and default to the Vibecodium identity, so local builds stamp patch placeholders and name artifacts with Vibecodium branding instead of VSCodium's (CI parity is a separate M0 slice). `ASSETS_REPOSITORY` keeps the upstream `VSCodium/vscodium` assets feed until the own-update-feed slice.

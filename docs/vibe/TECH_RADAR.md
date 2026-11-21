@@ -1,6 +1,6 @@
 # Vibecodium Technology Radar
 
-> Doc class: living · Owner: tech-scout · Last reviewed: 2026-11-20
+> Doc class: living · Owner: tech-scout · Last reviewed: 2026-11-21
 
 Maintained by the `tech-scout` sub-agent. Every component the product ships or the build depends on has one row. A row is reviewed by its "Next review" date, at every milestone start, and whenever its component changes. The docs check warns on overdue rows; a new dependency without a row fails the drift check.
 
@@ -31,7 +31,7 @@ Rings: `adopt` (in use, keep), `trial` (in use, under evaluation), `assess` (wat
 | Build toolchain: jq | jq | 1.8.2 | 1.8.2 | 2026-11-20 | — | adopt | 2026-12-04 |
 | Build toolchain: 7-Zip | 7-Zip | installed (Program Files) | — | 2026-11-20 | — | adopt | 2026-12-04 |
 | Build toolchain: MSVC | Visual Studio Build Tools 2022, C++ workload | 17.14 | — | 2026-11-20 | Build Tools 2026 (assess) | adopt | 2026-12-04 |
-| Build toolchain: Spectre libraries | MSVC Spectre-mitigated runtimes component | missing on workstation (parked) | — | 2026-11-20 | — | adopt | 2026-11-27 |
+| Build toolchain: Spectre libraries | MSVC Spectre-mitigated runtimes component (`Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre`) | installed on workstation 2026-11-20 (vswhere; `lib\spectre\x64\msvcrt.lib`); preflight PASS; used by the successful M0 full build | — | 2026-11-20 | — | adopt | 2026-12-04 |
 | Build orchestrator agent | Codex CLI BYOK (our models only, no subscription) | 0.154.0 | 0.154.0 | 2026-11-20 | OpenCode (product harness + loop fallback on Morph/DeepInfra; native 1.19.5, npm 1.18.31 removed 2026-11-20), OpenHands automations | adopt | 2026-11-27 |
 | Loop fallback harness | OpenCode | 1.19.5 | 1.19.6 (2026-11-17, install on 2026-11-24 after 7 days); 2.3.2 (2026-11-18) | 2026-11-20 | keep Codex-only (loses Morph-direct fallback) | adopt | 2026-11-27 |
 | Agent harness major version | OpenCode 2.x (new config format: `agents`, `permissions` lists) | — | v2.3.2 (2026-11-18) | 2026-11-20 | stay on 1.19.x | assess | 2026-11-27 |

@@ -19,7 +19,7 @@
     },
     {
       "path": "docs/vibe/GOVERNANCE.md",
-      "sha256": "a0efac1c4c1ecc376be93237847bdeb895ae2d89f84b5046b6ddf770f76098a3"
+      "sha256": "d59e66efbc7fa51603c9ac21500283fcc12d62589104601c42b596e89074d4eb"
     },
     {
       "path": "docs/vibe/PRODUCT_SPEC.md",
@@ -43,7 +43,7 @@
     },
     {
       "path": "vibe/goal/run-goal.ps1",
-      "sha256": "96af4945ba38381e72adf1ecffa090319452ff67acba71d45d658aa2b3a79acd"
+      "sha256": "d80f2abc58c050bf4af4770abc42e1470d7382893d5441973f979b74c93a0eb7"
     },
     {
       "path": "vibe/tools/governance.mjs",

@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-20
+> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-21
 
 One file per decision: `NNNN-<slug>.md`. Status is one of `proposed`, `accepted`, `superseded by NNNN`. Proposed alternatives live on `vibe/alt/<slug>` branches.
 

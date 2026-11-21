@@ -71,3 +71,33 @@ test('stable build metadata identifies Vibecodium with an independent Windows id
   assert.match(prepare, /sed -i 's\|https:\/\/code\.visualstudio\.com\|https:\/\/github\.com\/ynotfins\/vibecodium\|'/);
   assert.match(prepare, /sed -i 's\|Microsoft Corporation\|Vibecodium\|' build\/win32\/code\.iss/);
 });
+
+test('dev/build.sh must not defeat the branded identity defaults', () => {
+  const build = read('dev/build.sh');
+
+  // The wrapper `vibe/dev/build-windows.sh` calls `dev/build.sh` unconditionally;
+  // upstream's hardcoded exports would override the branded defaults in utils.sh
+  // for every patch placeholder (!!APP_NAME!!, !!ORG_NAME!!, ...) and artifact name.
+  // ASSETS_REPOSITORY deliberately mirrors utils.sh: it stays on the upstream assets
+  // feed until the own-update-feed slice (M0) brands the download/update endpoints.
+  for (const [key, value] of Object.entries({
+    APP_NAME: 'Vibecodium',
+    ASSETS_REPOSITORY: 'VSCodium/vscodium',
+    BINARY_NAME: 'vibecodium',
+    GH_REPO_PATH: 'ynotfins/vibecodium',
+    ORG_NAME: 'Vibecodium',
+  })) {
+    assert.match(
+      build,
+      new RegExp(`^export ${key}="\\$\\{${key}:-${value.replaceAll('/', '\\/')}\\}"$`, 'm'),
+      `dev/build.sh must export ${key} with the default utils.sh brands it with, not the upstream VSCodium value`,
+    );
+  }
+
+  // Non-identity settings keep their plain upstream exports.
+  assert.match(build, /^export CI_BUILD="no"$/m);
+
+  // The insider flag forces insider identity (plain assignments, like upstream).
+  assert.match(build, /export ASSETS_REPOSITORY="VSCodium\/vscodium-insiders"/);
+  assert.match(build, /export BINARY_NAME="vibecodium-insiders"/);
+});

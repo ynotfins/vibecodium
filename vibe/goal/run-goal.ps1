@@ -182,7 +182,10 @@ function Write-GuardShims([string]$dir) {
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
   Set-Content -Path (Join-Path $dir 'deny.txt') -Value ($DeniedCommands | ConvertTo-Json) -Encoding utf8NoBOM
   $guardPs1 = @'
-param([string]$Cmd, [string]$Real, [string]$Mode, [Parameter(ValueFromRemainingArguments = $true)] [string[]]$Rest)
+$Cmd = [string]$args[0]
+$Real = [string]$args[1]
+$Mode = [string]$args[2]
+$Rest = @($args | Select-Object -Skip 3)
 $line = (@($Cmd) + $Rest) -join ' '
 if ($Mode -eq 'always') { [Console]::Error.WriteLine("Vibecodium guard: '$Cmd' is blocked in the build loop"); exit 1 }
 foreach ($p in (Get-Content -Raw (Join-Path $PSScriptRoot 'deny.txt') | ConvertFrom-Json)) {
@@ -205,7 +208,8 @@ exit $LASTEXITCODE
       if ($c) { $real = $c.Source; break }
     }
     if (-not $real -and $targets[$name].mode -eq 'check') { continue }
-    $shim = "@echo off`r`n`"$pwshPath`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"%~dp0guard.ps1`" $name `"$real`" $($targets[$name].mode) %*`r`n"
+    $repoLine = if ($name -eq 'gh') { "set `"GH_REPO=ynotfins/vibecodium`"`r`n" } else { '' }
+    $shim = "@echo off`r`n$repoLine`"$pwshPath`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"%~dp0guard.ps1`" $name `"$real`" $($targets[$name].mode) %*`r`n"
     Set-Content -Path (Join-Path $dir "$name.cmd") -Value $shim -Encoding ascii
   }
   return $dir
@@ -375,7 +379,8 @@ try {
     }
 
     $guardDir = Write-GuardShims (Join-Path $LogDir 'guard')
-    $env:PATH = "$guardDir;$env:PATH"
+    $gitDir = Split-Path -Parent ((Get-Command git.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source)
+    if ($gitDir) { $env:PATH = "$guardDir;$gitDir;$env:PATH" } else { $env:PATH = "$guardDir;$env:PATH" }
 
     if (-not $DryRun) { Add-TodayCount }
     Write-Log "iteration start ($stamp) harness=$harness provider=$chosen model=$modelDesc"
