@@ -64,6 +64,8 @@ node vibe/tools/update-feed.mjs --manifest release.json --out ../update-feed-sta
 
 The generator validates the update-service fields, requires a SHA-256 checksum and size for every artifact, emits `sha256hash`, and writes one manifest per quality/platform/architecture combination, with an extra target segment for Windows installer and archive assets. `version` follows the updater contract as the commit and `productVersion` as the semver product version. It does not upload or publish anything.
 
+The stable and insider Windows publish workflows check out the product tooling from `vibe/main` and run `node vibecodium-tooling/vibe/tools/release-feeds.mjs` after checksum preparation. The tool reads the release asset directory and its `.sha256` sidecars, skips the updates-disabled MSI, and maps the remaining Windows assets to `system`, `user`, `archive`, and `msi` feeds. The workflows upload the resulting `latest.json` files as build artifacts named `update-feeds-<architecture>` for staged verification only; they do not upload feeds to a release or create a feed repository.
+
 ```bash
 bash vibe/dev/build-windows.sh       # app only
 bash vibe/dev/build-windows.sh -p    # app plus installer .exe and zip (not yet verified in this slice)
