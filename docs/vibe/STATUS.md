@@ -11,6 +11,19 @@ Current milestone: M0 (in progress)
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
 
+### 2026-11-21 — M0 packaging-smoke correction
+
+- Goal / must-haves: harden and correct the packaging-smoke slice after its merge; A1 (packaged identity/version checks only). No new product acceptance is claimed.
+- Files allowed: `vibe/tools/windows-packaging-smoke.mjs`, `tests/vibe/windows-packaging-smoke.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/STATUS.md`.
+- Files forbidden: upstream source, build scripts, CI workflows, release publication, signing policy, installer assets, dependencies.
+- Acceptance commands: `node --test tests/vibe/windows-packaging-smoke.test.mjs`, `node vibe/tools/verify.mjs`.
+- Out of scope: clean-machine install/uninstall, MSI generation, signing, publishing a release, creating a feed repository, changing CI or build scripts.
+- Branch: `vibe/m0/packaging-smoke-correction` → PR into `vibe/main`.
+- Delivered: rejected empty artifacts, restricted architecture to x64/arm64, expanded the 7-Zip stdout buffer, rejected unsafe zip paths, and required unique portable entries. Corrected the PR #14 status bullet to match its actual merged state and CI outcome.
+- Tests: `node --test tests/vibe/windows-packaging-smoke.test.mjs` PASS (5 tests); `node vibe/tools/verify.mjs` PASS.
+- Guardians: governance-verifier PASS as not applicable (no locked path changed); tech-scout PASS as not applicable (no dependency changed). Release-manager remains not applicable because no release checkpoint was crossed. Other guardians are pending the branch check.
+- Next step: keep the real `-p` artifact smoke parked until the build environment provides a writable native-header cache.
+
 ### 2026-11-21 — M0 Windows packaging smoke (parked after tooling)
 
 - Goal / must-haves: create and test a local verifier for Windows system installer, user installer, and portable zip artifacts. This supports later M0 artifact work but claims no G1 or G4 acceptance.
@@ -25,7 +38,7 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 - Blocked artifact smoke: the three attempts stopped in environment/cache setup before compilation, so the `-p` build and this smoke remain unverified; no product-code dependency is known to be missing. The full acceptance still requires a successful `-p` build plus the packaging smoke command above.
 - Guardians: qa-verifier PASS after fixing a false-pass CLI guard and adding the nonzero-exit test; drift-sentinel PASS after removing build cache, enforcing packaged commit identity, and adding the “Parked for owner” row; security-reviewer PASS; docs-keeper PASS after correcting the smoke command to build-stamped values and documenting the 7-Zip prerequisite; governance-verifier PASS as not applicable (no locked path changed); tech-scout PASS as not applicable (no new dependency); release-manager PASS as not applicable (no release checkpoint).
 - Final verdict: PASS for the delivered packaging-smoke tooling; the actual `-p` installer/zip smoke remains parked and must be rerun after a writable build-cache environment fix.
-- Merge blocker: repository checks are not fully green at this PR head because `build (macos-14, arm64)` is cancelled/failing on the unsupported `macos-14-arm64-us-default` runner label. Windows/Linux compile, macOS x64 build, lint, verify, and Devin Review are green or in progress at this head. PR #14 remains unmerged because the loop requires green CI.
+- Merge outcome: PR #14 merged at 2026-11-21T17:46:22Z as `59af95f9643f1e85c848edfb6f08256f10e6a428`. At the PR head, Windows/Linux compile, Windows/macOS x64 builds, lint, verify, and Devin Review were green or completed, but `build (macos-14, arm64)` was cancelled on the unsupported runner label and two Linux checks later failed on GitHub API 403 rate limits. The rerun was token-blocked; a post-merge correction is in progress.
 
 ### 2026-11-21 — M0 release-feed tooling (staging)
 

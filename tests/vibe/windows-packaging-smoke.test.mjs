@@ -121,3 +121,71 @@ test('rejects a missing portable zip', async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('rejects unsupported architecture and empty artifacts', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'vibecodium-packaging-smoke-'));
+  try {
+    const assets = await createAssets(root);
+    const options = {
+      assets,
+      name: 'Vibecodium',
+      version: '1.147.17795',
+      commit: '4c2b3f4aebcfef13c63c19d4ee7e1a5ee36656d9',
+    };
+    const dependencies = {
+      hashFile: sha256,
+      listZip: fakeList,
+      extractZip: fakeExtract,
+      readProductJson: fakeProduct,
+      readPackageJson: fakePackage,
+      statFile: fakeStat,
+    };
+
+    await assert.rejects(
+      runSmoke({ ...options, arch: 'ia32' }, dependencies),
+      /unsupported architecture: ia32/,
+    );
+    await assert.rejects(
+      runSmoke(options, { ...dependencies, statFile: async () => ({ size: 0 }) }),
+      /artifact is empty: VibecodiumSetup-x64-1\.147\.17795\.exe/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects unsafe or duplicate portable zip entries', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'vibecodium-packaging-smoke-'));
+  try {
+    const assets = await createAssets(root);
+    const options = {
+      assets,
+      name: 'Vibecodium',
+      version: '1.147.17795',
+      commit: '4c2b3f4aebcfef13c63c19d4ee7e1a5ee36656d9',
+    };
+    const dependencies = {
+      hashFile: sha256,
+      listZip: fakeList,
+      extractZip: fakeExtract,
+      readProductJson: fakeProduct,
+      readPackageJson: fakePackage,
+      statFile: fakeStat,
+    };
+
+    await assert.rejects(
+      runSmoke(options, { ...dependencies, listZip: async () => ['../Vibecodium.exe'] }),
+      /portable zip contains an unsafe path: \.\.\/Vibecodium\.exe/,
+    );
+    await assert.rejects(
+      runSmoke(options, { ...dependencies, listZip: async () => ['C:/Vibecodium.exe'] }),
+      /portable zip contains an unsafe path: C:\/Vibecodium\.exe/,
+    );
+    await assert.rejects(
+      runSmoke(options, { ...dependencies, listZip: async () => [...await fakeList(), 'Vibecodium.exe'] }),
+      /portable zip is missing Vibecodium\.exe/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
