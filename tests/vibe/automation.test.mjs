@@ -129,7 +129,7 @@ test('codex harness: BYOK config, sandbox roots, no subscription login, Morph to
   assert.equal(blocked.status, 1, blocked.stdout + blocked.stderr);
   assert.match(blocked.stderr, /blocked hard-stop command/);
   const always = spawnSync('cmd', ['/c', path.join(guard, 'gh.cmd'), 'pr', 'list', '--repo', 'ynotfins/vibecodium'], { encoding: 'utf8' });
-  assert.notEqual(always.status, 1, 'gh pr list --repo ynotfins/vibecodium must still work');
+  assert.notEqual(always.status, 1, 'gh pr list must still work');
   assert.doesNotMatch(out, /not-a-real-secret-123|scoped-test-token-456|morph-test-key-789/);
   const cfg = readFileSync(path.join(f.logs, 'codex-home', 'config.toml'), 'utf8');
   assert.ok(cfg.includes('model_provider = "omniroute"\nmodel = "glm-5.3-flash"'));
