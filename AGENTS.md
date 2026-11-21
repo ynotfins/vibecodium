@@ -41,7 +41,7 @@ The owner granted full autonomy to build to completion. Do not stop between task
 - Never write, print, log or commit a secret value. Environment variable names are fine.
 - Never edit a `locked` doc or locked file except through `governance-verifier` (GOVERNANCE §3).
 - Never hand-edit `.opencode/agent/*.md`; edit `.vibe/agents/*.md` and regenerate.
-- The build runs on our own models (OmniRoute first, Morph direct second, DeepInfra third; `vibe/goal/models.json`). Use the Morph tools for code search (WarpGrep) and edits (Fast Apply) when available.
+- The build runs on our own models: OmniRoute first through Codex BYOK, Morph direct second and DeepInfra third through OpenCode (`vibe/goal/models.json`, ADR-0008). Use the Morph tools for code search (WarpGrep) and edits (Fast Apply) when available.
 - `master` mirrors `VSCodium/vscodium` only. Product work lands on `vibe/main` by PR.
 - Library and API facts come from live sources (release pages, registries, official docs), not memory. Record versions in `docs/vibe/TECH_RADAR.md`.
 - New dependencies: permissive license, pinned version and checksum, public for at least 7 days, radar row added.

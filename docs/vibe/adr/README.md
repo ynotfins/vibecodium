@@ -12,4 +12,5 @@ One file per decision: `NNNN-<slug>.md`. Status is one of `proposed`, `accepted`
 | [0004](0004-governance-and-guardian-agents.md) | Locked docs and guardian sub-agents | accepted |
 | [0005](0005-openhands-autonomous-lane.md) | OpenHands as the autonomous background lane | accepted |
 | [0006](0006-autonomous-goal-runner.md) | Autonomous goal runner for building the product | superseded by 0007 |
-| [0007](0007-build-on-our-own-models-with-opencode.md) | Build on our own models with OpenCode | accepted |
+| [0007](0007-build-on-our-own-models-with-opencode.md) | Build on our own models with OpenCode | superseded by 0008 |
+| [0008](0008-codex-byok-primary-opencode-fallback.md) | Codex BYOK on OmniRoute primary; OpenCode fallback | accepted |

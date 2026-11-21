@@ -2,7 +2,7 @@
 
 > Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-20
 
-- Status: accepted (supersedes ADR-0006)
+- Status: superseded by [ADR-0008](0008-codex-byok-primary-opencode-fallback.md) (owner clarified Codex is fine with our own models (BYOK); Codex's sandbox makes it the better primary on OmniRoute, OpenCode stays the fallback harness)
 - Date: 2026-11-20
 
 ## Context

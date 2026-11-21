@@ -3,12 +3,20 @@
 > Doc class: living · Owner: vibe-overseer · Last reviewed: 2026-11-20
 
 Goal state: active
+Owner priorities (2026-11-20): alongside M0/M1, begin the standalone engine packages (Vibe Context Engine, multi-project indexer/graph) — they are testable without the IDE build. Build-dependent work stays parked until the MSVC Spectre component is installed. Milestone numbering is unchanged.
 
 Current milestone: M0 (in progress)
 
 ## Task log
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
+
+### 2026-11-20 — F0 harness v2: Codex BYOK on OmniRoute + OpenCode fallback
+
+- Branch: `vibe/f0/codex-byok` → PR into `vibe/main`. Owner clarified Codex is wanted for the loop — on our own models (BYOK), never the ChatGPT subscription (ADR-0008).
+- Delivered: dual-harness runner — OmniRoute (forced first by health check) runs `codex exec` in the `workspace-write` sandbox with an isolated `CODEX_HOME` (no `auth.json` can exist); Morph direct and DeepInfra run OpenCode as the fallback because Codex no longer supports their API format. Morph classes: DeepSeek V4.1 Flash first (standard/cheap), GLM-5.3 for strong/review; Kimi removed per owner. Morph tools through `cmd /c npx` in both harnesses.
+- Evidence: `node vibe/tools/verify.mjs` PASS (29 tests incl. dry runs for both harnesses: BYOK config, writable roots, no auth.json, per-class agent TOMLs, deny rules, guard, secret removal); approval record 0005 written by the verifier running on Codex BYOK. Live earlier this session: codex exec on OmniRoute created files, ran commands, spawned a custom agent and listed the four Morph tools.
+- Note for the operator: `VIBECODIUM_GH_TOKEN` is not present in Windows user/machine environment variables as of 18:56 — the runner falls back to `GITHUB_TOKEN` until it exists.
 
 ### 2026-11-20 — F0 build harness: our own models (OpenCode + OmniRoute + Morph)
 
