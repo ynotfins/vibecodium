@@ -32,7 +32,7 @@ Every line must say `PASS` - *verified 2026-11-20 (all PASS except `spectre`).*
 
 ## 2. Build
 
-### Update-feed manifests
+### Update-feed manifests — local staging only
 
 To prepare the platform-scoped `latest.json` files for the own update feed without publishing, create a release manifest containing the product fields and one entry per artifact:
 
