@@ -11,6 +11,21 @@ Current milestone: M0 (in progress)
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
 
+### 2026-11-21 — M0 Windows packaging smoke (parked after tooling)
+
+- Goal / must-haves: produce and verify the Windows system installer, user installer, and portable zip from a local `-p` build. This addresses the remaining M0 artifact smoke and builds the repeatable evidence tool needed for G1 later.
+- Must-have IDs: A1 (packaged identity/version check), G1 (Windows artifact smoke only), G4 (local artifact parity evidence).
+- Files allowed: `vibe/tools/windows-packaging-smoke.mjs`, `tests/vibe/windows-packaging-smoke.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/STATUS.md`.
+- Files forbidden: upstream source, build scripts, CI workflows, release publication, signing policy, installer assets, dependencies.
+- Acceptance commands: `node --test tests/vibe/windows-packaging-smoke.test.mjs`, `source dev/build.env && node vibe/tools/windows-packaging-smoke.mjs --assets assets --name Vibecodium --version "$RELEASE_VERSION" --commit "$BUILD_SOURCEVERSION"`, `node vibe/tools/verify.mjs`.
+- Out of scope: clean-machine install/uninstall, MSI generation, signing, publishing a release, creating a feed repository, changing CI or build scripts.
+- Branch: `vibe/m0/windows-packaging-smoke` → PR into `vibe/main`.
+- Delivered: `vibe/tools/windows-packaging-smoke.mjs` validates the three required local Windows artifacts, computes SHA-256 for each, checks the portable zip contents, and reads the packaged app identity/version/commit from `resources/app`. `docs/vibe/dev/BUILD.md` documents the command. The actual `-p` packaging run remains parked.
+- Attempts: three `bash vibe/dev/build-windows.sh -p` runs failed before compilation. (1) Git Bash used a non-executable winget `jq` shim, fixed by staging an official checksum-verified jq 1.7.1 locally. (2) node-gyp hit `EPERM` writing to the user Electron-header cache; setting `npm_config_devdir` fixed header download but the VS Code preinstall still hardcoded the user cache for custom-header overlay. (3) A retry with a slice-local cache failed because a Windows path contained an accidental tab; the build did not reach native compilation. No repository source or build script was changed in these attempts.
+- Blocked artifact smoke: the three attempts stopped in environment/cache setup before compilation, so the `-p` build and this smoke remain unverified; no product-code dependency is known to be missing. The full acceptance still requires a successful `-p` build plus the packaging smoke command above.
+- Guardians: qa-verifier PASS after fixing a false-pass CLI guard and adding the nonzero-exit test; drift-sentinel PASS after removing build cache, enforcing packaged commit identity, and adding the “Parked for owner” row; security-reviewer PASS; docs-keeper PASS after correcting the smoke command to build-stamped values and documenting the 7-Zip prerequisite; governance-verifier PASS as not applicable (no locked path changed); tech-scout PASS as not applicable (no new dependency); release-manager PASS as not applicable (no release checkpoint).
+- Final verdict: PASS for the delivered packaging-smoke tooling; the actual `-p` installer/zip smoke remains parked and must be rerun after a writable build-cache environment fix.
+
 ### 2026-11-21 — M0 release-feed tooling (staging)
 
 - Goal / must-haves: generate platform- and target-scoped update-feed manifests from Windows release asset checksums without publishing them or changing the feed repository. Bridges the completed local manifest contract toward the release pipeline.
@@ -136,4 +151,5 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 | Public repository | `ynotfins/vibecodium` is a public fork; GitHub forks cannot be made private. A closed-source product needs a separate private repository | Continue in the public fork; no secrets or machine details in the repo |
 | Product name and trademark check for "Vibecodium" | Legal decision | Working name stays "Vibecodium" |
 | MSI installer | WiX v3 is archived; WiX v6+ binaries carry a maintenance-fee EULA for revenue-generating users | Ship Inno `.exe` and portable zip only |
+| Complete M0 `-p` Windows artifact smoke | Three unattended build attempts failed before compilation on native-header cache permissions; a writable build cache needs an environment fix outside this task worktree | Retry after the build environment provides a writable node-gyp cache and rerun the packaging smoke command in `docs/vibe/dev/BUILD.md` |
 | Upstream base | Stay on VSCodium's cadence or move ahead to newer VS Code | Stay on VSCodium's cadence |
