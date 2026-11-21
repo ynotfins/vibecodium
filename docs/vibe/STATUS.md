@@ -10,6 +10,15 @@ Current milestone: M0 (in progress)
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
 
+### 2026-11-21 — Task card: deliver PR #7 (M0 windows-build) through green CI
+
+- Goal: complete the in-flight M0 windows-build PR (opened by the previous session, all guardians already PASS on commit 86500c8) whose delivery is stalled by (a) an `ecformat` CI lint failure — `docs/vibe/dev/BUILD.md` in latin1-detectable bytes — and (b) trunk's PR #8 merge, which reworded the same BUILD.md lines and made the PR conflict.
+- Must-have IDs: A1, G4 (delivery completion; content already guardian-approved).
+- Files allowed: `docs/vibe/STATUS.md`, `docs/vibe/dev/BUILD.md`, `docs/vibe/TECH_RADAR.md`, `docs/vibe/CHANGELOG.md`, `tests/vibe/branding.test.mjs`, `dev/build.sh` (only merge-conflict resolution, no new behaviour), `.gitignore` (only if build log needs exclusion).
+- Files forbidden: everything else, and any locked path (governance-verifier not applicable).
+- Acceptance commands: `node vibe/tools/verify.mjs` PASS on the branch; local `ecformat check` PASS on the changed docs; PR #7 CI green; PR #7 merged into `vibe/main` with the M0 STATUS entry intact.
+- Out of scope: new M0 features (update feed, icons, CI Windows parity), any harness changes, any runner change.
+
 ### 2026-11-20 — M0 reproducible Windows build (A1, G4)
 
 - Branch: `vibe/m0/windows-build` → PR into `vibe/main`.
