@@ -11,6 +11,17 @@ Current milestone: M0 (in progress)
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
 
+### 2026-11-21 — F0 guard test avoids an empty-remote false failure
+
+- Branch: `vibe/f0/gh-pr-list-guard-test` → PR into `vibe/main`.
+- Goal / must-haves: make the Codex hard-stop guard test prove that ordinary `gh pr list` remains allowed even when a task fixture has no git remote. Foundation process correctness only; no must-have ID.
+- Files allowed: `tests/vibe/automation.test.mjs`, `docs/vibe/STATUS.md`.
+- Files forbidden: `vibe/goal/run-goal.ps1`, `.vibe/agents/`, `.opencode/agent/`, locked docs, dependency manifests, upstream paths.
+- Acceptance commands: `node --test tests/vibe/automation.test.mjs`, `node vibe/tools/verify.mjs`.
+- Delivered: the guard-allowlist regression now invokes `gh pr list --repo ynotfins/vibecodium` explicitly instead of relying on `GH_REPO` injected by the shim, so an empty task fixture cannot hide a false failure.
+- Evidence: `node --test tests/vibe/automation.test.mjs` PASS (9/9); `node vibe/tools/verify.mjs` PASS (4/4 steps, 31/31 tests).
+- Guardians: qa-verifier PASS; drift-sentinel PASS; security-reviewer PASS after correcting the test to exercise the explicit repository argument; docs-keeper PASS. No locked path, dependency, milestone exit, or release build changed, so governance-verifier, tech-scout, and release-manager were not applicable.
+
 ### 2026-11-21 — M0 windows-build delivery + guard hotfix (A1, G4)
 
 - Branch: `vibe/m0/windows-build` → PR #7 into `vibe/main`.
