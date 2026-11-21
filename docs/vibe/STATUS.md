@@ -11,6 +11,20 @@ Current milestone: M0 (in progress)
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
 
+### 2026-11-21 — M0 release-feed tooling (staging)
+
+- Goal / must-haves: generate platform- and target-scoped update-feed manifests from Windows release asset checksums without publishing them or changing the feed repository. Bridges the completed local manifest contract toward the release pipeline.
+- Must-have IDs: G2 (own update-feed contract integration only).
+- Files allowed: `vibe/tools/release-feeds.mjs`, `tests/vibe/release-feeds.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/STATUS.md`, `docs/vibe/ops/RELEASE.md`.
+- Files forbidden: upstream product source, locked docs, release secrets, installer assets, release workflows, feed or release publication, signing policy.
+- Acceptance commands: `node --test tests/vibe/release-feeds.test.mjs`, `node vibe/tools/verify.mjs`.
+- Out of scope: release-workflow edits, creating the feed repository, uploading `latest.json`, altering release tags, MSI generation, signing, real release manifests.
+- Branch: `vibe/m0/release-feed-tooling` → PR into `vibe/main`.
+- Delivered: `vibe/tools/release-feeds.mjs` reads checksum sidecars, maps Windows system/user/archive/MSI assets to scoped feeds, skips the updates-disabled MSI, validates release metadata through the existing feed contract, and writes `latest.json` only to a local staging directory.
+- Tests: `node --test tests/vibe/release-feeds.test.mjs` PASS (2 tests); `node vibe/tools/verify.mjs` PASS (4/4 steps, 41 tests). Tests cover scoped output paths, checksum rejection, and update-disabled MSI exclusion.
+- Guardians: qa-verifier PASS; drift-sentinel PASS after refreshing rebased evidence; security-reviewer PASS; docs-keeper PASS after correcting scope, behavior, and evidence claims. Governance-verifier not applicable (no locked path changed); tech-scout not applicable (no dependency changed); release-manager not applicable (not a milestone exit or release build).
+- Next step: wire release-workflow staging once the loop token has `workflow` scope; then continue with feed-repository selection and the `-p` installer/zip smoke. A later hardening slice should pin release tooling to an immutable product revision.
+
 ### 2026-11-21 — M5 lossless session store
 
 - Goal / must-haves: implement the standalone M5 context-engine session store so messages, tool calls, and tool results remain recoverable verbatim after compaction. This is the owner-priority standalone engine work that does not depend on the M0 IDE build.
@@ -100,7 +114,7 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 - Tests: `node --test tests/vibe/branding.test.mjs` PASS (covers all changed transformations and replacement Windows identifiers); `node vibe/tools/verify.mjs` PASS (governance, agents, docs, 26 tests).
 - Guardians: qa-verifier PASS (after strengthening per-transformation assertions); drift-sentinel PASS; security-reviewer PASS; docs-keeper PASS; tech-scout PASS. No locked path or dependency changed, so governance-verifier was not applicable.
 - Technology note: verified upstream VS Code `1.147.0` is only two days old; it is recorded in `TECH_RADAR.md` and deferred to 2026-11-25 under the seven-day policy.
-- Remaining M0 evidence: a full Windows build and installer smoke remain blocked on the parked MSVC Spectre libraries. Update-feed activation and icon work are separate M0 slices.
+- Remaining M0 evidence after that entry: CI Windows build parity, icon work, update-feed activation, and the `-p` installer/zip smoke. The app-only full-build evidence was subsequently delivered by the M0 windows-build slice.
 - Delivery: the unattended session could not push (its sandbox removed the GitHub token from its environment). The bootstrapping session pushed the branch and opened the PR on 2026-11-20; the loop's GitHub access is fixed in the OpenCode runner change.
 
 ### 2026-11-20 — F0 foundation
