@@ -1,6 +1,6 @@
 # Building Vibecodium on Windows
 
-> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-21
+> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-21
 
 Vibecodium builds with VSCodium's scripts. Run everything in **Git Bash** from the repository root.
 
@@ -32,7 +32,7 @@ Every line must say `PASS`. *Verified 2026-11-20 (all PASS, including `spectre`)
 
 ## 2. Build
 
-### Update-feed manifests — local staging only
+### Update-feed manifests - local staging only
 
 To prepare the platform-scoped `latest.json` files for the own update feed without publishing, create a release manifest containing the product fields and one entry per artifact:
 
