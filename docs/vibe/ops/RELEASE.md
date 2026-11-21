@@ -1,6 +1,6 @@
 # Release Checklist
 
-> Doc class: living · Owner: release-manager · Last reviewed: 2026-11-20
+> Doc class: living · Owner: release-manager · Last reviewed: 2026-11-21
 
 Run by `release-manager` before any release build. Public publication is a hard stop (see `GOVERNANCE.md`); everything up to a draft release is autonomous.
 
