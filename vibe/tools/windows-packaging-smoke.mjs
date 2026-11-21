@@ -35,6 +35,7 @@ function defaultListZip(file) {
   const result = spawnSync('7z', ['l', '-ba', '-slt', file], {
     encoding: 'utf8',
     windowsHide: true,
+    maxBuffer: 64 * 1024 * 1024,
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -78,6 +79,9 @@ export async function runSmoke(options, dependencies = {}) {
   const version = options.version || '';
   const commit = options.commit || '';
   const arch = options.arch || 'x64';
+  if (!/^(?:x64|arm64)$/.test(arch)) {
+    throw new Error(`unsupported architecture: ${arch}`);
+  }
 
   if (!/^[\w.-]+$/.test(name) || /^-/.test(name)) {
     throw new Error('name contains unsupported characters');
@@ -110,6 +114,9 @@ export async function runSmoke(options, dependencies = {}) {
     }
     const file = path.join(directory, definition.file);
     const metadata = await statFile(file);
+    if (metadata.size <= 0) {
+      throw new Error(`artifact is empty: ${definition.file}`);
+    }
     const sha256 = await hashFile(file);
     const artifact = {
       kind: definition.kind,
@@ -120,6 +127,10 @@ export async function runSmoke(options, dependencies = {}) {
 
     if (definition.kind === 'portable-zip') {
       const contents = (await listZip(file)).map(normalizeListEntry);
+      const unsafeEntry = contents.find((entry) => /^(?:[A-Za-z]:[\\/]|\/)/.test(entry) || entry.split('/').includes('..'));
+      if (unsafeEntry) {
+        throw new Error(`portable zip contains an unsafe path: ${unsafeEntry}`);
+      }
       const requiredZipEntries = [
         `${name}.exe`,
         `bin/${name.toLowerCase()}.cmd`,
@@ -127,7 +138,8 @@ export async function runSmoke(options, dependencies = {}) {
         'resources/app/product.json',
       ];
       for (const requiredEntry of requiredZipEntries) {
-        if (!contents.includes(requiredEntry)) {
+        const matchingEntries = contents.filter((entry) => entry === requiredEntry);
+        if (matchingEntries.length !== 1) {
           throw new Error(`portable zip is missing ${requiredEntry}`);
         }
       }
