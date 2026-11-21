@@ -128,8 +128,8 @@ test('codex harness: BYOK config, sandbox roots, no subscription login, Morph to
   const blocked = spawnSync('cmd', ['/c', path.join(guard, 'git.cmd'), 'push', '--force', 'origin', 'HEAD:x'], { encoding: 'utf8' });
   assert.equal(blocked.status, 1, blocked.stdout + blocked.stderr);
   assert.match(blocked.stderr, /blocked hard-stop command/);
-  const always = spawnSync('cmd', ['/c', path.join(guard, 'gh.cmd'), 'pr', 'list'], { encoding: 'utf8' });
-  assert.notEqual(always.status, 1, 'gh pr list must still work');
+  const always = spawnSync('cmd', ['/c', path.join(guard, 'gh.cmd'), 'pr', 'list', '--repo', 'ynotfins/vibecodium'], { encoding: 'utf8' });
+  assert.notEqual(always.status, 1, 'gh pr list --repo ynotfins/vibecodium must still work');
   assert.doesNotMatch(out, /not-a-real-secret-123|scoped-test-token-456|morph-test-key-789/);
   const cfg = readFileSync(path.join(f.logs, 'codex-home', 'config.toml'), 'utf8');
   assert.ok(cfg.includes('model_provider = "omniroute"\nmodel = "glm-5.3-flash"'));
