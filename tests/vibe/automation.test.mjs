@@ -45,6 +45,7 @@ test('goal runner: codex BYOK on OmniRoute, opencode fallback, secrets removed, 
   // Secrets and hard stops.
   assert.ok(s.includes('Remove-Item -LiteralPath "Env:'), 'secret env vars must be removed');
   assert.ok(s.includes("$AllowedProviderKeys = @('OMNIROUTE_API_KEY', 'MORPH_API_KEY', 'DEEPINFRA_API_KEY')"));
+  assert.ok(s.includes("GetEnvironmentVariable($name, 'User')"), 'the scoped token must also be read from the user registry (scheduled tasks can get a stale environment)');
   assert.ok(s.includes("'git push --force*'") && s.includes("'gh release create*'") && s.includes("'gh auth*'"));
   assert.ok(s.indexOf('governance.mjs') < s.indexOf('$p = Start-Process'), 'governance check must run before the session starts');
   assert.match(s, /while \(-not \$p\.WaitForExit\(30000\)\) \{\n\s+Set-TreeBelowNormal \$p\.Id/, 'session tree must be kept below normal priority');

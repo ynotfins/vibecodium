@@ -19,6 +19,12 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 - Guardians: qa-verifier PASS after format fixes; drift-sentinel PASS after scope/proposal-location corrections; security-reviewer PASS; docs-keeper PASS; governance-verifier PASS for approvals 0006 and 0007. tech-scout not applicable (no dependency change); release-manager not applicable (not a milestone exit or release build).
 - Next: push this branch, wait for PR #7 CI green, merge it, then continue M0 with the own update feed, icons, CI Windows parity, and `-p` installer/zip smoke.
 
+### 2026-11-21 — F0 loop uses the repository-scoped GitHub token
+
+- Branch: `vibe/f0/token-from-registry` → PR into `vibe/main`.
+- Problem: the owner created `VIBECODIUM_GH_TOKEN`, but the loop's scheduled-task process received a stale environment block and fell back to the account-wide `GITHUB_TOKEN`.
+- Delivered: the runner reads that one name from the user registry when the environment lacks it; the value stays in memory and is redacted like every other secret. Verified in a dry run (`gh_token_source=VIBECODIUM_GH_TOKEN`, `secret_vars_left=0`); approval record 0008, written by the verifier running on Codex BYOK.
+
 ### 2026-11-20 — M0 reproducible Windows build (A1, G4)
 
 - Branch: `vibe/m0/windows-build` → PR into `vibe/main`.
@@ -37,7 +43,6 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 - Delivered: dual-harness runner — OmniRoute (forced first by health check) runs `codex exec` in the `workspace-write` sandbox with an isolated `CODEX_HOME` (no `auth.json` can exist); Morph direct and DeepInfra run OpenCode as the fallback because Codex no longer supports their API format. Morph classes: DeepSeek V4.1 Flash first (standard/cheap), GLM-5.3 for strong/review; Kimi removed per owner. Morph tools through `cmd /c npx` in both harnesses.
 - Evidence: `node vibe/tools/verify.mjs` PASS (29 tests incl. dry runs for both harnesses: BYOK config, writable roots, no auth.json, per-class agent TOMLs, deny rules, guard, secret removal); approval record 0005 written by the verifier running on Codex BYOK. Live earlier this session: codex exec on OmniRoute created files, ran commands, spawned a custom agent and listed the four Morph tools.
 - Note for the operator: `VIBECODIUM_GH_TOKEN` is not present in Windows user/machine environment variables as of 18:56 — the runner falls back to `GITHUB_TOKEN` until it exists.
-
 
 ### 2026-11-20 — F0 build harness: our own models (OpenCode + OmniRoute + Morph)
 
