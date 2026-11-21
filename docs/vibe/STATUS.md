@@ -1,8 +1,9 @@
 # Vibecodium Status
 
-> Doc class: living · Owner: vibe-overseer · Last reviewed: 2026-11-20
+> Doc class: living · Owner: vibe-overseer · Last reviewed: 2026-11-21
 
 Goal state: active
+Owner priorities (2026-11-20): alongside M0/M1, begin the standalone engine packages (Vibe Context Engine, multi-project indexer/graph) — they are testable without the IDE build. Build-dependent work continues now that the MSVC Spectre component is installed. Milestone numbering is unchanged.
 
 Current milestone: M0 (in progress)
 
@@ -10,14 +11,13 @@ Current milestone: M0 (in progress)
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
 
-### 2026-11-21 — Task card: deliver PR #7 (M0 windows-build) through green CI
+### 2026-11-21 — M0 windows-build delivery + guard hotfix (A1, G4)
 
-- Goal: complete the in-flight M0 windows-build PR (opened by the previous session, all guardians already PASS on commit 86500c8) whose delivery is stalled by (a) an `ecformat` CI lint failure — `docs/vibe/dev/BUILD.md` in latin1-detectable bytes — and (b) trunk's PR #8 merge, which reworded the same BUILD.md lines and made the PR conflict.
-- Must-have IDs: A1, G4 (delivery completion; content already guardian-approved).
-- Files allowed: `docs/vibe/STATUS.md`, `docs/vibe/dev/BUILD.md`, `docs/vibe/TECH_RADAR.md`, `docs/vibe/CHANGELOG.md`, `tests/vibe/branding.test.mjs`, `dev/build.sh` (only merge-conflict resolution, no new behaviour), `.gitignore` (only if build log needs exclusion).
-- Files forbidden: everything else, and any locked path (governance-verifier not applicable).
-- Acceptance commands: `node vibe/tools/verify.mjs` PASS on the branch; local `ecformat check` PASS on the changed docs; PR #7 CI green; PR #7 merged into `vibe/main` with the M0 STATUS entry intact.
-- Out of scope: new M0 features (update feed, icons, CI Windows parity), any harness changes, any runner change.
+- Branch: `vibe/m0/windows-build` → PR #7 into `vibe/main`.
+- Delivered: resolved the PR #8 merge conflicts; fixed the guard shim so hyphen arguments pass through and `git push --force` still reports the hard-stop message; gave the GitHub CLI shim non-secret repository context; accepted an ASCII `-` docs header separator for ASCII-only files; and reconciled STATUS, BUILD, CHANGELOG, TECH_RADAR, and related docs/tests. Locked changes are covered by governance approvals 0006 and 0007.
+- Tests: `node vibe/tools/verify.mjs --strict` PASS (31/31 tests); new docs-check regression covers ASCII headers; the codex harness test confirms `git push --force` is blocked and `gh pr list` is not. Local `ecformat` is unavailable, so CI remains the final format gate.
+- Guardians: qa-verifier PASS after format fixes; drift-sentinel PASS after scope/proposal-location corrections; security-reviewer PASS; docs-keeper PASS; governance-verifier PASS for approvals 0006 and 0007. tech-scout not applicable (no dependency change); release-manager not applicable (not a milestone exit or release build).
+- Next: push this branch, wait for PR #7 CI green, merge it, then continue M0 with the own update feed, icons, CI Windows parity, and `-p` installer/zip smoke.
 
 ### 2026-11-20 — M0 reproducible Windows build (A1, G4)
 
@@ -30,6 +30,14 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 - Branding scan: only remaining `VSCodium` strings in `product.json` are `updateUrl`/`downloadUrl`/`serverDownloadUrlTemplate` (update feed — separate M0 slice); the built `package.json` keeps `@vscodium/*` npm dependency names (not user-visible).
 - Guardians: qa-verifier PASS (independently reproduced test-first red/green, verify suite 29/29, build evidence from log and artifacts); drift-sentinel PASS (scope inside card, no locked-doc contradiction, no dependency drift; notes: keep build-windows.log out of the commit, reh-URL hybrid resolves in the update-feed slice); security-reviewer PASS (no secrets, no new dependencies; residuals: update-feed trust concern until the own-feed slice, env identity values interpolated into sed unsanitized — hardening note); docs-keeper FAIL then PASS (five fixes applied: TECH_RADAR spectre row now truthful, resolved parked row removed, CHANGELOG ASSETS_REPOSITORY caveat, BUILD.md output path corrected, branding-scan attribution fixed); governance-verifier not applicable (no locked path changed — confirmed by governance.mjs status); tech-scout PASS (radar row truthful, version scheme 1.143.1+7795 explained, no missing rows); release-manager PASS (light review: no release created, CHANGELOG and evidence citable for RELEASE.md later).
 - Next M0 slices: own update feed repo activation, icons, then CI Windows build parity (G4) and `-p` installer/zip packaging smoke.
+
+### 2026-11-20 — F0 harness v2: Codex BYOK on OmniRoute + OpenCode fallback
+
+- Branch: `vibe/f0/codex-byok` → PR into `vibe/main`. Owner clarified Codex is wanted for the loop — on our own models (BYOK), never the ChatGPT subscription (ADR-0008).
+- Delivered: dual-harness runner — OmniRoute (forced first by health check) runs `codex exec` in the `workspace-write` sandbox with an isolated `CODEX_HOME` (no `auth.json` can exist); Morph direct and DeepInfra run OpenCode as the fallback because Codex no longer supports their API format. Morph classes: DeepSeek V4.1 Flash first (standard/cheap), GLM-5.3 for strong/review; Kimi removed per owner. Morph tools through `cmd /c npx` in both harnesses.
+- Evidence: `node vibe/tools/verify.mjs` PASS (29 tests incl. dry runs for both harnesses: BYOK config, writable roots, no auth.json, per-class agent TOMLs, deny rules, guard, secret removal); approval record 0005 written by the verifier running on Codex BYOK. Live earlier this session: codex exec on OmniRoute created files, ran commands, spawned a custom agent and listed the four Morph tools.
+- Note for the operator: `VIBECODIUM_GH_TOKEN` is not present in Windows user/machine environment variables as of 18:56 — the runner falls back to `GITHUB_TOKEN` until it exists.
+
 
 ### 2026-11-20 — F0 build harness: our own models (OpenCode + OmniRoute + Morph)
 

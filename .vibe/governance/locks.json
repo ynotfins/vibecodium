@@ -11,7 +11,7 @@
     },
     {
       "path": "AGENTS.md",
-      "sha256": "aa1d417a9d8b50c31831a18d36492c882fe3708a6cd36d340b7079032d25e7e5"
+      "sha256": "10b223e6971f6b4f4161437895400da535de3d9e1763116fc41d99a8c8e06d54"
     },
     {
       "path": "docs/vibe/ARCHITECTURE.md",
@@ -19,7 +19,7 @@
     },
     {
       "path": "docs/vibe/GOVERNANCE.md",
-      "sha256": "1394fa4469060ac7b4a2eb008acd969303db8404728885909eb9c8cea4b33490"
+      "sha256": "d59e66efbc7fa51603c9ac21500283fcc12d62589104601c42b596e89074d4eb"
     },
     {
       "path": "docs/vibe/PRODUCT_SPEC.md",
@@ -31,7 +31,7 @@
     },
     {
       "path": "vibe/goal/continue.prompt.md",
-      "sha256": "47d31d5f22913713a8ccc345cb8bd9b9a214ced028b8d588262e3c4cd6906d90"
+      "sha256": "03fb29d301c18a19ac708f65f4b03710bad7f86a80c325756c8fe69addfc0d92"
     },
     {
       "path": "vibe/goal/GOAL.md",
@@ -43,7 +43,7 @@
     },
     {
       "path": "vibe/goal/run-goal.ps1",
-      "sha256": "2e25fd003c97a0f8e3e4c51752946300acb74199f221f56058aafe92407f41a9"
+      "sha256": "05ddeaddcba1f6d3de2cb117bb32aeedf2595b4a1bcacd1f24b41426dfe4d832"
     },
     {
       "path": "vibe/tools/governance.mjs",

@@ -13,7 +13,7 @@ import { loadAgents } from './sync-agents.mjs';
 import { loadLocks } from './governance.mjs';
 import { isMain, parseArgs, readText, report, rootFrom, today, toPosix, walk } from './lib.mjs';
 
-const HEADER = /^> Doc class: (locked|living|generated|archive) · Owner: ([a-z][a-z-]*) · Last reviewed: (\d{4}-\d{2}-\d{2})\s*$/m;
+const HEADER = /^> Doc class: (locked|living|generated|archive) [-·] Owner: ([a-z][a-z-]*) [-·] Last reviewed: (\d{4}-\d{2}-\d{2})\s*$/m;
 
 function stripCode(text) {
   return text.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
@@ -36,7 +36,7 @@ export function checkDocs(root, { strict = false } = {}) {
     const text = readText(file);
     const head = text.split('\n').slice(0, 6).join('\n');
     const m = HEADER.exec(head);
-    if (!m) { errors.push(`${rel}: missing header "> Doc class: <class> · Owner: <agent> · Last reviewed: <YYYY-MM-DD>"`); continue; }
+    if (!m) { errors.push(`${rel}: missing header "> Doc class: <class> [-·] Owner: <agent> [-·] Last reviewed: <YYYY-MM-DD>"`); continue; }
     const [, cls, owner, reviewed] = m;
     if (!owners.has(owner)) errors.push(`${rel}: owner "${owner}" is not an agent in .vibe/agents/`);
     if (reviewed > today()) errors.push(`${rel}: Last reviewed date ${reviewed} is in the future`);

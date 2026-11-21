@@ -28,23 +28,41 @@ test('CI workflow: no default permissions, actions pinned by SHA, no persisted c
   assert.match(wf, /node vibe\/tools\/verify\.mjs/);
 });
 
-test('goal runner: OpenCode on our models, isolated config, secrets removed, governance-gated', () => {
+test('goal runner: codex BYOK on OmniRoute, opencode fallback, secrets removed, governance-gated', () => {
   const s = read('vibe/goal/run-goal.ps1');
-  assert.ok(s.includes("'--agent', 'vibe-overseer'"), 'must start OpenCode with the overseer agent');
-  assert.ok(!/codex/i.test(s), 'the build loop must not use Codex');
-  assert.ok(s.includes('$env:XDG_CONFIG_HOME') && s.includes('$env:XDG_DATA_HOME'), 'OpenCode must use its own config and data folders');
+  // Codex BYOK on an isolated home: no subscription login can exist there.
+  assert.ok(s.includes('$env:CODEX_HOME'), 'Codex must use its own home folder');
+  assert.ok(s.includes("'refusing: auth.json in the loop Codex home"), 'must refuse if auth.json appears');
+  assert.ok(s.includes('sandbox_mode = "workspace-write"') && s.includes('sandbox = "elevated"'));
+  assert.ok(s.includes('wire_api = "responses"'), 'Codex only supports the responses wire API');
+  assert.ok(s.includes('writable_roots = ["$rootToml", "$worktrees"]'));
+  assert.ok(s.includes('web_search = "disabled"'), 'OmniRoute cannot serve the hosted web_search tool');
+  // OpenCode fallback for providers Codex cannot reach (Morph/DeepInfra: no responses API).
+  assert.ok(s.includes('$env:XDG_CONFIG_HOME') && s.includes('$env:XDG_DATA_HOME'));
+  assert.ok(s.includes('cannot use the codex harness'), 'codex harness must be limited to OmniRoute');
+  // Both harnesses get the Morph tools through cmd (npx is a .cmd on Windows).
+  assert.ok(s.includes('"/c", "npx"') && s.includes('morphmcp@'));
+  // Secrets and hard stops.
   assert.ok(s.includes('Remove-Item -LiteralPath "Env:'), 'secret env vars must be removed');
   assert.ok(s.includes("$AllowedProviderKeys = @('OMNIROUTE_API_KEY', 'MORPH_API_KEY', 'DEEPINFRA_API_KEY')"));
-  assert.ok(s.includes("'git push --force*'") && s.includes("'gh release create*'") && s.includes("'gh auth*'"), 'hard-stop commands must be denied');
+  assert.ok(s.includes("'git push --force*'") && s.includes("'gh release create*'") && s.includes("'gh auth*'"));
   assert.ok(s.indexOf('governance.mjs') < s.indexOf('$p = Start-Process'), 'governance check must run before the session starts');
   assert.match(s, /while \(-not \$p\.WaitForExit\(30000\)\) \{\n\s+Set-TreeBelowNormal \$p\.Id/, 'session tree must be kept below normal priority');
   assert.match(s, /Get-FileHash -LiteralPath \$PSCommandPath\)\.Hash -ne \$selfHash/, 'runner must exit when its script changes');
   assert.match(s, /AddDays\(-14\)/);
 });
 
-test('model routing: OmniRoute first, Morph second, every class mapped, only allowed keys', () => {
+test('model routing: OmniRoute forced unless down, codex only for OmniRoute, Morph order', () => {
   const m = JSON.parse(read('vibe/goal/models.json'));
   assert.deepEqual(m.order.slice(0, 2), ['omniroute', 'morph']);
+  assert.equal(m.providers.omniroute.harness, 'codex');
+  assert.ok(!Object.values(m.providers.omniroute.classes).some((v) => ['agent', 'reasoning', 'review', 'cheap', 'default'].includes(v)), 'OmniRoute must use pinned model ids, not combos that can switch mid-session');
+  assert.equal(m.providers.morph.harness, 'opencode');
+  assert.equal(m.providers.deepinfra.harness, 'opencode');
+  const mc = m.providers.morph.classes;
+  assert.equal(mc.standard, 'morph-dsv41flash');
+  assert.equal(mc.strong, 'morph-glm53-744b');
+  assert.ok(!Object.values(mc).some((v) => /kimik?3/i.test(v)), 'no Kimi on Morph');
   for (const name of m.order) {
     const p = m.providers[name];
     assert.ok(['OMNIROUTE_API_KEY', 'MORPH_API_KEY', 'DEEPINFRA_API_KEY'].includes(p.keyEnv), `${name} key`);
@@ -82,32 +100,59 @@ function runnerFixture() {
   return { fx, logs: path.join(fx, 'logs') };
 }
 
-function dryRun({ fx, logs }) {
+function dryRun({ fx, logs }, provider) {
   const env = { ...process.env, FAKE_TEST_API_KEY: 'not-a-real-secret-123', VIBECODIUM_GH_TOKEN: 'scoped-test-token-456', MORPH_API_KEY: 'morph-test-key-789' };
-  const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', path.join(fx, 'vibe/goal/run-goal.ps1'), '-Root', fx, '-LogDir', logs, '-OpenCode', 'opencode-not-started', '-Provider', 'morph', '-DryRun'], { encoding: 'utf8', env });
+  const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', path.join(fx, 'vibe/goal/run-goal.ps1'), '-Root', fx, '-LogDir', logs, '-Codex', 'codex-not-started', '-OpenCode', 'opencode-not-started', '-Provider', provider, '-DryRun'], { encoding: 'utf8', env });
   return r.stdout + r.stderr;
 }
 
 test('goal runner refuses to start when its lock fails', { skip: WIN_PWSH }, () => {
   const f = runnerFixture();
   writeFileSync(path.join(f.fx, 'vibe/goal/continue.prompt.md'), 'tampered prompt\n');
-  const out = dryRun(f);
+  const out = dryRun(f, 'morph');
   assert.doesNotMatch(out, /DRYRUN/);
   const log = readFileSync(path.join(f.logs, readdirSync(f.logs).find((n) => n.startsWith('run-'))), 'utf8');
   assert.match(log, /governance check failed on trunk; refusing to start a session/);
 });
 
-test('goal runner dry run: own models per agent, Morph tools, deny rules, secrets removed', { skip: WIN_PWSH }, () => {
+test('codex harness: BYOK config, sandbox roots, no subscription login, Morph tools, secrets removed', { skip: WIN_PWSH }, () => {
   const f = runnerFixture();
-  const out = dryRun(f);
-  assert.match(out, /DRYRUN provider=morph /, out);
-  assert.match(out, /DRYRUN args=run "Follow the attached file exactly\.[^"]*" --agent vibe-overseer -m morph\/morph-glm53-744b --dir \S+ -f \S+continue\.prompt\.md\s*$/m, 'the message must come before -f');
+  const out = dryRun(f, 'omniroute');
+  assert.match(out, /DRYRUN harness=codex provider=omniroute/, out);
+  assert.match(out, /DRYRUN args=exec -C ".+" --skip-git-repo-check stdin=.*continue\.prompt\.md/);
   assert.match(out, /secret_vars_left=0 gh_token_source=VIBECODIUM_GH_TOKEN/);
+  // Hard stops are enforced mechanically on this path too, through the PATH guard.
+  const guard = out.match(/guard=(\S+)/)[1];
+  assert.ok(existsSync(path.join(guard, 'deny.txt')) && existsSync(path.join(guard, 'gh.cmd')));
+  const blocked = spawnSync('cmd', ['/c', path.join(guard, 'git.cmd'), 'push', '--force', 'origin', 'HEAD:x'], { encoding: 'utf8' });
+  assert.equal(blocked.status, 1, blocked.stdout + blocked.stderr);
+  assert.match(blocked.stderr, /blocked hard-stop command/);
+  const always = spawnSync('cmd', ['/c', path.join(guard, 'gh.cmd'), 'pr', 'list'], { encoding: 'utf8' });
+  assert.notEqual(always.status, 1, 'gh pr list must still work');
   assert.doesNotMatch(out, /not-a-real-secret-123|scoped-test-token-456|morph-test-key-789/);
-  const cfg = JSON.parse(readFileSync(out.match(/config=(\S+)/)[1], 'utf8'));
-  assert.equal(cfg.agent['governance-verifier'].model, 'morph/morph-kimik31');
+  const cfg = readFileSync(path.join(f.logs, 'codex-home', 'config.toml'), 'utf8');
+  assert.ok(cfg.includes('model_provider = "omniroute"\nmodel = "glm-5.3-flash"'));
+  assert.match(cfg, /base_url = "http:\/\/127\.0\.0\.1:20128\/v1"/);
+  const roots = (cfg.match(/writable_roots = \[([^\]]+)/) || [])[1].match(/"([^"]+)"/g).map((x) => x.slice(1, -1));
+  assert.ok(roots[1] === roots[0] + '.worktrees', `writes limited to the clone and its worktrees: ${roots}`);
+  assert.ok(!roots[0].includes('..'));
+  assert.match(cfg, /args = \["\/c", "npx", "-y", "@morphllm\/morphmcp@[\d.]+"\]/);
+  const agent = readFileSync(path.join(f.logs, 'codex-home', 'agents', 'governance-verifier.toml'), 'utf8');
+  assert.match(agent, /model = "glm-5\.3-flash"/);
+  const doc = readFileSync(path.join(f.logs, 'codex-home', 'agents', 'docs-keeper.toml'), 'utf8');
+  assert.match(doc, /model = "deepseek-v4\.1-flash"/);
+  assert.ok(!existsSync(path.join(f.logs, 'codex-home', 'auth.json')), 'a subscription login must never appear');
+});
+
+test('opencode fallback: own models per agent, Morph tools, deny rules, secrets removed', { skip: WIN_PWSH }, () => {
+  const f = runnerFixture();
+  const out = dryRun(f, 'morph');
+  assert.match(out, /DRYRUN harness=opencode provider=morph/, out);
+  assert.match(out, /args=run "Follow the attached file exactly\.[^"]*" --agent vibe-overseer -m morph\/morph-dsv41flash --dir \S+ -f \S+continue\.prompt\.md/, 'message must come before -f');
+  assert.match(out, /secret_vars_left=0/);
+  const cfg = JSON.parse(readFileSync(path.join(f.logs, 'opencode-home', 'config', 'opencode', 'opencode.json'), 'utf8'));
+  assert.equal(cfg.agent['governance-verifier'].model, 'morph/morph-glm53-744b');
   assert.equal(cfg.agent['docs-keeper'].model, 'morph/morph-dsv41flash');
-  assert.equal(cfg.provider.morph.options.apiKey, '{env:MORPH_API_KEY}');
   assert.ok(cfg.mcp.morph.command.join(' ').includes('@morphllm/morphmcp@'));
   assert.equal(cfg.permission.bash['git push --force*'], 'deny');
   assert.equal(cfg.permission.bash['*'], 'allow');

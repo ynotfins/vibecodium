@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
-  Autonomous goal loop for the Vibecodium build (ADR-0007).
+  Autonomous goal loop for the Vibecodium build (ADR-0008).
 
 .DESCRIPTION
-  Each iteration starts a fresh OpenCode session (`opencode run --agent vibe-overseer`) in the
-  dedicated clone with vibe/goal/continue.prompt.md attached. The session does one task slice and
-  records state in the repo. Models are our own, chosen per iteration from vibe/goal/models.json:
-  the first provider in "order" that answers a health check (OmniRoute, then Morph direct, then
-  DeepInfra). Each guardian sub-agent gets the model for its model_class.
+  Each iteration starts a fresh agent session in the dedicated clone. The harness depends on the
+  chosen provider (vibe/goal/models.json): OmniRoute (forced unless unavailable) runs Codex BYOK
+  with the OS sandbox; the fallbacks (Morph direct, DeepInfra) run OpenCode, because Codex does not
+  support their API format. Guardians are sub-agents; each gets the model for its model_class.
+  The Morph tools (WarpGrep, Fast Apply, GitHub search) are configured for both harnesses.
 
   The loop stops when docs/vibe/STATUS.md says "Goal state: complete" or "Goal state: blocked",
   when the daily iteration cap is reached, when no provider answers, after repeated failures, or
@@ -16,11 +16,12 @@
 
   Isolation (docs/vibe/GOVERNANCE.md §5 "Enforcement"):
   - Root is a dedicated clone used only by the loop.
-  - Every secret-looking environment variable is removed before OpenCode starts, except the model
+  - Every secret-looking environment variable is removed before the agent starts, except the model
     provider keys in $AllowedProviderKeys and GH_TOKEN. GH_TOKEN comes from VIBECODIUM_GH_TOKEN
     (a fine-grained token scoped to ynotfins/vibecodium) when it exists.
-  - OpenCode runs with its own generated config and data folders (no user config, MCP servers or
-    history leak in) and with deny rules for hard-stop shell commands.
+  - Codex runs with its own home folder (no subscription login, no user config) and writes limited
+    to the clone and its .worktrees folder; OpenCode runs with its own config and data folders and
+    a hard-stop deny list. Neither can see the owner's normal agent setup.
 
 .PARAMETER Root
   Dedicated clone of ynotfins/vibecodium, checked out on vibe/main.
@@ -31,6 +32,7 @@ param(
   [int]$MaxIterationsPerDay = 24,
   [int]$IterationTimeoutMinutes = 180,
   [int]$MaxConsecutiveFailures = 3,
+  [string]$Codex = '',
   [string]$OpenCode = '',
   # Use this provider from vibe/goal/models.json instead of health-checking (tests, manual runs).
   [string]$Provider = '',
@@ -46,12 +48,16 @@ function Write-Log([string]$m) { Add-Content -Path $log -Value ("{0}  {1}" -f (G
 
 try { [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = 'BelowNormal' } catch { }
 
+if (-not $Codex) { $Codex = (Get-Command codex.cmd -ErrorAction Stop).Source }
 if (-not $OpenCode) { $OpenCode = (Get-Command opencode -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source }
 
-# Git uses the GitHub CLI (and therefore GH_TOKEN) as its credential helper, for this process tree only.
-$env:GIT_CONFIG_COUNT = '2'
+# Git uses the GitHub CLI (and therefore GH_TOKEN) as its credential helper, for this process tree
+# only. OpenSSL is used because the elevated Codex sandbox cannot use Windows certificate channels.
+$env:GIT_CONFIG_COUNT = '3'
 $env:GIT_CONFIG_KEY_0 = 'credential.helper'; $env:GIT_CONFIG_VALUE_0 = ''
 $env:GIT_CONFIG_KEY_1 = 'credential.helper'; $env:GIT_CONFIG_VALUE_1 = '!gh auth git-credential'
+$env:GIT_CONFIG_KEY_2 = 'safe.directory'; $env:GIT_CONFIG_VALUE_2 = '*'
+$env:GIT_SSL_BACKEND = 'openssl'
 
 # Single instance.
 $lockFile = Join-Path $LogDir 'runner.lock'
@@ -125,13 +131,15 @@ function Add-TodayCount {
 function Get-Models {
   $models = Get-Content -Raw (Join-Path $Root 'vibe\goal\models.json') | ConvertFrom-Json
   foreach ($name in $models.order) {
-    $k = $models.providers.$name.keyEnv
-    if ($k -notin $AllowedProviderKeys) { throw "models.json: provider '$name' uses key '$k', which the runner does not allow" }
+    $p = $models.providers.$name
+    if ($p.keyEnv -notin $AllowedProviderKeys) { throw "models.json: provider '$name' uses key '$($p.keyEnv)', which the runner does not allow" }
+    if ($p.harness -notin 'codex', 'opencode') { throw "models.json: provider '$name' must set harness to 'codex' or 'opencode'" }
+    if ($p.harness -eq 'codex' -and $name -ne 'omniroute') { throw "models.json: '$name' cannot use the codex harness; Codex does not support its API format (OmniRoute only)" }
   }
   return $models
 }
 
-# First provider in models.order whose /models endpoint answers.
+# First provider in models.order whose /models endpoint answers. OmniRoute is forced unless down.
 function Select-Provider($models) {
   if ($Provider) { return $Provider }
   foreach ($name in $models.order) {
@@ -146,8 +154,7 @@ function Select-Provider($models) {
   return $null
 }
 
-# Hard-stop shell commands are denied (docs/vibe/GOVERNANCE.md §5). A deny list is not a sandbox;
-# the accepted residual risk is documented in GOVERNANCE.md.
+# Hard-stop shell commands are denied in the OpenCode fallback (docs/vibe/GOVERNANCE.md §5).
 $DeniedCommands = @(
   'git push --force*', 'git push -f*', 'git push * --force*', 'git push * -f*', 'git push --delete*', 'git push * --delete*', 'git push * :*',
   'git config --global*', 'git config --system*',
@@ -160,7 +167,115 @@ $DeniedCommands = @(
   'rm -rf /*', 'rm -rf ~*', 'rm -rf C:*', 'rm -rf /c*', 'rm -rf /d*', 'Remove-Item * -Recurse* C:\*'
 )
 
-# Generated OpenCode config: our providers, per-agent models, the Morph MCP tools, deny rules.
+# Mechanical hard-stop guard for both harnesses. The OpenCode config denies these patterns directly;
+# Codex has no deny rules, so a guard folder is put first on PATH with shims for the commands that can
+# cross a hard stop. Shims forward to the real executable after checking the same pattern list.
+function Write-GuardShims([string]$dir) {
+  New-Item -ItemType Directory -Force -Path $dir | Out-Null
+  Set-Content -Path (Join-Path $dir 'deny.txt') -Value ($DeniedCommands | ConvertTo-Json) -Encoding utf8NoBOM
+  $guardPs1 = @'
+$Cmd = [string]$args[0]
+$Real = [string]$args[1]
+$Mode = [string]$args[2]
+$Rest = @($args | Select-Object -Skip 3)
+$line = (@($Cmd) + $Rest) -join ' '
+if ($Mode -eq 'always') { [Console]::Error.WriteLine("Vibecodium guard: '$Cmd' is blocked in the build loop"); exit 1 }
+foreach ($p in (Get-Content -Raw (Join-Path $PSScriptRoot 'deny.txt') | ConvertFrom-Json)) {
+  if ($line -like $p) { [Console]::Error.WriteLine("Vibecodium guard: blocked hard-stop command: $line"); exit 1 }
+}
+& $Real @Rest
+exit $LASTEXITCODE
+'@
+  Set-Content -Path (Join-Path $dir 'guard.ps1') -Value $guardPs1 -Encoding utf8NoBOM
+  # Resolve the real programs before this folder joins PATH.
+  $targets = [ordered]@{
+    git = @{ mode = 'check' }; gh = @{ mode = 'check' }; npm = @{ mode = 'check' }; pnpm = @{ mode = 'check' }; yarn = @{ mode = 'check' }
+    winget = @{ mode = 'always' }; choco = @{ mode = 'always' }; schtasks = @{ mode = 'always' }; reg = @{ mode = 'always' }; diskpart = @{ mode = 'always' }
+  }
+  $pwshPath = (Get-Process -Id $PID).Path
+  foreach ($name in $targets.Keys) {
+    $real = $null
+    foreach ($ext in '.exe', '.cmd', '.bat') {
+      $c = Get-Command ($name + $ext) -CommandType Application -ErrorAction SilentlyContinue | Where-Object { $_.Source -notlike "$dir*" } | Select-Object -First 1
+      if ($c) { $real = $c.Source; break }
+    }
+    if (-not $real -and $targets[$name].mode -eq 'check') { continue }
+    $repoLine = if ($name -eq 'gh') { "set `"GH_REPO=ynotfins/vibecodium`"`r`n" } else { '' }
+    $shim = "@echo off`r`n$repoLine`"$pwshPath`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"%~dp0guard.ps1`" $name `"$real`" $($targets[$name].mode) %*`r`n"
+    Set-Content -Path (Join-Path $dir "$name.cmd") -Value $shim -Encoding ascii
+  }
+  return $dir
+}
+
+function Get-AgentDefs {
+  $defs = @()
+  foreach ($f in Get-ChildItem (Join-Path $Root '.vibe\agents') -Filter *.md) {
+    $t = Get-Content -Raw $f.FullName
+    $defs += [pscustomobject]@{
+      name = $f.BaseName
+      model_class = ([regex]::Match($t, '(?m)^model_class:\s*(\w+)')).Groups[1].Value
+      sandbox = ([regex]::Match($t, '(?m)^sandbox:\s*(\S+)')).Groups[1].Value
+      description = ([regex]::Match($t, '(?m)^description:\s*(.+)$')).Groups[1].Value.Trim()
+      body = ([regex]::Match($t, '(?s)---.*?---\s*(.+)$')).Groups[1].Value.Trim()
+    }
+  }
+  return $defs
+}
+
+# Codex gets its own home folder: no subscription login (auth.json can never exist there), no user
+# config, generated agents TOML with the model for each class, the Morph tools through cmd (npx is a
+# .cmd script on Windows), writes limited to the clone and its .worktrees folder.
+function Write-CodexConfig($models, [string]$chosen, [string]$codexHome) {
+  $defs = Get-AgentDefs
+  $p = $models.providers.$chosen
+  $classes = $p.classes
+  $rootToml = $Root -replace '\\', '/'
+  $worktrees = $rootToml + '.worktrees'
+  New-Item -ItemType Directory -Force -Path (Join-Path $codexHome 'agents') | Out-Null
+  $cfg = @"
+model_provider = "$chosen"
+model = "$($classes.standard)"
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+web_search = "disabled"
+
+[sandbox_workspace_write]
+network_access = true
+writable_roots = ["$rootToml", "$worktrees"]
+
+[windows]
+sandbox = "elevated"
+
+[model_providers.$chosen]
+name = "$($p.name)"
+base_url = "$($p.baseURL)"
+wire_api = "responses"
+env_key = "$($p.keyEnv)"
+requires_openai_auth = false
+
+[mcp_servers.morph]
+command = "cmd"
+args = ["/c", "npx", "-y", "@morphllm/morphmcp@$($models.morphMcpVersion)"]
+env_vars = ["MORPH_API_KEY"]
+startup_timeout_sec = 60
+"@
+  Set-Content -Path (Join-Path $codexHome 'config.toml') -Value $cfg -Encoding utf8NoBOM
+  foreach ($a in $defs) {
+    $toml = @"
+name = "$($a.name)"
+description = "$($a.description.Replace('"', '\"'))"
+model = "$($classes.($a.model_class))"
+sandbox_mode = "$(if ($a.sandbox -eq 'read-only') { 'read-only' } else { 'workspace-write' })"
+developer_instructions = '''
+$($a.body)
+'''
+"@
+    Set-Content -Path (Join-Path $codexHome "agents\$($a.name).toml") -Value $toml -Encoding utf8NoBOM
+  }
+  return $codexHome
+}
+
+# Generated OpenCode config (fallback harness): our providers, per-agent models, Morph tools, denies.
 function Write-OpenCodeConfig($models, [string]$chosen, [string]$configDir) {
   $providers = [ordered]@{}
   foreach ($name in $models.order) {
@@ -171,10 +286,7 @@ function Write-OpenCodeConfig($models, [string]$chosen, [string]$configDir) {
   }
   $classes = $models.providers.$chosen.classes
   $agents = [ordered]@{}
-  foreach ($f in Get-ChildItem (Join-Path $Root '.vibe\agents') -Filter *.md) {
-    $mc = (Select-String -Path $f.FullName -Pattern '^model_class:\s*(\w+)' | Select-Object -First 1).Matches[0].Groups[1].Value
-    $agents[$f.BaseName] = @{ model = "$chosen/$($classes.$mc)" }
-  }
+  foreach ($a in (Get-AgentDefs)) { $agents[$a.name] = @{ model = "$chosen/$($classes.($a.model_class))" } }
   $agents['compaction'] = @{ model = "$chosen/$($classes.cheap)" }
   $bash = [ordered]@{ '*' = 'allow' }
   foreach ($d in $DeniedCommands) { $bash[$d] = 'deny' }
@@ -186,7 +298,7 @@ function Write-OpenCodeConfig($models, [string]$chosen, [string]$configDir) {
     share = 'disabled'
     provider = $providers
     agent = $agents
-    mcp = @{ morph = [ordered]@{ type = 'local'; command = @('npx', '-y', "@morphllm/morphmcp@$($models.morphMcpVersion)"); environment = @{ MORPH_API_KEY = '{env:MORPH_API_KEY}' }; enabled = $true } }
+    mcp = @{ morph = [ordered]@{ type = 'local'; command = @('cmd', '/c', 'npx', '-y', "@morphllm/morphmcp@$($models.morphMcpVersion)"); environment = @{ MORPH_API_KEY = '{env:MORPH_API_KEY}' }; enabled = $true } }
     permission = [ordered]@{ edit = 'allow'; webfetch = 'allow'; external_directory = 'allow'; doom_loop = 'allow'; bash = $bash }
   }
   New-Item -ItemType Directory -Force -Path (Join-Path $configDir 'opencode') | Out-Null
@@ -226,35 +338,64 @@ try {
     $chosen = Select-Provider $models
     if (-not $chosen) { Write-Log 'no model provider answered; stopping until the next scheduled start'; break }
     $classes = $models.providers.$chosen.classes
+    $harness = $models.providers.$chosen.harness
 
-    # Own config and data folders: no user config, MCP servers or session history leak in or out.
-    $ocHome = Join-Path $LogDir 'opencode-home'
-    $env:XDG_CONFIG_HOME = (Join-Path $ocHome 'config') -replace '\\', '/'
-    $env:XDG_DATA_HOME = (Join-Path $ocHome 'data') -replace '\\', '/'
-    $configFile = Write-OpenCodeConfig $models $chosen (Join-Path $ocHome 'config')
-
-    if (-not $DryRun) { Add-TodayCount }
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "vibe-goal-$stamp"
     New-Item -ItemType Directory -Force -Path $tmp | Out-Null
     $promptFile = Join-Path $tmp 'continue.prompt.md'
     Copy-Item (Join-Path $Root 'vibe\goal\continue.prompt.md') $promptFile
-    Write-Log "iteration start ($stamp) provider=$chosen model=$chosen/$($classes.standard)"
 
-    # The message must come before -f: OpenCode's -f takes every following positional as a file.
-    $ocArgs = @('run', 'Follow the attached file exactly. It is your complete instruction set for this session.',
-      '--agent', 'vibe-overseer', '-m', "$chosen/$($classes.standard)", '--dir', $Root, '-f', $promptFile) |
-      ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }
+    if ($harness -eq 'codex') {
+      # Own home folder; auth.json must never exist here (a subscription cannot be used).
+      $env:CODEX_HOME = Join-Path $LogDir 'codex-home'
+      Write-CodexConfig $models $chosen $env:CODEX_HOME | Out-Null
+      if (Test-Path (Join-Path $env:CODEX_HOME 'auth.json')) { Write-Log 'refusing: auth.json in the loop Codex home (would use the subscription)'; break }
+      $exe = $Codex
+      $cmdArgs = "exec -C `"$Root`" --skip-git-repo-check"
+      $stdinFile = $promptFile
+      $modelDesc = "$chosen/$($classes.standard) (codex BYOK)"
+      Remove-Item Env:XDG_CONFIG_HOME, Env:XDG_DATA_HOME -ErrorAction SilentlyContinue
+    } else {
+      # Own config and data folders: no user config, MCP servers or session history leak in or out.
+      $ocHome = Join-Path $LogDir 'opencode-home'
+      $env:XDG_CONFIG_HOME = (Join-Path $ocHome 'config') -replace '\\', '/'
+      $env:XDG_DATA_HOME = (Join-Path $ocHome 'data') -replace '\\', '/'
+      Write-OpenCodeConfig $models $chosen (Join-Path $ocHome 'config') | Out-Null
+      $exe = $OpenCode
+      # The message must come before -f: OpenCode's -f takes every following positional as a file.
+      $cmdArgs = 'run "Follow the attached file exactly. It is your complete instruction set for this session." ' +
+        "--agent vibe-overseer -m $chosen/$($classes.standard) --dir `"$Root`" -f `"$promptFile`""
+      $stdinFile = $null
+      $modelDesc = "$chosen/$($classes.standard) (opencode)"
+    }
+
+    $guardDir = Write-GuardShims (Join-Path $LogDir 'guard')
+    $gitDir = Split-Path -Parent ((Get-Command git.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source)
+    if ($gitDir) { $env:PATH = "$guardDir;$gitDir;$env:PATH" } else { $env:PATH = "$guardDir;$env:PATH" }
+
+    if (-not $DryRun) { Add-TodayCount }
+    Write-Log "iteration start ($stamp) harness=$harness provider=$chosen model=$modelDesc"
+
     if ($DryRun) {
       $left = @(Get-ChildItem Env: | Where-Object { $_.Name -match $secretPattern -and $_.Name -notmatch '^GIT_CONFIG_' -and $_.Name -notin ($AllowedProviderKeys + 'GH_TOKEN') } | ForEach-Object Name)
-      Write-Output "DRYRUN provider=$chosen config=$configFile"
-      Write-Output "DRYRUN args=$($ocArgs -join ' ')"
+      Write-Output "DRYRUN harness=$harness provider=$chosen guard=$guardDir"
+      Write-Output "DRYRUN args=$cmdArgs stdin=$stdinFile"
       Write-Output "DRYRUN secrets_removed=$($script:SecretValues.Count) secret_vars_left=$($left.Count) gh_token_source=$ghSource"
       Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
       break
     }
-    $p = Start-Process -FilePath $OpenCode -ArgumentList ($ocArgs -join ' ') -WorkingDirectory $Root `
-      -RedirectStandardOutput (Join-Path $tmp 'out.txt') -RedirectStandardError (Join-Path $tmp 'err.txt') -WindowStyle Hidden -PassThru
+    $startArgs = @{
+      FilePath = $exe
+      ArgumentList = $cmdArgs
+      WorkingDirectory = $Root
+      RedirectStandardOutput = Join-Path $tmp 'out.txt'
+      RedirectStandardError = Join-Path $tmp 'err.txt'
+      WindowStyle = 'Hidden'
+      PassThru = $true
+    }
+    if ($stdinFile) { $startArgs.RedirectStandardInput = $stdinFile }
+    $p = Start-Process @startArgs
     # Keep the whole session tree below normal priority.
     $deadline = (Get-Date).AddMinutes($IterationTimeoutMinutes)
     Start-Sleep -Seconds 5

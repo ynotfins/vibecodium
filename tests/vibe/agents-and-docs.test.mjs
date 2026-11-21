@@ -84,6 +84,14 @@ test('missing header, unknown owner and broken link are errors', () => {
   assert.ok(errors.some((e) => /README.md does not link to LINK.md/.test(e)));
 });
 
+test('ascii separator passes docs header', () => {
+  minimalDocs();
+  write('docs/vibe/ASCII.md', `# x\n${HDR('living').replace(/·/g, '-')}\n`);
+  const readme = path.join(root, 'docs/vibe/README.md');
+  writeFileSync(readme, `${readFileSync(readme, 'utf8')} [ascii](ASCII.md)\n`);
+  assert.deepEqual(checkDocs(root).errors, []);
+});
+
 test('locked class must match locks.json', () => {
   minimalDocs();
   write('docs/vibe/VISION.md', `# v\n${HDR('locked')}\n`);

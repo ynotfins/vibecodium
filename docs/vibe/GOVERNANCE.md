@@ -6,7 +6,7 @@
 
 ## 1. Document classes
 
-Every Markdown file under `docs/vibe/` starts with a header line: `Doc class: <class> · Owner: <agent> · Last reviewed: <YYYY-MM-DD>`.
+Every Markdown file under `docs/vibe/` starts with a header line: `Doc class: <class> · Owner: <agent> · Last reviewed: <YYYY-MM-DD>`. An ASCII `-` may replace either `·` separator when the file must remain ASCII-only.
 
 | Class | Meaning | Who may change it |
 |---|---|---|
@@ -35,7 +35,7 @@ Honest limit: this is a process lock, not a security boundary. A determined agen
 
 ## 4. The after-every-task chain
 
-Every task slice, by any agent, ends with this chain before it is committed. Each guardian is a separate sub-agent defined in `.vibe/agents/` (OpenCode copies are generated into `.opencode/agent/`; each declares a model class that the runner maps to one of our models).
+Every task slice, by any agent, ends with this chain before it is committed. Each guardian is a separate sub-agent defined in `.vibe/agents/` (generated for the active harness by the runner; OpenCode copies for interactive use live in `.opencode/agent/`). Each declares a model class that the runner maps to one of our models.
 
 | Order | Guardian | Runs when | Blocks on |
 |---|---|---|---|
@@ -59,22 +59,24 @@ The owner granted full autonomy for the build (UNLOCK of `D:\vscodium\AGENTS.md`
 
 ### Enforcement
 
-Instructions alone are not a boundary, so the loop is also constrained mechanically. The loop runs on our own models through OpenCode (ADR-0007); OpenCode has no operating-system sandbox, so the controls are:
+Instructions alone are not a boundary, so the loop is also constrained mechanically. The loop runs on our own models (ADR-0008): OmniRoute first through **Codex BYOK** (with the OS sandbox), the fallback providers through OpenCode. The controls are:
 
-- The goal loop runs in a dedicated clone used by nothing else, so a mistake cannot touch the owner's other checkouts through git.
-- Secret-looking environment variables (API keys, tokens, passwords, database URLs) are removed from the runner before OpenCode starts. Only the model-provider keys the runner allows (OmniRoute, Morph, DeepInfra) and `GH_TOKEN` are passed on. `GH_TOKEN` comes from a fine-grained token scoped to this repository (`VIBECODIUM_GH_TOKEN`) when the owner has created one; otherwise the runner falls back to the owner's `GITHUB_TOKEN` and logs a warning.
-- OpenCode runs with its own generated config and data folders, so the owner's MCP servers, global rules and session history are neither loaded nor modified.
-- Hard-stop shell commands are denied by OpenCode permission rules: force-push and remote branch deletion, release creation or editing, repository deletion or settings, GitHub auth and secrets, package publishing, software installs, environment dumps, global git config, scheduled tasks, registry edits and recursive deletes of system paths.
+- The goal loop runs in a dedicated clone used by nothing else.
+- On OmniRoute, Codex runs in the `workspace-write` sandbox with writes limited to that clone and its `.worktrees` folder; the owner's other checkouts and files cannot be modified. Codex uses its own home folder with no subscription login (`auth.json` can never exist; the runner refuses to start if one appears), so the ChatGPT subscription cannot be billed.
+- Hard-stop commands are blocked on **both** harnesses: force-push and remote branch deletion, release creation or editing, repository deletion or settings, GitHub auth and secrets, package publishing, software installs, environment dumps, global git config, scheduled tasks, registry edits and recursive deletes of system paths. OpenCode denies them through its permission rules; for Codex a generated guard folder goes first on PATH with shims (git, gh, npm, pnpm, yarn) that refuse matching command lines, and hard blocks for winget, choco, schtasks, reg and diskpart.
+- The fallback harness (OpenCode, for Morph/DeepInfra, which Codex cannot reach) has no OS sandbox; the guard and its deny rules are its main mechanical control.
+- Secret-looking environment variables (API keys, tokens, passwords, database URLs) are removed from the runner before the agent starts. Only the model-provider keys the runner allows (OmniRoute, Morph, DeepInfra) and `GH_TOKEN` are passed on. `GH_TOKEN` comes from a fine-grained token scoped to this repository (`VIBECODIUM_GH_TOKEN`) when the owner has created one; otherwise the runner falls back to the owner's `GITHUB_TOKEN` and logs a warning.
+- Both harnesses run with their own generated config, home and data folders, so the owner's MCP servers, global rules and session history are neither loaded nor modified.
 - GitHub branch protection on `master` and `vibe/main` forbids force-pushes and branch deletion.
 - Runner logs keep only short summaries with secret values redacted; raw agent event streams are never written to disk. Logs are deleted after 14 days.
 
-Accepted residual risks (owner decision 2026-11-20: run the build on our own models instead of a sandboxed vendor agent):
+Accepted residual risks (owner decision 2026-11-20: run the build on our own models):
 
-- No operating-system sandbox: a shell command that the deny list does not anticipate can write anywhere the owner's account can. `tech-scout` evaluates sandbox-runtime for the loop at M6 start, when the product needs it anyway.
+- During fallback windows (OmniRoute down), no operating-system sandbox: a shell command that the deny list does not anticipate can write anywhere the owner's account can. `tech-scout` evaluates sandbox-runtime for the loop at M6 start, when the product needs it anyway.
 - Network access is open, not allowlisted, because research, package registries and provider docs are part of the work. Prompt injection from web content could cause outbound requests.
 - The model-provider keys and the GitHub credential are readable by the agent. Scope GitHub with `VIBECODIUM_GH_TOKEN` to limit the blast radius; provider keys should carry spending limits at the provider.
 - The runner and the lock live in the same user-writable clone and the scheduled task uses `-ExecutionPolicy Bypass` (required by the workstation's silent-automation policy). A process already running as the owner could replace both; that attacker already controls the account, so script signing would add little.
-- The in-product quarantine of untrusted content (SECURITY.md) lands with M6; until then the build loop relies on secret removal, the deny list and server-side branch protection.
+- The in-product quarantine of untrusted content (SECURITY.md) lands with M6; until then the build loop relies on the sandbox (or deny list), secret removal and server-side branch protection.
 
 ### Hard stops (always pause, in every mode)
 
