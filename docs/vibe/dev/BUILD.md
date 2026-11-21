@@ -1,6 +1,6 @@
 # Building Vibecodium on Windows
 
-> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-21
+> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-21
 
 Vibecodium builds with VSCodium's scripts. Run everything in **Git Bash** from the repository root.
 
@@ -16,7 +16,7 @@ Vibecodium builds with VSCodium's scripts. Run everything in **Git Bash** from t
 | Visual Studio Build Tools | 2022 with the C++ workload | |
 | MSVC Spectre-mitigated libraries | component `Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre` | Required by VS Code's native modules (MSB8040 without it). Install from an **elevated** PowerShell, see below |
 
-If the Spectre libraries are missing, add them (one time, needs administrator rights):
+Add the Spectre libraries (one time, needs administrator rights) - *not yet verified: operator-only step, waiting for the owner.*
 
 ```powershell
 & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe" modify --installPath "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools" --add Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre --passive --norestart
@@ -28,18 +28,48 @@ Check everything:
 bash vibe/dev/preflight.sh
 ```
 
-Every line must say `PASS`. *Verified 2026-11-20 (all PASS, including `spectre`).* The `spectre` component is installed on the build workstation.
+Every line must say `PASS` - *verified 2026-11-20 (all PASS except `spectre`).*
 
 ## 2. Build
 
-```bash
-bash vibe/dev/build-windows.sh       # app only
-bash vibe/dev/build-windows.sh -p    # app plus installer .exe and zip (not yet verified in this slice)
+### Update-feed manifests — local staging only
+
+To prepare the platform-scoped `latest.json` files for the own update feed without publishing, create a release manifest containing the product fields and one entry per artifact:
+
+```json
+{
+   "name": "Vibecodium",
+   "version": "1.147.0",
+   "commit": "<commit>",
+   "date": "YYYY-MM-DD",
+   "quality": "stable",
+   "assets": [
+      {
+         "platform": "win32",
+         "architecture": "x64",
+         "target": "system",
+         "path": "Vibecodium-x64-system.exe",
+         "sha256": "<64-hex-checksum>",
+         "size": 123456
+      }
+   ]
+}
 ```
 
-*Verified 2026-11-20 for the app-only build on the build workstation (preflight PASS including `spectre`; full build from clean clone through `npm ci`, native modules, compile and `vscode-win32-x64-min-packing`, producing `VSCode-win32-x64/` in the repository root, branded as Vibecodium).* The wrapper runs the preflight, pins node-gyp to Python 3.11 and calls `dev/build.sh` with the same flags. The `-p` installer/zip smoke remains pending. Output appears in the repository root (`VSCode-win32-x64/`, beside the `vscode` checkout).
+Run the generator against a non-public staging folder:
 
-The build stamps the Vibecodium identity from `dev/build.sh` defaults (`APP_NAME=Vibecodium`, `BINARY_NAME=vibecodium`, `GH_REPO_PATH=ynotfins/vibecodium`, `ORG_NAME=Vibecodium`); each respects a pre-set environment value, which is how CI injects its own.
+```bash
+node vibe/tools/update-feed.mjs --manifest release.json --out ../update-feed-staging --asset-url-root https://releases.example.com/vibecodium/1.147.0
+```
+
+The generator validates the update-service fields, requires a SHA-256 checksum and size for every artifact, emits `sha256hash`, and writes one manifest per quality/platform/architecture combination, with an extra target segment for Windows installer and archive assets. `version` follows the updater contract as the commit and `productVersion` as the semver product version. It does not upload or publish anything.
+
+```bash
+bash vibe/dev/build-windows.sh       # app only
+bash vibe/dev/build-windows.sh -p    # app plus installer .exe and zip
+```
+
+*Verified 2026-11-20 up to `npm install`, which fails with MSB8040 until the Spectre libraries are installed.* The wrapper runs the preflight, pins node-gyp to Python 3.11 and calls `dev/build.sh` with the same flags. Output appears beside the repository folder (`../VSCode-win32-x64/`).
 
 ## 3. Checks before committing
 
