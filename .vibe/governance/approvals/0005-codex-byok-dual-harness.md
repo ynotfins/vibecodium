@@ -1,0 +1,11 @@
+# Governance approval 0005: codex-byok-dual-harness
+
+verifier: governance-verifier
+verdict: PASS
+date: 2026-11-21
+proposal: .vibe/governance/proposals/2026-11-20-codex-byok-dual-harness.md
+
+lock: AGENTS.md aa1d417a9d8b50c31831a18d36492c882fe3708a6cd36d340b7079032d25e7e5 -> 10b223e6971f6b4f4161437895400da535de3d9e1763116fc41d99a8c8e06d54
+lock: docs/vibe/GOVERNANCE.md 1394fa4469060ac7b4a2eb008acd969303db8404728885909eb9c8cea4b33490 -> a0efac1c4c1ecc376be93237847bdeb895ae2d89f84b5046b6ddf770f76098a3
+lock: vibe/goal/run-goal.ps1 2e25fd003c97a0f8e3e4c51752946300acb74199f221f56058aafe92407f41a9 -> ce0e1f20afe58f1747193cd57ef8f028fca7d53e8a3e903b5303045744139ae0
+lock: vibe/goal/continue.prompt.md 47d31d5f22913713a8ccc345cb8bd9b9a214ced028b8d588262e3c4cd6906d90 -> 03fb29d301c18a19ac708f65f4b03710bad7f86a80c325756c8fe69addfc0d92

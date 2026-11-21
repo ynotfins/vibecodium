@@ -1,25 +1,47 @@
 {
-  "$comment": "Model routing for the autonomous build loop (ADR-0007). The runner health-checks providers in 'order' and uses the first that answers. Each agent in .vibe/agents declares a model_class; 'classes' maps it to a model on the chosen provider. keyEnv must be one of the provider keys the runner allows (OMNIROUTE_API_KEY, MORPH_API_KEY, DEEPINFRA_API_KEY). Tuned by tech-scout; no governance approval needed for model names.",
-  "order": ["omniroute", "morph", "deepinfra"],
+  "$comment": "Model routing for the autonomous build loop (ADR-0008). The runner health-checks providers in 'order' and uses the first that answers: OmniRoute is forced unless it is unavailable, then Morph direct, then DeepInfra. 'harness' picks the agent program for that provider: 'codex' (BYOK, OS sandbox; OmniRoute only - Codex no longer supports the chat API format so it cannot reach Morph/DeepInfra) or 'opencode'. Each agent declares a model_class; 'classes' maps it to a model on that provider. keyEnv must be one of the provider keys the runner allows. Tuned by tech-scout; no governance approval needed for model names. Pinned model ids are used instead of OmniRoute 'combos' because a combo can switch the underlying model mid-session, which breaks Codex's pinned turn and provider prompt caching.",
+  "order": [
+    "omniroute",
+    "morph",
+    "deepinfra"
+  ],
   "morphMcpVersion": "0.8.222",
   "providers": {
     "omniroute": {
       "name": "OmniRoute (local smart router)",
       "baseURL": "http://127.0.0.1:20128/v1",
       "keyEnv": "OMNIROUTE_API_KEY",
-      "classes": { "strong": "reasoning", "standard": "agent", "review": "review", "cheap": "cheap" }
+      "classes": {
+        "strong": "glm-5.3-flash",
+        "standard": "glm-5.3-flash",
+        "review": "glm-5.3-flash",
+        "cheap": "deepseek-v4.1-flash"
+      },
+      "harness": "codex"
     },
     "morph": {
       "name": "Morph (direct)",
       "baseURL": "https://api.morphllm.com/v1",
       "keyEnv": "MORPH_API_KEY",
-      "classes": { "strong": "morph-kimik31", "standard": "morph-glm53-744b", "review": "morph-glm53-744b", "cheap": "morph-dsv41flash" }
+      "classes": {
+        "strong": "morph-glm53-744b",
+        "standard": "morph-dsv41flash",
+        "review": "morph-glm53-744b",
+        "cheap": "morph-dsv41flash"
+      },
+      "harness": "opencode"
     },
     "deepinfra": {
       "name": "DeepInfra (direct)",
       "baseURL": "https://api.deepinfra.com/v1/openai",
       "keyEnv": "DEEPINFRA_API_KEY",
-      "classes": { "strong": "deepseek-ai/DeepSeek-V4-Pro", "standard": "deepseek-ai/DeepSeek-V4-Pro", "review": "deepseek-ai/DeepSeek-V4-Pro", "cheap": "deepseek-ai/DeepSeek-V4-Pro" }
+      "classes": {
+        "strong": "deepseek-ai/DeepSeek-V4-Pro",
+        "standard": "deepseek-ai/DeepSeek-V4-Pro",
+        "review": "deepseek-ai/DeepSeek-V4-Pro",
+        "cheap": "deepseek-ai/DeepSeek-V4-Pro"
+      },
+      "harness": "opencode"
     }
   }
 }
