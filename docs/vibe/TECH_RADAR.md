@@ -31,7 +31,7 @@ Rings: `adopt` (in use, keep), `trial` (in use, under evaluation), `assess` (wat
 | Build toolchain: jq | jq | 1.8.2 | 1.8.2 | 2026-11-20 | — | adopt | 2026-12-04 |
 | Build toolchain: 7-Zip | 7-Zip | installed (Program Files) | — | 2026-11-20 | — | adopt | 2026-12-04 |
 | Build toolchain: MSVC | Visual Studio Build Tools 2022, C++ workload | 17.14 | — | 2026-11-20 | Build Tools 2026 (assess) | adopt | 2026-12-04 |
-| Build toolchain: Spectre libraries | MSVC Spectre-mitigated runtimes component | missing on workstation (parked) | — | 2026-11-20 | — | adopt | 2026-11-27 |
+| Build toolchain: Spectre libraries | MSVC Spectre-mitigated runtimes component (`Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre`) | installed on workstation 2026-11-20 (vswhere; `lib\spectre\x64\msvcrt.lib`); preflight PASS; used by the successful M0 full build | — | 2026-11-20 | — | adopt | 2026-12-04 |
 | Build orchestrator agent | OpenCode (same harness as the product) | 1.19.5 | 1.19.6 (2026-11-17, waiting out 7 days); 2.3.2 (2026-11-18) | 2026-11-20 | Codex CLI (owner decision: not used for this build), OpenHands automations. Workstation also has an older npm `opencode-ai` 1.18.31 earlier on PATH inside agent shells; the runner resolves the native 1.19.5 binary | adopt | 2026-11-27 |
 | Agent harness major version | OpenCode 2.x (new config format: `agents`, `permissions` lists) | — | v2.3.2 (2026-11-18) | 2026-11-20 | stay on 1.19.x | assess | 2026-11-27 |
 | Build models: primary | OmniRoute combos `agent`, `reasoning`, `review`, `cheap` | 3.8.53 (workstation) | — | 2026-11-20 | Bifrost routing rules | adopt | 2026-11-27 |

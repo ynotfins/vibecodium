@@ -13,3 +13,4 @@ All notable user-visible changes to Vibecodium. Format: [Keep a Changelog](https
 ### Changed
 
 - Stable-build product identity defaults now use Vibecodium, including a distinct Windows application identity and artifact base name.
+- `dev/build.sh` identity exports (`APP_NAME`, `BINARY_NAME`, `GH_REPO_PATH`, `ORG_NAME`) now respect pre-set environment values and default to the Vibecodium identity, so the build stamps patch placeholders and names artifacts with Vibecodium branding instead of VSCodium's. `ASSETS_REPOSITORY` keeps the upstream `VSCodium/vscodium` assets feed until the own-update-feed slice.

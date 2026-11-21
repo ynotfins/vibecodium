@@ -5,12 +5,15 @@
 # to run with Bash: "C:\Program Files\Git\bin\bash.exe" ./dev/build.sh
 ###
 
-export APP_NAME="VSCodium"
-export ASSETS_REPOSITORY="VSCodium/vscodium"
-export BINARY_NAME="codium"
+# Identity defaults mirror utils.sh (Vibecodium branding). Each export respects a
+# pre-set value so CI environments (which inject APP_NAME etc.) still work; the
+# defaults below are what the wrapper `vibe/dev/build-windows.sh` builds with.
+export APP_NAME="${APP_NAME:-Vibecodium}"
+export ASSETS_REPOSITORY="${ASSETS_REPOSITORY:-VSCodium/vscodium}"
+export BINARY_NAME="${BINARY_NAME:-vibecodium}"
 export CI_BUILD="no"
-export GH_REPO_PATH="VSCodium/vscodium"
-export ORG_NAME="VSCodium"
+export GH_REPO_PATH="${GH_REPO_PATH:-ynotfins/vibecodium}"
+export ORG_NAME="${ORG_NAME:-Vibecodium}"
 export SHOULD_BUILD="yes"
 export SKIP_ASSETS="yes"
 export SKIP_BUILD="no"
@@ -23,7 +26,7 @@ while getopts ":ilops" opt; do
   case "$opt" in
     i)
       export ASSETS_REPOSITORY="VSCodium/vscodium-insiders"
-      export BINARY_NAME="codium-insiders"
+      export BINARY_NAME="vibecodium-insiders"
       export VSCODE_QUALITY="insider"
       ;;
     l)

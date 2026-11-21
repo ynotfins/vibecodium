@@ -10,6 +10,18 @@ Current milestone: M0 (in progress)
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
 
+### 2026-11-20 — M0 reproducible Windows build (A1, G4)
+
+- Branch: `vibe/m0/windows-build` → PR into `vibe/main`.
+- Goal: the parked MSVC Spectre-mitigated libraries are installed on the workstation (vswhere reports the component; `lib\spectre\x64\msvcrt.lib` present), so run the first full Vibecodium-branded Windows build and capture A1 acceptance evidence.
+- Must-haves: A1 (rebranded build reports its own name and version), G4 evidence baseline (local build script runs end to end on Windows).
+- Delivered: `dev/build.sh` identity exports (`APP_NAME`, `ASSETS_REPOSITORY`, `BINARY_NAME`, `GH_REPO_PATH`, `ORG_NAME`) now use `${VAR:-default}` form, defaulting to the Vibecodium identity from `utils.sh` instead of upstream's hardcoded VSCodium values, so patch placeholders (`!!APP_NAME!!`, `!!ORG_NAME!!`, `!!GH_REPO_PATH!!`) and artifact names stamp Vibecodium branding. Insider flag keeps insider identity (`vibecodium-insiders`). `ASSETS_REPOSITORY` stays on the upstream assets repo until the update-feed slice (deferred by task card).
+- Tests: new `dev/build.sh must not defeat the branded identity defaults` in `tests/vibe/branding.test.mjs` (written first, red, then green); `node vibe/tools/verify.mjs` PASS (governance, agents, docs, 29 tests).
+- Build evidence (A1, G4 baseline): `bash vibe/dev/preflight.sh` all PASS including `spectre`; full `bash vibe/dev/build-windows.sh` from clean clone of VS Code 1.143.1 → EXIT=0 in ~37 min (npm ci incl. native modules with Spectre libs, compile, `vscode-win32-x64-min-packing` 5.73 min, REH 2.72 min). Output `VSCode-win32-x64/`: `Vibecodium.exe` (FileVersion/ProductVersion 1.143.17795, ProductName/FileDescription/CompanyName Vibecodium), `bin/vibecodium{,.cmd,-tunnel.exe}`, `resources/app/product.json` reports nameShort/nameLong `Vibecodium`, `applicationName vibecodium`, `dataFolderName .vibecodium`, `serverApplicationName vibecodium-server`, `urlProtocol vibecodium`, `win32AppUserModelId Vibecodium.Vibecodium`, quality stable; `policies/Vibecodium.admx` (group policy namespace `Software\Policies\Vibecodium`); CLI smoke: `bin/vibecodium --version` → `1.143.17795`, `bin/vibecodium-tunnel.exe --version` → `vibecodium 1.143.17795`.
+- Branding scan: only remaining `VSCodium` strings in `product.json` are `updateUrl`/`downloadUrl`/`serverDownloadUrlTemplate` (update feed — separate M0 slice); the built `package.json` keeps `@vscodium/*` npm dependency names (not user-visible).
+- Guardians: qa-verifier PASS (independently reproduced test-first red/green, verify suite 29/29, build evidence from log and artifacts); drift-sentinel PASS (scope inside card, no locked-doc contradiction, no dependency drift; notes: keep build-windows.log out of the commit, reh-URL hybrid resolves in the update-feed slice); security-reviewer PASS (no secrets, no new dependencies; residuals: update-feed trust concern until the own-feed slice, env identity values interpolated into sed unsanitized — hardening note); docs-keeper FAIL then PASS (five fixes applied: TECH_RADAR spectre row now truthful, resolved parked row removed, CHANGELOG ASSETS_REPOSITORY caveat, BUILD.md output path corrected, branding-scan attribution fixed); governance-verifier not applicable (no locked path changed — confirmed by governance.mjs status); tech-scout PASS (radar row truthful, version scheme 1.143.1+7795 explained, no missing rows); release-manager PASS (light review: no release created, CHANGELOG and evidence citable for RELEASE.md later).
+- Next M0 slices: own update feed repo activation, icons, then CI Windows build parity (G4) and `-p` installer/zip packaging smoke.
+
 ### 2026-11-20 — F0 build harness: our own models (OpenCode + OmniRoute + Morph)
 
 - Branch: `vibe/f0/opencode-harness` → PR into `vibe/main`. Owner decision: the build must not use Codex as its primary agent; it runs on our own models (ADR-0007).
@@ -44,7 +56,6 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 | Item | Why it needs the owner | Default until decided |
 |---|---|---|
 | Create a fine-grained GitHub token for the goal loop | Only the owner can mint tokens. Scope: repository `ynotfins/vibecodium`, permissions Contents and Pull requests read/write; store as User environment variable `VIBECODIUM_GH_TOKEN` | Loop uses the owner's broad `GITHUB_TOKEN` and logs a warning |
-| Install MSVC Spectre-mitigated libraries | Needs an elevated (administrator) PowerShell; command in `dev/BUILD.md` §1 | M0 build acceptance waits; other work continues |
 | Code-signing route | Paid certificate vs SignPath Foundation (free for open source, needs an application) | Unsigned builds; Windows SmartScreen shows "More info → Run anyway" |
 | Public repository | `ynotfins/vibecodium` is a public fork; GitHub forks cannot be made private. A closed-source product needs a separate private repository | Continue in the public fork; no secrets or machine details in the repo |
 | Product name and trademark check for "Vibecodium" | Legal decision | Working name stays "Vibecodium" |
