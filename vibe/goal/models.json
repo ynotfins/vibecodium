@@ -1,5 +1,5 @@
 {
-  "$comment": "Model routing for the autonomous build loop (ADR-0008). The runner health-checks providers in 'order' and uses the first that answers: OmniRoute is forced unless it is unavailable, then Morph direct, then DeepInfra. 'harness' picks the agent program for that provider: 'codex' (BYOK, OS sandbox; OmniRoute only - Codex no longer supports the chat API format so it cannot reach Morph/DeepInfra) or 'opencode'. Each agent declares a model_class; 'classes' maps it to a model on that provider. keyEnv must be one of the provider keys the runner allows. Tuned by tech-scout; no governance approval needed for model names. Pinned model ids are used instead of OmniRoute 'combos' because a combo can switch the underlying model mid-session, which breaks Codex's pinned turn and provider prompt caching. Default model is requesty/deepseek/deepseek-v4.1-flash-1017 (owner choice, verified on both /v1/chat/completions and /v1/responses). The bare deepseek/... route returns 402 (no balance) so the Requesty route is pinned; openrouter/deepseek/deepseek-v4.1-flash-1017 is the equivalent alternative.",
+  "$comment": "Model routing for the autonomous build loop (ADR-0008). The runner health-checks providers in 'order' and uses the first that answers: OmniRoute is forced unless it is unavailable, then Morph direct, then DeepInfra. 'harness' picks the agent program for that provider: 'codex' (BYOK, OS sandbox; OmniRoute only - Codex no longer supports the chat API format so it cannot reach Morph/DeepInfra) or 'opencode'. Each agent declares a model_class; 'classes' maps it to a model on that provider. keyEnv must be one of the provider keys the runner allows. Tuned by tech-scout; no governance approval needed for model names. Pinned model ids are used instead of OmniRoute 'combos' because a combo can switch the underlying model mid-session, which breaks Codex's pinned turn and provider prompt caching. Default model is openrouter/deepseek/deepseek-v4.1-flash-1017 (owner choice, OpenRouter credits restored; verified on both /v1/chat/completions and /v1/responses). The bare deepseek/... route returns 402 (no balance) so the Requesty route is pinned; openrouter/deepseek/deepseek-v4.1-flash-1017 is the equivalent alternative.",
   "order": [
     "omniroute",
     "morph",
@@ -12,10 +12,10 @@
       "baseURL": "http://127.0.0.1:20128/v1",
       "keyEnv": "OMNIROUTE_API_KEY",
       "classes": {
-        "strong": "requesty/deepseek/deepseek-v4.1-flash-1017",
-        "standard": "requesty/deepseek/deepseek-v4.1-flash-1017",
-        "review": "requesty/deepseek/deepseek-v4.1-flash-1017",
-        "cheap": "requesty/deepseek/deepseek-v4.1-flash-1017"
+        "strong": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "standard": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "review": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "cheap": "openrouter/deepseek/deepseek-v4.1-flash-1017"
       },
       "harness": "codex"
     },
