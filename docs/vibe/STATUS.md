@@ -13,11 +13,11 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 
 ### 2026-11-21 — M0 Windows packaging smoke (parked after tooling)
 
-- Goal / must-haves: produce and verify the Windows system installer, user installer, and portable zip from a local `-p` build. This addresses the remaining M0 artifact smoke and builds the repeatable evidence tool needed for G1 later.
-- Must-have IDs: A1 (packaged identity/version check), G1 (Windows artifact smoke only), G4 (local artifact parity evidence).
+- Goal / must-haves: create and test a local verifier for Windows system installer, user installer, and portable zip artifacts. This supports later M0 artifact work but claims no G1 or G4 acceptance.
+- Must-have IDs: A1 (partial packaged identity/version check only).
 - Files allowed: `vibe/tools/windows-packaging-smoke.mjs`, `tests/vibe/windows-packaging-smoke.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/STATUS.md`.
 - Files forbidden: upstream source, build scripts, CI workflows, release publication, signing policy, installer assets, dependencies.
-- Acceptance commands: `node --test tests/vibe/windows-packaging-smoke.test.mjs`, `source dev/build.env && node vibe/tools/windows-packaging-smoke.mjs --assets assets --name Vibecodium --version "$RELEASE_VERSION" --commit "$BUILD_SOURCEVERSION"`, `node vibe/tools/verify.mjs`.
+- Acceptance commands: `node --test tests/vibe/windows-packaging-smoke.test.mjs`, `node vibe/tools/verify.mjs`. The documented artifact-smoke command is not an acceptance claim because the required local `-p` build remains parked.
 - Out of scope: clean-machine install/uninstall, MSI generation, signing, publishing a release, creating a feed repository, changing CI or build scripts.
 - Branch: `vibe/m0/windows-packaging-smoke` → PR into `vibe/main`.
 - Delivered: `vibe/tools/windows-packaging-smoke.mjs` validates the three required local Windows artifacts, computes SHA-256 for each, checks the portable zip contents, and reads the packaged app identity/version/commit from `resources/app`. `docs/vibe/dev/BUILD.md` documents the command. The actual `-p` packaging run remains parked.
@@ -25,7 +25,7 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 - Blocked artifact smoke: the three attempts stopped in environment/cache setup before compilation, so the `-p` build and this smoke remain unverified; no product-code dependency is known to be missing. The full acceptance still requires a successful `-p` build plus the packaging smoke command above.
 - Guardians: qa-verifier PASS after fixing a false-pass CLI guard and adding the nonzero-exit test; drift-sentinel PASS after removing build cache, enforcing packaged commit identity, and adding the “Parked for owner” row; security-reviewer PASS; docs-keeper PASS after correcting the smoke command to build-stamped values and documenting the 7-Zip prerequisite; governance-verifier PASS as not applicable (no locked path changed); tech-scout PASS as not applicable (no new dependency); release-manager PASS as not applicable (no release checkpoint).
 - Final verdict: PASS for the delivered packaging-smoke tooling; the actual `-p` installer/zip smoke remains parked and must be rerun after a writable build-cache environment fix.
-- Merge blocker: at head `c40e8fbb` (`ecformat`, `zizmor`, governance `verify` pass), `build (macos-14, arm64)` was cancelled again in run `44926233124`; Windows/Linux/macOS-x64 were still pending when this note was written. PR #14 remains unmerged because the loop requires green CI.
+- Merge blocker: repository checks are not fully green at this PR head because `build (macos-14, arm64)` is cancelled/failing on the unsupported `macos-14-arm64-us-default` runner label. Windows/Linux compile, macOS x64 build, lint, verify, and Devin Review are green or in progress at this head. PR #14 remains unmerged because the loop requires green CI.
 
 ### 2026-11-21 — M0 release-feed tooling (staging)
 
