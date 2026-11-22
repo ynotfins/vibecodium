@@ -103,6 +103,15 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 - Guardians: qa-verifier PASS after format fixes; drift-sentinel PASS after scope/proposal-location corrections; security-reviewer PASS; docs-keeper PASS; governance-verifier PASS for approvals 0006 and 0007. tech-scout not applicable (no dependency change); release-manager not applicable (not a milestone exit or release build).
 - Next: push this branch, wait for PR #7 CI green, merge it, then continue M0 with the own update feed, icons, CI Windows parity, and `-p` installer/zip smoke.
 
+### 2026-11-21 — I1: loop transport measured and hardened
+
+- Branch: `vibe/f0/ssh-transport` → PR into `vibe/main`.
+- Problem: the loop's Codex session crashed `git-remote-https.exe` and raised a focus-stealing dialog.
+- Measured inside the sandbox (the environment that fails): schannel TLS is unusable (`SEC_E_NO_CREDENTIALS`, curl 35, git 128); `http.sslBackend=openssl` clones, commits and pushes cleanly (all exit 0). SSH is unusable too — the sandbox user cannot read the private key. So OpenSSL stays, with a comment recording why, and nobody should "fix" a transport error by switching back.
+- Also fixed: the runner now creates `<clone>.worktrees` before each session (the sandbox can write inside it but cannot create it — that broke the first transport test); `GIT_TERMINAL_PROMPT=0` so a prompt can never block an unattended run.
+- Dialog class suppressed at OS level for this user (`HKCU\...\Windows Error Reporting\DontShowUI=1`), outside the repo and reversible.
+- Approval record 0009, verifier run on Codex BYOK; `node vibe/tools/verify.mjs` PASS.
+
 ### 2026-11-21 — F0 loop uses the repository-scoped GitHub token
 
 - Branch: `vibe/f0/token-from-registry` → PR into `vibe/main`.
