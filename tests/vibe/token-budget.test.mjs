@@ -319,16 +319,41 @@ test('summary blocks can be derived from a summary DAG', async () => {
   assert.throws(() => summaryBlocksFromDag(null), /summary DAG/);
 });
 
-test('a caller tokenizer controls the budget and is validated', () => {
-  const result = assembleContext({
-    modelWindow: 30,
-    system: 'sys',
-    spec: 'p'.repeat(40),
-    tokenizer: (value) => Math.ceil([...value].length / 4),
+test('a caller tokenizer cannot loosen the conservative UTF-8 byte ceiling', () => {
+  const cjk = '你'.repeat(100);
+  const naive = (value) => Math.ceil([...value].length / 4);
+
+  assert.throws(
+    () => assembleContext({ modelWindow: 200, system: cjk, tokenizer: naive }),
+    (error) => {
+      assert.ok(error instanceof ContextBudgetError);
+      assert.equal(error.availableTokens, 200);
+      assert.equal(error.requiredTokens, 301);
+      return true;
+    },
+  );
+
+  const exact = assembleContext({ modelWindow: 301, system: cjk, tokenizer: naive });
+  assert.equal(exact.report.estimator, 'provided-bounded-by-utf8-byte-upper-bound');
+  assert.equal(exact.report.totalTokens, 301);
+
+  assert.throws(
+    () => assembleContext({ modelWindow: 10, system: 'A'.repeat(4_096), tokenizer: () => 1 }),
+    (error) => {
+      assert.ok(error instanceof ContextBudgetError);
+      assert.equal(error.requiredTokens, 4_097);
+      return true;
+    },
+  );
+
+  const tightened = assembleContext({
+    modelWindow: 100,
+    system: 's',
+    tail: [record(0, 'x'.repeat(40))],
+    tokenizer: (value) => (value.length === 0 ? 0 : [...value].length * 2),
   });
-  assert.equal(result.report.estimator, 'provided');
-  assert.equal(result.report.includedSections.includes('spec'), true);
-  assert.ok(result.report.totalTokens <= result.report.availableTokens);
+  assert.equal(tightened.report.tail.includedSequences.length, 0);
+  assert.equal(tightened.report.totalTokens, estimateTokens(tightened.text));
 
   assert.throws(
     () => assembleContext({ modelWindow: 100, system: 's', tokenizer: () => -1 }),
@@ -337,32 +362,6 @@ test('a caller tokenizer controls the budget and is validated', () => {
   assert.throws(
     () => assembleContext({ modelWindow: 100, system: 's', tokenizer: () => 0 }),
     /under-counted/,
-  );
-  const longVocabulary = assembleContext({
-    modelWindow: 100_000,
-    system: 'x'.repeat(64),
-    tokenizer: (value) => (value.length === 0 ? 0 : 1),
-    tokenizerMinBytesPerToken: 64,
-  });
-  assert.equal(longVocabulary.report.estimator, 'provided');
-  assert.equal(longVocabulary.text, 'x'.repeat(64));
-  assert.equal(longVocabulary.report.totalTokens, 1);
-  assert.throws(
-    () => assembleContext({
-      modelWindow: 100_000,
-      system: 'x'.repeat(1_000),
-      tokenizer: () => 1,
-    }),
-    /under-counted/,
-  );
-  assert.throws(
-    () => assembleContext({
-      modelWindow: 100_000,
-      system: 's',
-      tokenizer: () => 1,
-      tokenizerMinBytesPerToken: 0,
-    }),
-    /tokenizerMinBytesPerToken/,
   );
   assert.throws(
     () => assembleContext({ modelWindow: 100, system: 's', tokenizer: 'nope' }),
@@ -373,37 +372,34 @@ test('a caller tokenizer controls the budget and is validated', () => {
 test('the final joined prompt is measured exactly before reporting a fit', () => {
   const countTokens = (text) => {
     if (text.length === 0) return 0;
-    if (text.includes('\n\n')) return [...text].length;
-    return Math.max(1, Math.ceil([...text].length / 16));
+    if (text.includes('\n\n')) return 100;
+    return 1;
   };
-  assert.equal(countTokens('abcdefghijklmno!'), 1);
-  assert.equal(countTokens('r'), 1);
-  assert.ok(countTokens('abcdefghijklmno!\n\nr') > 10);
 
   assert.throws(
     () => assembleContext({
-      modelWindow: 10,
+      modelWindow: 50,
       system: 'abcdefghijklmno!',
       rules: 'r',
       tokenizer: countTokens,
     }),
     (error) => {
       assert.ok(error instanceof ContextBudgetError);
-      assert.equal(error.availableTokens, 10);
-      assert.ok(error.requiredTokens > 10);
+      assert.equal(error.availableTokens, 50);
+      assert.equal(error.requiredTokens, 100);
       return true;
     },
   );
 
   const result = assembleContext({
-    modelWindow: 20,
+    modelWindow: 100,
     system: 'abcdefghijklmno!',
     rules: 'r',
     tokenizer: countTokens,
   });
   assert.equal(result.report.fits, true);
-  assert.equal(result.report.totalTokens, countTokens(result.text));
-  assert.ok(result.report.totalTokens <= 20);
+  assert.equal(result.report.totalTokens, 100);
+  assert.equal(result.text, 'abcdefghijklmno!\n\nr');
 });
 
 test('optional content is trimmed when the exact joined prompt exceeds the budget', () => {
@@ -419,11 +415,13 @@ test('optional content is trimmed when the exact joined prompt exceeds the budge
     summaries: [{ id: 'summary:0-1', startSequence: 0, endSequence: 1, summary: 'm' }],
     tail: [record(2, 't')],
     tokenizer: countTokens,
-    tokenizerMinBytesPerToken: 128,
   });
 
   assert.equal(result.report.fits, true);
-  assert.equal(result.report.totalTokens, countTokens(result.text));
+  assert.equal(
+    result.report.totalTokens,
+    Math.max(countTokens(result.text), estimateTokens(result.text)),
+  );
   assert.deepEqual(result.report.tail.includedSequences, []);
   assert.deepEqual(result.report.tail.droppedSequences, [2]);
   assert.deepEqual(result.report.summaries.includedIds, []);
@@ -446,11 +444,13 @@ test('exact trimming uses a bounded number of joined measurements', () => {
     rules: 'r',
     tail,
     tokenizer: countTokens,
-    tokenizerMinBytesPerToken: 128,
   });
 
   assert.equal(result.report.fits, true);
-  assert.equal(result.report.totalTokens, countTokens(result.text));
+  assert.equal(
+    result.report.totalTokens,
+    Math.max(countTokens(result.text), estimateTokens(result.text)),
+  );
   assert.ok(calls < 1_100);
 });
 
@@ -622,6 +622,14 @@ test('invalid assembly inputs are rejected', () => {
   assert.throws(() => assembleContext({ modelWindow: 0 }), /modelWindow/);
   assert.throws(() => assembleContext({ modelWindow: 10, system: 5 }), /system must be a string/);
   assert.throws(() => assembleContext({ modelWindow: 100, system: 's', spec: 5 }), /spec must be a string/);
+  assert.throws(
+    () => assembleContext({ modelWindow: 100, system: 's', rules: '   \n	 ' }),
+    /rules must not be whitespace-only when provided/,
+  );
+  assert.throws(
+    () => assembleContext({ modelWindow: 100, system: 's', spec: '   ' }),
+    /spec must not be whitespace-only when provided/,
+  );
   assert.throws(
     () => assembleContext({ modelWindow: 100, system: 's', summaries: {} }),
     /summaries must be an array/,

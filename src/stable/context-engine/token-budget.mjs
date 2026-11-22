@@ -16,8 +16,6 @@ export const MAX_RECORD_ITEMS = 1_000;
 export const MAX_RECORD_KEY_CHARS = 200;
 export const MAX_TAIL_TOTAL_CHARS = 20_000_000;
 export const MAX_SUMMARY_TOTAL_CHARS = 20_000_000;
-export const DEFAULT_TOKENIZER_MIN_BYTES_PER_TOKEN = 16;
-export const MAX_TOKENIZER_BYTES_PER_TOKEN = 4_096;
 export const UNTRUSTED_OPEN = '<<<UNTRUSTED_SESSION_CONTENT>>>';
 export const UNTRUSTED_CLOSE = '<<<END_UNTRUSTED_SESSION_CONTENT>>>';
 
@@ -203,7 +201,10 @@ function validateOptionalText(value, name) {
   if (value.length > MAX_SECTION_CHARS) {
     throw new Error(`${name} exceeds ${MAX_SECTION_CHARS} characters`);
   }
-  if (value.trim().length === 0) return '';
+  if (value.length === 0) return '';
+  if (value.trim().length === 0) {
+    throw new Error(`${name} must not be whitespace-only when provided`);
+  }
   assertWellFormed(value, name);
   return value;
 }
@@ -334,14 +335,9 @@ function validatePreviousPrefixHashes(value) {
   return [...value];
 }
 
-function resolveCountTokens(tokenizer, minBytesPerToken) {
+function resolveCountTokens(tokenizer) {
   if (tokenizer === undefined || tokenizer === null) return estimateTokens;
   if (typeof tokenizer !== 'function') throw new Error('tokenizer must be a function');
-  if (!Number.isInteger(minBytesPerToken) || minBytesPerToken < 1 || minBytesPerToken > MAX_TOKENIZER_BYTES_PER_TOKEN) {
-    throw new Error(
-      `tokenizerMinBytesPerToken must be an integer between 1 and ${MAX_TOKENIZER_BYTES_PER_TOKEN}`,
-    );
-  }
   return (text) => {
     const value = tokenizer(text);
     if (!Number.isInteger(value) || value < 0) {
@@ -354,13 +350,8 @@ function resolveCountTokens(tokenizer, minBytesPerToken) {
     if (value === 0) {
       throw new Error('tokenizer under-counted: 0 tokens for non-empty text');
     }
-    const floor = Math.ceil(utf8Length(text) / minBytesPerToken);
-    if (value < floor) {
-      throw new Error(
-        `tokenizer under-counted: ${value} tokens for ${utf8Length(text)} UTF-8 bytes at a ${minBytesPerToken}-byte minimum per token`,
-      );
-    }
-    return value;
+    const conservative = estimateTokens(text);
+    return value < conservative ? conservative : value;
   };
 }
 
@@ -394,7 +385,6 @@ export function assembleContext(options = {}) {
     modelWindow,
     reserveTokens = 0,
     tokenizer,
-    tokenizerMinBytesPerToken = DEFAULT_TOKENIZER_MIN_BYTES_PER_TOKEN,
     system,
     rules,
     spec,
@@ -406,7 +396,7 @@ export function assembleContext(options = {}) {
 
   validateModelWindow(modelWindow);
   validateReserve(reserveTokens, modelWindow);
-  const countTokens = resolveCountTokens(tokenizer, tokenizerMinBytesPerToken);
+  const countTokens = resolveCountTokens(tokenizer);
   const systemText = validateSystem(system);
   const rulesText = validateOptionalText(rules, 'rules');
   const specText = validateOptionalText(spec, 'spec');
@@ -607,7 +597,9 @@ export function assembleContext(options = {}) {
       availableTokens,
       totalTokens,
       fits: totalTokens <= availableTokens,
-      estimator: tokenizer === undefined || tokenizer === null ? 'utf8-byte-upper-bound' : 'provided',
+      estimator: tokenizer === undefined || tokenizer === null
+        ? 'utf8-byte-upper-bound'
+        : 'provided-bounded-by-utf8-byte-upper-bound',
       includedSections,
       omittedSections,
       summaries: {
