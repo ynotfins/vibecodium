@@ -84,6 +84,18 @@ Caps fail closed before any local write: 200 characters per session id, 100,000 
 node --test tests/vibe/agentcore-adapter.test.mjs
 ```
 
+### Code index: project symbols and text
+
+`src/stable/index-engine/index-engine.mjs` is the standalone per-project index. It extracts TypeScript and JavaScript declarations (functions, classes, interfaces, types, enums, namespaces, variables, class methods, getters and setters) with a deterministic built-in parser; tree-sitter and LSP providers remain M4 work. The same pass builds a case-insensitive identifier index, excluding comment and string-literal contents. Declarations inside comments and strings are not indexed, and a UTF-8 BOM does not hide the first declaration.
+
+The index is written atomically to `.vibe/index/index.json` by default, with a configurable relative `indexDir` and simple JSON `indexFile`. A refresh reuses entries whose SHA-256 hash is unchanged; `reindexFile(relativePath)` reads and hashes one file and rewrites the index. File and directory symlinks are not followed. Every source read is opened with no-follow where the platform supports it, then revalidated against its directory entry so a swapped path fails closed. Every index-directory segment is checked before creation, and the write is revalidated before and after the atomic rename. File, directory, file-size, symbol, token and index sizes are capped, and the persisted index contains only per-file entries and metadata, never a derived symbol array. A corrupt, oversized or inconsistent index is rejected on load and rebuilt by the next refresh. Paths are project-relative POSIX paths; absolute paths, drive prefixes, traversal segments, alternate-data-stream colons and control characters are rejected. indexDir and indexFile also reject Windows reserved device names. Comment, string and regex-literal bodies are excluded from the identifier index.
+
+```bash
+node --test tests/vibe/index-engine.test.mjs
+```
+
+The fixture at `tests/fixtures/repo-ts` has 24 known symbols. The test requires at least 95% of them to be indexed and requires a one-file reindex to finish in under 2 seconds. It also covers persistence, corrupt-index rejection, identifier search, symlink and oversized-file skipping, path traversal rejection, BOM handling, and declaration extraction without false matches from comments or strings.
+
 ### Update-feed manifests - local staging only
 
 To prepare the platform-scoped `latest.json` files for the own update feed without publishing, create a release manifest containing the product fields and one entry per artifact:
