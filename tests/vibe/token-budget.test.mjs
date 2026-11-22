@@ -412,6 +412,28 @@ test('optional content is trimmed when the exact joined prompt exceeds the budge
   assert.deepEqual(result.report.includedSections, ['system', 'rules']);
 });
 
+test('exact trimming uses a bounded number of joined measurements', () => {
+  let calls = 0;
+  const countTokens = (text) => {
+    calls += 1;
+    if (text.length === 0) return 0;
+    if (text.includes('\n\n')) return [...text].length;
+    return 1;
+  };
+  const tail = Array.from({ length: 1_000 }, (_, index) => record(index, 'x'.repeat(40)));
+  const result = assembleContext({
+    modelWindow: 5_000,
+    system: 's',
+    rules: 'r',
+    tail,
+    tokenizer: countTokens,
+  });
+
+  assert.equal(result.report.fits, true);
+  assert.equal(result.report.totalTokens, countTokens(result.text));
+  assert.ok(calls < 1_100);
+});
+
 test('the summary loop stops rendering once the budget closes', () => {
   const rendered = [];
   const result = assembleContext({

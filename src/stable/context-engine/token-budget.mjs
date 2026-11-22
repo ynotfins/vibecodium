@@ -477,30 +477,43 @@ export function assembleContext(options = {}) {
     includedTail.unshift({ record, tokens });
   }
 
-  const renderSections = () => joinSections([
+  const renderSections = (tailStart = 0, summaryCount = includedSummaries.length) => joinSections([
     ...requiredParts,
     repoMapFit.content,
-    includedSummaries.map(({ rendered }) => rendered).join('\n'),
-    includedTail.map(({ record }) => record.text).join('\n'),
+    includedSummaries.slice(0, summaryCount).map(({ rendered }) => rendered).join('\n'),
+    includedTail.slice(tailStart).map(({ record }) => record.text).join('\n'),
   ]);
+  const measure = (tailStart = 0, summaryCount = includedSummaries.length) => {
+    const rendered = renderSections(tailStart, summaryCount);
+    return { text: rendered, tokens: countTokens(rendered) };
+  };
 
-  let text = renderSections();
-  let totalTokens = countTokens(text);
-
-  while (totalTokens > availableTokens && includedTail.length > 0) {
-    includedTail.shift();
-    text = renderSections();
-    totalTokens = countTokens(text);
+  let { text, tokens: totalTokens } = measure();
+  if (totalTokens > availableTokens) {
+    let low = 0;
+    let high = includedTail.length;
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      if (measure(mid, includedSummaries.length).tokens <= availableTokens) high = mid;
+      else low = mid + 1;
+    }
+    includedTail.splice(0, low);
+    ({ text, tokens: totalTokens } = measure());
   }
-  while (totalTokens > availableTokens && includedSummaries.length > 0) {
-    includedSummaries.pop();
-    text = renderSections();
-    totalTokens = countTokens(text);
+  if (totalTokens > availableTokens) {
+    let low = 0;
+    let high = includedSummaries.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (measure(0, mid).tokens <= availableTokens) low = mid;
+      else high = mid - 1;
+    }
+    includedSummaries.length = low;
+    ({ text, tokens: totalTokens } = measure());
   }
   if (totalTokens > availableTokens && repoMapFit.included) {
     repoMapFit = { included: false, content: null, tokens: 0 };
-    text = renderSections();
-    totalTokens = countTokens(text);
+    ({ text, tokens: totalTokens } = measure());
   }
   if (totalTokens > availableTokens) {
     throw new ContextBudgetError(
