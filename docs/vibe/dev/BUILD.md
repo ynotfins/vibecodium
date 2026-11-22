@@ -62,6 +62,16 @@ The store enforces hard caps: 20,000,000 bytes per log, 256,000 bytes per event,
 node --test tests/vibe/memory.test.mjs
 ```
 
+### Context engine: token-budget assembly
+
+`assembleContext` turns the fixed prompt sections into one budgeted string in the architecture order: system, rules, spec, repo map, summary blocks, fresh tail. It never returns more than `modelWindow - reserveTokens`. Required `system`, `rules`, and a provided `spec` fail closed with `ContextBudgetError` when they cannot fit; section text is never rewritten or truncated. Summary blocks are included whole, and once one does not fit the remaining blocks are dropped; the fresh tail keeps a contiguous newest suffix while dropping older records. The report lists included and omitted sections, summary ids, tail sequences, total tokens, the estimator, and per-section sha256 hashes. The fully joined prompt, including section separators, is measured with the bounded token count (the supplied tokenizer floored at the conservative UTF-8 byte upper bound) before a fit is reported; if that exact count exceeds the budget, optional content is removed until it fits. Passing the previous hash list back in reports the first changed section and how much prefix can be reused, so a growing tail leaves the summary prefix cached while a revised summary invalidates the cache from the summaries section onward. Content from the repo map, summaries and the tail is wrapped in in-band untrusted markers and carries `sourceTrust: untrusted-repository-content` or `untrusted-session-content`; marker strings inside content are escaped. System, rules and spec are trusted configuration. The in-band markers are a warning boundary, not a security boundary; normalization and quarantine remain M6 work, and `reserveTokens` defaults to 0, so callers should reserve output space explicitly. Tail payloads must be trees: repeated object references and cycles are rejected, with caps on nodes, object keys, array items, key length and accumulated strings, and the tail and summary totals are capped. The summary loop stops rendering blocks once the budget closes.
+
+Token counts default to a conservative UTF-8 byte upper bound (`bytes + 1`) plus per-section or per-record overhead, so a byte-level BPE tokenizer cannot exceed the reported budget. The budget decision always uses at least that byte bound; a caller-supplied `tokenizer(text) -> tokens` can only raise the count (it tightens the budget), never lower it, so an under-counting host tokenizer cannot make the assembled prompt exceed `modelWindow - reserveTokens`. The report records `estimator: provided-bounded-by-utf8-byte-upper-bound` or `estimator: utf8-byte-upper-bound`. Caller tokenizers must be functions, must return a non-negative integer, and must return 0 only for empty text; the assembler measures the fully joined prompt, including separators, before reporting a fit. Whitespace-only `rules`, `spec` or `repoMap` values are rejected rather than silently treated as absent. IDE integration and memory-fact assembly are separate slices.
+
+```bash
+node --test tests/vibe/token-budget.test.mjs
+```
+
 ### Update-feed manifests - local staging only
 
 To prepare the platform-scoped `latest.json` files for the own update feed without publishing, create a release manifest containing the product fields and one entry per artifact:
