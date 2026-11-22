@@ -118,7 +118,7 @@ function capturePayload(value, state, depth = 1, requirePlainObject = false) {
     if (requirePlainObject) {
       return { error: 'payload must be a non-empty string, boolean, finite number or plain object' };
     }
-    if (typeof value.toJSON === 'function') return { error: 'payload must not define toJSON' };
+    if (Object.getOwnPropertyDescriptor(value, 'toJSON')) return { error: 'payload must not define toJSON' };
     state.bytes += 2 + Math.max(0, value.length - 1);
     if (state.bytes > MAX_REMOTE_RECORD_BYTES) return { error: tooBig() };
     const captured = state.capture === false ? null : [];
@@ -134,7 +134,7 @@ function capturePayload(value, state, depth = 1, requirePlainObject = false) {
   if (prototype !== Object.prototype && prototype !== null) {
     return { error: 'payload must contain only plain objects' };
   }
-  if (typeof value.toJSON === 'function') return { error: 'payload must not define toJSON' };
+  if (Object.getOwnPropertyDescriptor(value, 'toJSON')) return { error: 'payload must not define toJSON' };
   if (Object.getOwnPropertySymbols(value).length > 0) {
     return { error: 'payload must not contain symbol keys' };
   }
@@ -187,7 +187,12 @@ function validateRecord(record, index, { sessionId, phase, source, capture }) {
   }
   const envelopeBytes = RECORD_ENVELOPE_BYTES + jsonStringBytes(record.kind) + String(record.sequence).length;
   const state = { seen: new WeakSet(), nodes: 0, bytes: envelopeBytes, capture };
-  const captured = capturePayload(record.payload, state, 1, true);
+  let captured;
+  try {
+    captured = capturePayload(record.payload, state, 1, true);
+  } catch {
+    fail('has an unreadable payload');
+  }
   if (captured.error) {
     fail(`has an unsupported payload: ${captured.error}`);
   }

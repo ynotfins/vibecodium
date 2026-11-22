@@ -627,3 +627,57 @@ test('the payload budget matches JSON byte length across random payloads', async
     );
   }
 });
+test('hydrate preserves an enumerable __proto__ payload key verbatim', async (t) => {
+  const local = await createStore(t);
+  const payload = JSON.parse('{"__proto__":"abc"}');
+  const holder = { records: [{ kind: 'user', payload, sequence: 0 }] };
+  const client = {
+    async hydrate() { return { records: holder.records }; },
+    async append() { return { accepted: 0 }; },
+    async close() {},
+  };
+  const adapter = new AgentCoreAdapter({ store: local, sessionId: 'session-proto', client });
+
+  assert.equal((await adapter.hydrate()).hydrated, 1);
+  const [stored] = await local.readAll();
+  assert.equal(Object.prototype.hasOwnProperty.call(stored.payload, '__proto__'), true, 'the __proto__ key must survive');
+  assert.deepEqual(stored.payload, { ['__proto__']: 'abc' });
+  await adapter.hydrate();
+});
+
+test('hydrate rejects a non-function toJSON key as an adapter error', async (t) => {
+  const local = await createStore(t);
+  const holder = { records: [{ kind: 'user', payload: { toJSON: 'not-a-function' }, sequence: 0 }] };
+  const client = {
+    async hydrate() { return { records: holder.records }; },
+    async append() { return { accepted: 0 }; },
+    async close() {},
+  };
+  const adapter = new AgentCoreAdapter({ store: local, sessionId: 'session-tojson', client });
+
+  await assert.rejects(adapter.hydrate(), (error) => {
+    assert.ok(error instanceof AgentCoreAdapterError);
+    return true;
+  });
+  assert.deepEqual(await readAllOrEmpty(local), []);
+});
+
+test('unreadable payload properties fail as adapter errors without payload text', async (t) => {
+  const local = await createStore(t);
+  const payload = { ok: 'x' };
+  Object.defineProperty(payload, 'boom', { enumerable: true, get() { throw new Error('BOOM_MARKER'); } });
+  const holder = { records: [{ kind: 'user', payload, sequence: 0 }] };
+  const client = {
+    async hydrate() { return { records: holder.records }; },
+    async append() { return { accepted: 0 }; },
+    async close() {},
+  };
+  const adapter = new AgentCoreAdapter({ store: local, sessionId: 'session-getter', client });
+
+  await assert.rejects(adapter.hydrate(), (error) => {
+    assert.ok(error instanceof AgentCoreAdapterError);
+    assert.doesNotMatch(error.message, /BOOM_MARKER/);
+    return true;
+  });
+  assert.deepEqual(await readAllOrEmpty(local), []);
+});

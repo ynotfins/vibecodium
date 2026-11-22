@@ -66,7 +66,9 @@ function capturePayload(
     const item = payload[key];
     const itemResult = capturePayload(item, seen, false, depth + 1);
     if (itemResult.error) return itemResult;
-    value[key] = itemResult.value;
+    Object.defineProperty(value, key, {
+      value: itemResult.value, enumerable: true, configurable: true, writable: true,
+    });
   }
   return { value };
 }
