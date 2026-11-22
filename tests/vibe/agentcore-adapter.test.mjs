@@ -293,7 +293,7 @@ test('hydrate rejects divergent, malformed and unsafe remote sessions', async (t
   await rejectWith([{ kind: 'user', payload: null, sequence: 0 }], /unsupported payload/);
   await rejectWith([{
     kind: 'user',
-    payload: Array.from({ length: 1_000_001 }, () => ({})),
+    payload: { list: Array.from({ length: 1_000_001 }, () => ({})) },
     sequence: 0,
   }], /node count exceeds/);
   await rejectWith([{ ...remoteRecord(0), extra: true }], /must contain exactly/);
@@ -406,4 +406,64 @@ test('input and remote caps fail closed before touching the remote or local stor
     client: { async hydrate() { return { records: [] }; }, async append() { return { accepted: 0 }; }, async close() {} },
   });
   await assert.rejects(badAck.append(), /acknowledgement/);
+});
+
+test('hydrate rejects unsafe payloads and non-plain records it cannot mirror', async (t) => {
+  const local = await createStore(t);
+  const holder = { records: [] };
+  const client = {
+    async hydrate() { return { records: holder.records }; },
+    async append() { return { accepted: 0 }; },
+    async close() {},
+  };
+  const adapter = new AgentCoreAdapter({ store: local, sessionId: 'session-unsafe', client });
+  const shared = { x: 'one' };
+  const symbolKeys = { a: 'x' };
+  symbolKeys[Symbol('k')] = 'y';
+  let deep = 'leaf';
+  for (let level = 0; level < 40; level += 1) deep = { next: deep };
+
+  const cases = [
+    ['NaN', { value: Number.NaN }],
+    ['Infinity', { value: Number.POSITIVE_INFINITY }],
+    ['negative zero', { value: -0 }],
+    ['repeated reference', { first: shared, second: shared }],
+    ['toJSON', { value: { toJSON() { return 'x'; } } }],
+    ['symbol key', symbolKeys],
+    ['depth', deep],
+  ];
+  for (const [label, payload] of cases) {
+    holder.records = [{ kind: 'user', payload, sequence: 0 }];
+    await assert.rejects(adapter.hydrate(), (error) => {
+      assert.ok(error instanceof AgentCoreAdapterError, `${label} must fail closed`);
+      return true;
+    });
+  }
+
+  const nonPlainRecords = [
+    Object.assign([], { kind: 'user', payload: 'x', sequence: 0 }),
+    Object.assign(new Date('2026-11-22'), { kind: 'user', payload: 'x', sequence: 0 }),
+  ];
+  for (const record of nonPlainRecords) {
+    holder.records = [record];
+    await assert.rejects(adapter.hydrate(), /must be a plain object/);
+  }
+  assert.deepEqual(await readAllOrEmpty(local), []);
+});
+
+test('hydrate rejects remote payloads the local store cannot persist before writing', async (t) => {
+  const local = await createStore(t);
+  const remote = new FakeAgentCoreMemory();
+  const adapter = new AgentCoreAdapter({ store: local, sessionId: 'session-array', client: remote });
+
+  remote.session('session-array').records = [
+    remoteRecord(0, 'valid-first'),
+    { kind: 'user', payload: [1, 2, 3], sequence: 1 },
+  ];
+  await assert.rejects(adapter.hydrate());
+  assert.deepEqual(
+    await readAllOrEmpty(local),
+    [],
+    'a failed hydrate must not leave a partial local transcript',
+  );
 });

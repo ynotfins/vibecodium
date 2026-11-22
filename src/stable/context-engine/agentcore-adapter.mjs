@@ -55,7 +55,7 @@ function validateSessionId(sessionId) {
   return sessionId;
 }
 
-function payloadProblem(value, state = { seen: new WeakSet(), nodes: 0 }, depth = 1) {
+function payloadProblem(value, state = { seen: new WeakSet(), nodes: 0 }, depth = 1, requirePlainObject = false) {
   if (depth > MAX_REMOTE_DEPTH) {
     return `payload nesting depth exceeds ${MAX_REMOTE_DEPTH}`;
   }
@@ -82,6 +82,7 @@ function payloadProblem(value, state = { seen: new WeakSet(), nodes: 0 }, depth 
   }
 
   if (Array.isArray(value)) {
+    if (requirePlainObject) return 'payload must be a non-empty string, boolean, finite number or plain object';
     for (const item of value) {
       const problem = payloadProblem(item, state, depth + 1);
       if (problem) return problem;
@@ -138,7 +139,7 @@ function validateRecord(record, index, { sessionId, phase, source }) {
   if (record.sequence !== index) {
     fail(`has sequence ${record.sequence}, but ${source} records must be contiguous from sequence 0`);
   }
-  const problem = payloadProblem(record.payload);
+  const problem = payloadProblem(record.payload, undefined, 1, true);
   if (problem) {
     fail(`has an unsupported payload: ${problem}`);
   }
