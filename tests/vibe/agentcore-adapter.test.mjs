@@ -705,3 +705,59 @@ test('record-envelope accessors and proxies fail as adapter errors without paylo
     });
   }
 });
+test('client response accessors and record-array proxies fail as adapter errors without text', async (t) => {
+  const local = await createStore(t);
+
+  const responseGet = {
+    async hydrate() {
+      const response = {};
+      Object.defineProperty(response, 'records', { enumerable: true, get() { throw new Error('RECORDS_MARKER'); } });
+      return response;
+    },
+    async append() { return { accepted: 0 }; },
+    async close() {},
+  };
+  const first = new AgentCoreAdapter({ store: local, sessionId: 'session-response-1', client: responseGet });
+  await assert.rejects(first.hydrate(), (error) => {
+    assert.ok(error instanceof AgentCoreAdapterError, 'response.records must fail as an adapter error');
+    assert.doesNotMatch(error.message, /MARKER/);
+    return true;
+  });
+
+  const records = [{ kind: 'user', payload: 'x', sequence: 0 }];
+  const recordsProxy = new Proxy(records, {
+    get(target, key, receiver) {
+      if (key === '0') throw new Error('INDEX_MARKER');
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  const proxyClient = {
+    async hydrate() { return { records: recordsProxy }; },
+    async append() { return { accepted: 0 }; },
+    async close() {},
+  };
+  const second = new AgentCoreAdapter({ store: local, sessionId: 'session-response-2', client: proxyClient });
+  await assert.rejects(second.hydrate(), (error) => {
+    assert.ok(error instanceof AgentCoreAdapterError, 'records[index] must fail as an adapter error');
+    assert.doesNotMatch(error.message, /MARKER/);
+    return true;
+  });
+
+  const appendLocal = await createStore(t, 'append.jsonl');
+  await appendLocal.append('user', 'one');
+  const acceptedGet = {
+    async hydrate() { return { records: [] }; },
+    async append() {
+      const response = {};
+      Object.defineProperty(response, 'accepted', { enumerable: true, get() { throw new Error('ACCEPTED_MARKER'); } });
+      return response;
+    },
+    async close() {},
+  };
+  const third = new AgentCoreAdapter({ store: appendLocal, sessionId: 'session-response-3', client: acceptedGet });
+  await assert.rejects(third.append(), (error) => {
+    assert.ok(error instanceof AgentCoreAdapterError, 'response.accepted must fail as an adapter error');
+    assert.doesNotMatch(error.message, /MARKER/);
+    return true;
+  });
+});

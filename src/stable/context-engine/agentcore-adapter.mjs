@@ -266,8 +266,8 @@ export class AgentCoreAdapter {
     this.queue = Promise.resolve();
   }
 
-  #enqueue(task) {
-    const run = this.queue.then(task);
+  #enqueue(phase, task) {
+    const run = this.queue.then(() => this.#guard(phase, task));
     this.queue = run.then(() => undefined, () => undefined);
     return run;
   }
@@ -281,9 +281,10 @@ export class AgentCoreAdapter {
     }
   }
 
-  async #call(phase, fn) {
+
+  async #guard(phase, task) {
     try {
-      return await fn();
+      return await task();
     } catch (error) {
       if (error instanceof AgentCoreAdapterError) throw error;
       throw new AgentCoreAdapterError(
@@ -324,10 +325,10 @@ export class AgentCoreAdapter {
     let appended = 0;
     for (let offset = 0; offset < pending.length; offset += MAX_MIRROR_BATCH) {
       const batch = pending.slice(offset, offset + MAX_MIRROR_BATCH);
-      const response = await this.#call('append', () => this.client.append({
+      const response = await this.client.append({
         sessionId: this.sessionId,
         records: batch,
-      }));
+      });
       const accepted = response?.accepted;
       if (!Number.isInteger(accepted) || accepted !== batch.length) {
         throw new AgentCoreAdapterError(
@@ -350,7 +351,7 @@ export class AgentCoreAdapter {
         total: 0,
       };
     }
-    return this.#enqueue(async () => {
+    return this.#enqueue('hydrate', async () => {
       if (this.closed) {
         throw new AgentCoreAdapterError(
           `agentcore session ${this.sessionId} is closed`,
@@ -359,9 +360,9 @@ export class AgentCoreAdapter {
       }
       const local = await this.#readLocal('hydrate');
 
-      const response = await this.#call('hydrate', () => this.client.hydrate({
+      const response = await this.client.hydrate({
         sessionId: this.sessionId,
-      }));
+      });
       const remote = response?.records;
       const remoteResult = validateRecords(remote, {
         sessionId: this.sessionId,
@@ -407,7 +408,7 @@ export class AgentCoreAdapter {
         mirrored: 0,
       };
     }
-    return this.#enqueue(async () => {
+    return this.#enqueue('append', async () => {
       const appended = await this.#mirrorPending();
       return {
         enabled: true,
@@ -427,7 +428,7 @@ export class AgentCoreAdapter {
         mirrored: 0,
       };
     }
-    return this.#enqueue(async () => {
+    return this.#enqueue('close', async () => {
       if (this.closed) {
         return {
           enabled: true,
@@ -438,9 +439,9 @@ export class AgentCoreAdapter {
         };
       }
       const appended = await this.#mirrorPending();
-      await this.#call('close', () => this.client.close({
+      await this.client.close({
         sessionId: this.sessionId,
-      }));
+      });
       this.closed = true;
       return {
         enabled: true,
