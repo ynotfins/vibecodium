@@ -342,10 +342,28 @@ test('a caller tokenizer controls the budget and is validated', () => {
     modelWindow: 100_000,
     system: 'x'.repeat(64),
     tokenizer: (value) => (value.length === 0 ? 0 : 1),
+    tokenizerMinBytesPerToken: 64,
   });
   assert.equal(longVocabulary.report.estimator, 'provided');
   assert.equal(longVocabulary.text, 'x'.repeat(64));
   assert.equal(longVocabulary.report.totalTokens, 1);
+  assert.throws(
+    () => assembleContext({
+      modelWindow: 100_000,
+      system: 'x'.repeat(1_000),
+      tokenizer: () => 1,
+    }),
+    /under-counted/,
+  );
+  assert.throws(
+    () => assembleContext({
+      modelWindow: 100_000,
+      system: 's',
+      tokenizer: () => 1,
+      tokenizerMinBytesPerToken: 0,
+    }),
+    /tokenizerMinBytesPerToken/,
+  );
   assert.throws(
     () => assembleContext({ modelWindow: 100, system: 's', tokenizer: 'nope' }),
     /tokenizer must be a function/,
@@ -401,6 +419,7 @@ test('optional content is trimmed when the exact joined prompt exceeds the budge
     summaries: [{ id: 'summary:0-1', startSequence: 0, endSequence: 1, summary: 'm' }],
     tail: [record(2, 't')],
     tokenizer: countTokens,
+    tokenizerMinBytesPerToken: 128,
   });
 
   assert.equal(result.report.fits, true);
@@ -427,6 +446,7 @@ test('exact trimming uses a bounded number of joined measurements', () => {
     rules: 'r',
     tail,
     tokenizer: countTokens,
+    tokenizerMinBytesPerToken: 128,
   });
 
   assert.equal(result.report.fits, true);
