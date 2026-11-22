@@ -631,6 +631,10 @@ test('invalid assembly inputs are rejected', () => {
     /spec must not be whitespace-only when provided/,
   );
   assert.throws(
+    () => assembleContext({ modelWindow: 100, system: 's', repoMap: '   ' }),
+    /repoMap must not be whitespace-only when provided/,
+  );
+  assert.throws(
     () => assembleContext({ modelWindow: 100, system: 's', summaries: {} }),
     /summaries must be an array/,
   );
