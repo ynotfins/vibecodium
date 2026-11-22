@@ -1,6 +1,6 @@
 # Vibecodium Status
 
-> Doc class: living · Owner: vibe-overseer · Last reviewed: 2026-11-21
+> Doc class: living · Owner: vibe-overseer · Last reviewed: 2026-11-22
 
 Goal state: active
 Owner priorities (2026-11-20): alongside M0/M1, begin the standalone engine packages (Vibe Context Engine, multi-project indexer/graph) — they are testable without the IDE build. Build-dependent work continues now that the MSVC Spectre component is installed. Milestone numbering is unchanged.
@@ -10,6 +10,20 @@ Current milestone: M0 (in progress)
 ## Task log
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
+
+### 2026-11-22 — M5 project and user memory
+
+- Goal / must-haves: add persistent, scoped project and user memory to the standalone Vibe Context Engine, with a review surface for pending facts and recall of approved facts across sessions. D3 storage and review contract; binding the review panel UI remains a separate IDE integration step.
+- Must-have IDs: D3.
+- Files allowed: `src/stable/context-engine/**`, `tests/vibe/memory.test.mjs`, `docs/vibe/CHANGELOG.md`, `docs/vibe/README.md`, `docs/vibe/ROADMAP.md`, `docs/vibe/STATUS.md`, `docs/vibe/TECH_RADAR.md`, `docs/vibe/adr/README.md`, `docs/vibe/dev/BUILD.md`, `docs/vibe/user/README.md`.
+- Files forbidden: upstream source, IDE integration, dependencies, AgentCore adapter, token-budget assembly, SQLite persistence, release infrastructure, locked docs.
+- Acceptance commands: `node --test tests/vibe/memory.test.mjs`, `node vibe/tools/verify.mjs`.
+- Out of scope: review panel UI, model-generated extraction, memory deduplication or ranking, AgentCore mirroring, token-budget assembly, SQLite.
+- Branch: `vibe/m5/memory` → PR into `vibe/main`.
+- Delivered: `src/stable/context-engine/memory-store.mjs` adds append-only JSONL memory for global user facts and project-scoped facts. New and revised facts are `pending`, reviews gate recall, revisions preserve stable ids, `recall` returns only approved facts by default, `includePending` is explicit, and every returned entry carries `sourceTrust: untrusted-memory-content`. The store validates JSON-safe values and ids, rejects path traversal and Windows-reserved project ids, enforces file/event/entry/nesting/key/value/query/page caps, and serializes writes per store instance. The review API is ready for the later IDE panel; that UI is not wired yet.
+- Tests: `node --test tests/vibe/memory.test.mjs` PASS (6/6); `node vibe/tools/verify.mjs` PASS (4/4 steps, 63 tests); `git diff --cached --check vibe/main` clean.
+- Guardians: qa-verifier PASS after adding coverage for query/pagination, `get`, serialized writes and resource caps; drift-sentinel PASS on the final staged scope; security-reviewer PASS with low notes (caller-supplied values are not secret-scanned, an own `__proto__` key is not preserved, and Windows ACLs are not tightened by `chmod`); docs-keeper PASS; governance-verifier PASS as not applicable (no locked path); tech-scout PASS as not applicable (Node built-ins only); release-manager PASS as not applicable (not a milestone exit or release build).
+- Next step: continue M5 with token-budget assembly (D4); bind the project/user memory review panel in the IDE and add the noted memory hardening before user-facing release.
 
 ### 2026-11-21 — M5 summary DAG and recall tools
 
