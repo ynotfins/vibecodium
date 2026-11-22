@@ -178,16 +178,18 @@ function validateRecordBody(record, index, { sessionId, phase, source, capture }
   ) {
     fail('must contain exactly kind, payload and sequence');
   }
-  if (!RECORD_KINDS.has(record.kind)) {
+  const kind = record.kind;
+  if (!RECORD_KINDS.has(kind)) {
     fail('has an unsupported record kind');
   }
-  if (!Number.isInteger(record.sequence) || record.sequence < 0) {
+  const sequence = record.sequence;
+  if (!Number.isInteger(sequence) || sequence < 0) {
     fail('has an invalid sequence');
   }
-  if (record.sequence !== index) {
-    fail(`has sequence ${record.sequence}, but ${source} records must be contiguous from sequence 0`);
+  if (sequence !== index) {
+    fail(`has sequence ${sequence}, but ${source} records must be contiguous from sequence 0`);
   }
-  const envelopeBytes = RECORD_ENVELOPE_BYTES + jsonStringBytes(record.kind) + String(record.sequence).length;
+  const envelopeBytes = RECORD_ENVELOPE_BYTES + jsonStringBytes(kind) + String(sequence).length;
   const state = { seen: new WeakSet(), nodes: 0, bytes: envelopeBytes, capture };
   let captured;
   try {
@@ -201,7 +203,7 @@ function validateRecordBody(record, index, { sessionId, phase, source, capture }
   if (state.bytes > MAX_REMOTE_RECORD_BYTES) {
     fail(`exceeds ${MAX_REMOTE_RECORD_BYTES} bytes`);
   }
-  return { bytes: state.bytes, payload: captured.value };
+  return { bytes: state.bytes, payload: captured.value, kind };
 }
 
 function validateRecord(record, index, options) {
@@ -232,6 +234,7 @@ function validateRecords(records, options) {
   }
   let totalBytes = 0;
   const payloads = [];
+  const kinds = [];
   for (let index = 0; index < records.length; index += 1) {
     const result = validateRecord(records[index], index, { ...options, capture });
     totalBytes += result.bytes;
@@ -242,8 +245,9 @@ function validateRecords(records, options) {
       );
     }
     payloads.push(result.payload);
+    kinds.push(result.kind);
   }
-  return { bytes: totalBytes, payloads };
+  return { bytes: totalBytes, payloads, kinds };
 }
 
 export class AgentCoreAdapter {
@@ -386,7 +390,7 @@ export class AgentCoreAdapter {
 
       const missing = remote.slice(local.length);
       for (let index = 0; index < missing.length; index += 1) {
-        await this.store.append(missing[index].kind, remoteResult.payloads[local.length + index]);
+        await this.store.append(remoteResult.kinds[local.length + index], remoteResult.payloads[local.length + index]);
       }
       if (remote.length > this.mirrored) this.mirrored = remote.length;
       return {
