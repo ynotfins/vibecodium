@@ -9,7 +9,7 @@
 # pre-set value so CI environments (which inject APP_NAME etc.) still work; the
 # defaults below are what the wrapper `vibe/dev/build-windows.sh` builds with.
 export APP_NAME="${APP_NAME:-Vibecodium}"
-export ASSETS_REPOSITORY="${ASSETS_REPOSITORY:-VSCodium/vscodium}"
+export ASSETS_REPOSITORY="${ASSETS_REPOSITORY:-ynotfins/vibecodium}"
 export BINARY_NAME="${BINARY_NAME:-vibecodium}"
 export CI_BUILD="no"
 export GH_REPO_PATH="${GH_REPO_PATH:-ynotfins/vibecodium}"
@@ -25,7 +25,7 @@ export VSCODE_SKIP_NODE_VERSION_CHECK="yes"
 while getopts ":ilops" opt; do
   case "$opt" in
     i)
-      export ASSETS_REPOSITORY="VSCodium/vscodium-insiders"
+      export ASSETS_REPOSITORY="ynotfins/vibecodium-insiders"
       export BINARY_NAME="vibecodium-insiders"
       export VSCODE_QUALITY="insider"
       ;;
