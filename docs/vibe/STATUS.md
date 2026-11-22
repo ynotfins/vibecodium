@@ -5,11 +5,25 @@
 Goal state: active
 Owner priorities (2026-11-20): alongside M0/M1, begin the standalone engine packages (Vibe Context Engine, multi-project indexer/graph) — they are testable without the IDE build. Build-dependent work continues now that the MSVC Spectre component is installed. Milestone numbering is unchanged.
 
-Current milestone: M0 (in progress)
+Current milestone: M0 and M5 (in progress)
 
 ## Task log
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
+
+### 2026-11-22 — M5 token-budget context assembly
+
+- Goal / must-haves: add cache-stable token-budget assembly to the standalone Vibe Context Engine so assembled context never exceeds the model window, uses the fixed section order, and reports exactly what was included, omitted or dropped. D4.
+- Must-have IDs: D4.
+- Files allowed: `src/stable/context-engine/**`, `tests/vibe/token-budget.test.mjs`, `docs/vibe/CHANGELOG.md`, `docs/vibe/ROADMAP.md`, `docs/vibe/STATUS.md`, `docs/vibe/dev/BUILD.md`.
+- Files forbidden: upstream source, IDE integration, dependencies, AgentCore adapter, memory integration or review UI, SQLite persistence, release infrastructure, locked docs.
+- Acceptance commands: `node --test tests/vibe/token-budget.test.mjs`, `node vibe/tools/verify.mjs`.
+- Out of scope: binding assembly into an agent host or IDE, bundled model-specific tokenizers or provider calls, semantic caching, summarizer quality, AgentCore adapter, automatic compaction triggering, SQLite.
+- Branch: `vibe/m5/token-budget` → PR into `vibe/main`.
+- Delivered: `src/stable/context-engine/token-budget.mjs` assembles system, rules, spec, repo map, summary blocks, and fresh-tail records in the fixed architecture order. It uses a conservative UTF-8 byte upper bound by default or a caller-supplied model tokenizer with an under-count floor, keeps required system, rules and provided spec sections fail-closed, omits an oversized optional repo map whole, includes whole summary blocks and a contiguous newest tail suffix while dropping the rest rather than truncating or rewriting them, and reports included and omitted sections, summary ids, tail sequences, total tokens, the estimator and a per-section sha256 prefix manifest that lets a caller reuse the unchanged prefix. It rejects shared-reference payload graphs and caps payload nodes, object keys, array items, string lengths and total tail/summary characters. In-band untrusted markers wrap the repo map, summary blocks and tail records, marker strings in content are escaped, and source-trust labels distinguish trusted configuration from untrusted repository and session content. A growing fresh tail changes only the tail hash; a revised summary block changes the cache from the summaries section onward.
+- Tests: `node --test tests/vibe/token-budget.test.mjs` PASS (21/21); `node vibe/tools/verify.mjs` PASS (4/4 steps, 89 tests).
+- Guardians: qa-verifier PASS (21/21 token-budget tests; added exact cap boundaries and summary-loop stop coverage); drift-sentinel PASS after the fail-closed spec, estimator and ROADMAP wording fixes; security-reviewer PASS after payload-tree/cap, tokenizer-floor, in-band marker, repo-map trust and bounded-error hardening; docs-keeper PASS (corrected block-drop and tail-suffix wording in BUILD/STATUS, reproduced D4 evidence); governance-verifier PASS as not applicable (no locked path changed; governance check PASS); tech-scout PASS as not applicable (no dependency changed; only node:crypto); release-manager PASS as not applicable (M5 remains in progress; no release build).
+- Next step: bind assembly into the agent host and IDE context path, then continue M5 with the AgentCore adapter (D5). Keep the project/user memory review panel UI, the noted memory hardening and the ADR-0003 alignment visible; the M4-backed graph integration remains outstanding.
 
 ### 2026-11-22 — M5 project and user memory
 
