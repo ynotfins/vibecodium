@@ -146,6 +146,89 @@ test('Linux package metadata endpoints point at Vibecodium', () => {
   assert.doesNotMatch(block, /vscodium\.com/);
 });
 
+test('stable Linux package metadata identifies Vibecodium', () => {
+  const prepare = read('prepare_vscode.sh');
+  const start = prepare.indexOf('# fix the packages metadata');
+  const end = prepare.indexOf('elif [[ "${OS_NAME}" == "windows" ]]', start);
+  assert.ok(start >= 0 && end > start, 'the Linux package metadata block must exist');
+  const block = prepare.slice(start, end);
+
+  const fixtures = {
+    'resources/linux/code.appdata.xml': read('src/stable/resources/linux/code.appdata.xml'),
+    'resources/linux/debian/control.template': [
+      'Package: vibecodium',
+      'Maintainer: Microsoft Corporation <vscode-linux@microsoft.com>',
+      'Homepage: https://code.visualstudio.com/',
+      'Description: Visual Studio Code. Code editing. Redefined.',
+      ' Visual Studio Code is a choice of tool. See https://code.visualstudio.com/docs/setup/linux',
+    ].join('\n'),
+    'resources/linux/rpm/code.spec.template': [
+      'Vendor:   Microsoft Corporation',
+      'Packager: Visual Studio Code Team <vscode-linux@microsoft.com>',
+      'URL:      https://code.visualstudio.com/',
+      '%description',
+      'Visual Studio Code is a choice of tool. See https://code.visualstudio.com/docs/setup/linux',
+    ].join('\n'),
+    'resources/linux/snap/snapcraft.yaml': [
+      'name: vibecodium',
+      'description: |',
+      '  Visual Studio Code is a choice of tool.',
+    ].join('\n'),
+  };
+
+  const maintainer = block.match(/\|(Microsoft Corporation <[^|]+)\|/)?.[1];
+  const packager = block.match(/\|(Visual Studio Code Team <[^|]+)\|/)?.[1];
+  assert.ok(maintainer && packager, 'the Debian and RPM identity replacements must exist');
+  fixtures['resources/linux/debian/control.template'] = fixtures['resources/linux/debian/control.template']
+    .replace(/Maintainer: .*/, `Maintainer: ${maintainer}`);
+  fixtures['resources/linux/rpm/code.spec.template'] = fixtures['resources/linux/rpm/code.spec.template']
+    .replace(/Packager: .*/, `Packager: ${packager}`);
+
+  const commands = [...block.matchAll(/sed -i 's\|([^|]+)\|([^|]*)\|([g]*)'\s+([^\s]+)/g)]
+    .map((match) => ({ search: match[1], replacement: match[2], global: match[3] === 'g', path: match[4] }));
+  assert.ok(commands.length > 0, 'Linux package metadata must use sed replacements');
+
+  const touched = new Set();
+  for (const command of commands) {
+    if (!(command.path in fixtures)) continue;
+    touched.add(command.path);
+    const pattern = command.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    fixtures[command.path] = fixtures[command.path].replace(
+      new RegExp(pattern, command.global ? 'g' : ''),
+      command.replacement,
+    );
+  }
+
+  for (const [path, content] of Object.entries(fixtures)) {
+    assert.ok(touched.has(path), `${path} must be transformed by the Linux package metadata block`);
+    assert.doesNotMatch(content, /VSCodium|vscodium|Visual Studio Code|Microsoft Corporation|@microsoft\.com|https:\/\/code\.visualstudio\.com/, path);
+    assert.match(content, /Vibecodium/, path);
+  }
+});
+
+test('stable resource metadata contains no upstream brand identity', () => {
+  const files = [
+    'src/stable/resources/linux/code.appdata.xml',
+    'src/stable/resources/linux/code.desktop',
+    'src/stable/resources/linux/code-url-handler.desktop',
+    'src/stable/resources/win32/VisualElementsManifest.xml',
+  ];
+
+  for (const file of files) {
+    assert.doesNotMatch(
+      read(file),
+      /VSCodium|vscodium|Microsoft Corporation|Visual Studio Code|code\.visualstudio\.com|vscodium\.com/,
+      file,
+    );
+  }
+
+  assert.match(read('src/stable/resources/linux/code.appdata.xml'), /Vibecodium/);
+  assert.match(read('src/stable/resources/win32/VisualElementsManifest.xml'), /ShortDisplayName="Vibecodium"/);
+  for (const file of files.slice(1, 3)) {
+    assert.match(read(file), /Keywords=vibecodium;/, file);
+  }
+});
+
 test('the branded feed root matches the manifest generator paths', () => {
   const update = updateBlock().match(/setpath "product" "updateUrl" "([^"]+)"/);
   assert.ok(update, 'updateUrl must be set');
