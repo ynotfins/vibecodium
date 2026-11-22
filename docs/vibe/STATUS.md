@@ -11,10 +11,24 @@ Current milestone: M0 (in progress)
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
 
+### 2026-11-21 — M0 Vibecodium icon package
+
+- Goal / must-haves: replace the upstream Codium icon sources with Vibecodium-owned vectors and make the build generate its fallback PNG/ICO assets from those local sources instead of downloading upstream artwork. A1 (user-visible branding), G4 build-contract evidence only.
+- Files allowed: `icons/**`, `src/stable/resources/{win32,linux,server,[PERSON_NAME]}/*`, `src/stable/src/vs/workbench/browser/media/code-icon.svg`, `README.md`, `tests/vibe/icon-assets.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/CHANGELOG.md`, `docs/vibe/STATUS.md`.
+- Files forbidden: upstream source, build orchestration outside `icons/`, CI workflows, release infrastructure, installer templates, dependencies, locked docs.
+- Acceptance commands: `node --test tests/vibe/icon-assets.test.mjs`, `node vibe/tools/verify.mjs`.
+- Out of scope: a full Windows rebuild, installer/zip packaging, CI changes, signing, update-feed activation, trademark clearance.
+- Branch: `vibe/m0/brand-icons` → PR into `vibe/main`.
+- Delivered: six Vibecodium source vectors for stable and insider replace the upstream `codium_*` artwork; the icon build no longer downloads from `VSCodium/icons` or raw GitHub, renders Linux PNG, Windows ICO, and macOS ICNS fallbacks locally, validates `mktemp`, and fails closed when a renderer is missing. Checked-in app, server, Linux, macOS, Inno, and workbench artwork is regenerated from those vectors; the root README points at the live brand logo and the icon README and build guide describe the contract. `icons/overlay-assets.json` records the branded binary render hashes.
+- Tests: `node --test tests/vibe/icon-assets.test.mjs` PASS (7/7); `node vibe/tools/verify.mjs` PASS (4/4 steps, 53 tests); `git diff --check` clean.
+- Guardians: qa-verifier PASS after fixing the workbench 1024px transform, README link, and binary evidence; drift-sentinel PASS after fixing README branding, the checked-in macOS icon, and build-guide/tooling wording; security-reviewer PASS (the pre-existing fail-open tool check is now fail-closed); docs-keeper PASS after adding the changelog entry and labelling the unavailable renderer command unverified; governance-verifier PASS as not applicable (no locked path changed); tech-scout PASS (no dependency change); release-manager PASS (not a milestone exit or release build).
+- Evidence boundary: this slice proves the source contract, checked-in branded renders, and asset consistency; it did not run a full Windows rebuild or the renderer-backed `bash icons/build_icons.sh` because the loop environment lacks rsvg-convert/png2icns/icotool. Before release, regenerate a clean worktree with that toolchain and compare to `icons/overlay-assets.json`.
+- Next step: continue M0 with own update-feed activation and Windows CI parity; the `-p` installer/zip artifact smoke remains parked on the writable native-header cache.
+
 ### 2026-11-21 — M0 packaging-smoke correction
 
 - Goal / must-haves: harden and correct the packaging-smoke slice after its merge; A1 (packaged identity/version checks only). No new product acceptance is claimed.
-- Files allowed: `vibe/tools/windows-packaging-smoke.mjs`, `tests/vibe/windows-packaging-smoke.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/STATUS.md`.
+- Files allowed: `vibe/tools/windows-packaging-smoke.mjs`, `tests/vibe/windows-packaging-smoke.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/CHANGELOG.md`, `docs/vibe/STATUS.md`.
 - Files forbidden: upstream source, build scripts, CI workflows, release publication, signing policy, installer assets, dependencies.
 - Acceptance commands: `node --test tests/vibe/windows-packaging-smoke.test.mjs`, `node vibe/tools/verify.mjs`.
 - Out of scope: clean-machine install/uninstall, MSI generation, signing, publishing a release, creating a feed repository, changing CI or build scripts.
@@ -28,7 +42,7 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 
 - Goal / must-haves: create and test a local verifier for Windows system installer, user installer, and portable zip artifacts. This supports later M0 artifact work but claims no G1 or G4 acceptance.
 - Must-have IDs: A1 (partial packaged identity/version check only).
-- Files allowed: `vibe/tools/windows-packaging-smoke.mjs`, `tests/vibe/windows-packaging-smoke.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/STATUS.md`.
+- Files allowed: `vibe/tools/windows-packaging-smoke.mjs`, `tests/vibe/windows-packaging-smoke.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/CHANGELOG.md`, `docs/vibe/STATUS.md`.
 - Files forbidden: upstream source, build scripts, CI workflows, release publication, signing policy, installer assets, dependencies.
 - Acceptance commands: `node --test tests/vibe/windows-packaging-smoke.test.mjs`, `node vibe/tools/verify.mjs`. The documented artifact-smoke command is not an acceptance claim because the required local `-p` build remains parked.
 - Out of scope: clean-machine install/uninstall, MSI generation, signing, publishing a release, creating a feed repository, changing CI or build scripts.
@@ -44,7 +58,7 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 
 - Goal / must-haves: generate platform- and target-scoped update-feed manifests from Windows release asset checksums without publishing them or changing the feed repository. Bridges the completed local manifest contract toward the release pipeline.
 - Must-have IDs: G2 (own update-feed contract integration only).
-- Files allowed: `vibe/tools/release-feeds.mjs`, `tests/vibe/release-feeds.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/STATUS.md`, `docs/vibe/ops/RELEASE.md`.
+- Files allowed: `vibe/tools/release-feeds.mjs`, `tests/vibe/release-feeds.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/CHANGELOG.md`, `docs/vibe/STATUS.md`, `docs/vibe/ops/RELEASE.md`.
 - Files forbidden: upstream product source, locked docs, release secrets, installer assets, release workflows, feed or release publication, signing policy.
 - Acceptance commands: `node --test tests/vibe/release-feeds.test.mjs`, `node vibe/tools/verify.mjs`.
 - Out of scope: release-workflow edits, creating the feed repository, uploading `latest.json`, altering release tags, MSI generation, signing, real release manifests.
@@ -72,7 +86,7 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 
 - Goal / must-haves: establish a platform-scoped update manifest format for the own update feed without publishing a feed, creating a repository, or changing release infrastructure. Supports M0's "own update feed repo" work and later M12 update-feed acceptance.
 - Must-have IDs: A1 (identity metadata only), G2 (own update feed contract only).
-- Files allowed: `vibe/tools/update-feed.mjs`, `tests/vibe/update-feed.test.mjs`, `tests/vibe/automation.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/STATUS.md`.
+- Files allowed: `vibe/tools/update-feed.mjs`, `tests/vibe/update-feed.test.mjs`, `tests/vibe/automation.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/CHANGELOG.md`, `docs/vibe/STATUS.md`.
 - Included verification stabilization: make the Codex guard's `gh pr list` test use an explicit repository so it does not depend on the local dry-run fixture's git remotes.
 - Files forbidden: `.github/workflows/**`, upstream files, locked docs, release secrets, installer assets.
 - Acceptance commands: `node --test tests/vibe/update-feed.test.mjs`, `node vibe/tools/verify.mjs`.

@@ -1,0 +1,93 @@
+{
+  "generatedFrom": "icons/stable/vibe_cnl.svg and icons/stable/vibe_clt.svg",
+  "assets": {
+    "src/stable/resources/linux/code.png": {
+      "bytes": 56458,
+      "sha256": "8dd0f21812e463d3a9708c6745db7f2b312322e4e85e6eb182d94e85585d43e2"
+    },
+    "src/stable/resources/server/code-192.png": {
+      "bytes": 13558,
+      "sha256": "b39edf5ccc4daee2cadcd13864d06d02efea0b512f57a6c24a206878222a8b5a"
+    },
+    "src/stable/resources/server/code-512.png": {
+      "bytes": 56458,
+      "sha256": "8dd0f21812e463d3a9708c6745db7f2b312322e4e85e6eb182d94e85585d43e2"
+    },
+    "src/stable/resources/server/favicon.ico": {
+      "bytes": 412334,
+      "sha256": "f74b2bd76f60f2286e2654011539b8053022221245ff799562cb47140d096628"
+    },
+    "src/stable/resources/win32/code.ico": {
+      "bytes": 412334,
+      "sha256": "f74b2bd76f60f2286e2654011539b8053022221245ff799562cb47140d096628"
+    },
+    "src/stable/resources/win32/code_150x150.png": {
+      "bytes": 4678,
+      "sha256": "d36ae0fc4628e57659caf4ae763085677d008c24766ff0a4f02bac7327307e7e"
+    },
+    "src/stable/resources/win32/code_70x70.png": {
+      "bytes": 2247,
+      "sha256": "95a58d93df544a61e2ef587c1a09fcc16901db51ff7c0482c2a95211a750d409"
+    },
+    "src/stable/resources/win32/inno-big-100.bmp": {
+      "bytes": 154542,
+      "sha256": "63985465e8ff1a90cd22ec4518673e97bd46366f9d79ab609de38b1e9c4ebdc4"
+    },
+    "src/stable/resources/win32/inno-big-125.bmp": {
+      "bytes": 222390,
+      "sha256": "31ed5e9a171ed681f9e6002b459f7e754c530a8e0470c4808e15fe37182b0f83"
+    },
+    "src/stable/resources/win32/inno-big-150.bmp": {
+      "bytes": 339714,
+      "sha256": "a154e238da828e3ce7d195a2e29e6ec8aea7322d758a33aa838dd7c355b95c6e"
+    },
+    "src/stable/resources/win32/inno-big-175.bmp": {
+      "bytes": 455974,
+      "sha256": "153bfe6969905a82e3807fc8f65cdb504601a27bbff58df6a1e36fde3a7e79a5"
+    },
+    "src/stable/resources/win32/inno-big-200.bmp": {
+      "bytes": 594390,
+      "sha256": "067484cb2fab207fe0f1af41e81175d39295fe3c965e8f2fd3df4debc04db167"
+    },
+    "src/stable/resources/win32/inno-big-225.bmp": {
+      "bytes": 747654,
+      "sha256": "c717b073f6dec8fb5e9552ff0f77c629012bf0b9328af1216ac35b95a8708145"
+    },
+    "src/stable/resources/win32/inno-big-250.bmp": {
+      "bytes": 981958,
+      "sha256": "897ed1e6890a4f9f1b14424b71b25b774156888de22755f8ae2d01c8b08d22da"
+    },
+    "src/stable/resources/win32/inno-small-100.bmp": {
+      "bytes": 9294,
+      "sha256": "7a930dff017a9c8e04abed134d099dad017577ecc712fc00630a59bc91ac8b70"
+    },
+    "src/stable/resources/win32/inno-small-125.bmp": {
+      "bytes": 13110,
+      "sha256": "294e674cf63459b5a466b9428b3098e3f1c4a8c6982bafcd18c129e1a5115013"
+    },
+    "src/stable/resources/win32/inno-small-150.bmp": {
+      "bytes": 20214,
+      "sha256": "dea4086d0e18f2496ee86d3948e6829043560a0cfc1160fb88aced13cf4ab05e"
+    },
+    "src/stable/resources/win32/inno-small-175.bmp": {
+      "bytes": 26826,
+      "sha256": "835ac1cdc569061c5544fb3f8ea04283d83b7ebc6502d70b94890c1aa8136e6e"
+    },
+    "src/stable/resources/win32/inno-small-200.bmp": {
+      "bytes": 35246,
+      "sha256": "a2033ad3e75035b533312df3f202271fd9aab5c25a9e53adf7d2aa360ff59176"
+    },
+    "src/stable/resources/win32/inno-small-225.bmp": {
+      "bytes": 44334,
+      "sha256": "4880495a0c55cdee79bef2e367d539bc20c47e51da2b689a42215af64fd7fa3f"
+    },
+    "src/stable/resources/win32/inno-small-250.bmp": {
+      "bytes": 58294,
+      "sha256": "339ce8b86760b90373d0b90d0bb2859de6d3843094802b56a65a8eee9be5b521"
+    },
+    "src/stable/resources/darwin/code.icns": {
+      "bytes": 184983,
+      "sha256": "80f7ac770620caa300fbf542a739f56ac6295314e57ad42a118bca9cafff5979"
+    }
+  }
+}
