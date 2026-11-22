@@ -1,6 +1,6 @@
 # Building Vibecodium on Windows
 
-> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-21
+> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-22
 
 Vibecodium builds with VSCodium's scripts. Run everything in **Git Bash** from the repository root.
 
@@ -48,6 +48,18 @@ The contract test builds a 210-turn session, finds a detail stored at record seq
 
 ```bash
 node --test tests/vibe/context-engine.test.mjs
+```
+
+### Context engine: project and user memory
+
+The standalone memory store persists facts across sessions in two scopes. User memory is global at `<root>/user/memory.jsonl`; project memory is isolated at `<root>/projects/<sha256-of-projectId>/memory.jsonl`, so identifiers that differ only by case cannot collide on Windows. The store accepts JSON-safe values, serializes writes per scope within a store instance, and normally appends `put`, `review`, and `delete` events. Repeating a key writes a new `put` with the same id and the next `revision`.
+
+New and revised facts start as `pending`. `recall` returns approved facts only unless `includePending` is requested, in which case pending facts are included alongside approved facts; every returned entry carries `sourceTrust: untrusted-memory-content`. `review` defaults to the pending queue and can filter by `approved`, `rejected`, or `all`. `approve`, `reject`, and `forget` require the id and exact revision just reviewed; a stale revision is rejected rather than applying a decision to a newer value. A new key is rejected once 10,000 facts are live, while revisions of existing facts remain allowed. The review panel UI is not wired yet.
+
+The store enforces hard caps: 20,000,000 bytes per log, 256,000 bytes per event, 10,000 live entries, 32 levels of value nesting, 200 characters for keys and queries, 16,000 characters for string values, and at most 500 items per review or recall page (default 100). If the next event cannot fit, the store atomically compacts the log to one `put` per live fact, preserving ids, revisions, status, values, and timestamps, then appends the new event. Event history before such a compaction is intentionally discarded; live state and review and deletion semantics are preserved.
+
+```bash
+node --test tests/vibe/memory.test.mjs
 ```
 
 ### Update-feed manifests - local staging only

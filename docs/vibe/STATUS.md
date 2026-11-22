@@ -1,6 +1,6 @@
 # Vibecodium Status
 
-> Doc class: living · Owner: vibe-overseer · Last reviewed: 2026-11-21
+> Doc class: living · Owner: vibe-overseer · Last reviewed: 2026-11-22
 
 Goal state: active
 Owner priorities (2026-11-20): alongside M0/M1, begin the standalone engine packages (Vibe Context Engine, multi-project indexer/graph) — they are testable without the IDE build. Build-dependent work continues now that the MSVC Spectre component is installed. Milestone numbering is unchanged.
@@ -10,6 +10,20 @@ Current milestone: M0 (in progress)
 ## Task log
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
+
+### 2026-11-22 — M5 project and user memory
+
+- Goal / must-haves: add persistent, scoped project and user memory to the standalone Vibe Context Engine, with a review surface for pending facts and recall of approved facts across sessions. D3 storage and review contract; binding the review panel UI remains a separate IDE integration step.
+- Must-have IDs: D3.
+- Files allowed: `src/stable/context-engine/**`, `tests/vibe/memory.test.mjs`, `docs/vibe/CHANGELOG.md`, `docs/vibe/README.md`, `docs/vibe/ROADMAP.md`, `docs/vibe/STATUS.md`, `docs/vibe/TECH_RADAR.md`, `docs/vibe/adr/README.md`, `docs/vibe/dev/BUILD.md`, `docs/vibe/user/README.md`.
+- Files forbidden: upstream source, IDE integration, dependencies, AgentCore adapter, token-budget assembly, SQLite persistence, release infrastructure, locked docs.
+- Acceptance commands: `node --test tests/vibe/memory.test.mjs`, `node vibe/tools/verify.mjs`.
+- Out of scope: review panel UI, model-generated extraction, memory deduplication or ranking, AgentCore mirroring, token-budget assembly, SQLite.
+- Branch: `vibe/m5/memory` → PR into `vibe/main`.
+- Delivered: `src/stable/context-engine/memory-store.mjs` persists global user facts and project-scoped facts in JSONL event logs. New and revised facts are `pending`, reviews gate recall, revisions preserve stable ids, and `approve`, `reject`, and `forget` require the exact reviewed revision so stale decisions cannot approve a newer value. `recall` returns only approved facts by default, `includePending` is explicit, and every returned entry carries `sourceTrust: untrusted-memory-content`. Project paths use a SHA-256 key derived from the exact id, preventing case-only collisions on Windows. The store rejects a new fact at the 10,000-entry cap while still permitting revisions, and compacts to current live state when the 20,000,000-byte log cannot fit the next event. It validates JSON-safe values and ids, rejects path traversal and Windows-reserved project ids, enforces nesting/key/value/query/page caps, and serializes writes per scope within a store instance. The review API is ready for the later IDE panel; that UI is not wired yet.
+- Tests: `node --test tests/vibe/memory.test.mjs` PASS (11/11); `node vibe/tools/verify.mjs` PASS (4/4 steps, 68 tests); `git diff --check` clean.
+- Guardians: qa-verifier PASS (added revision-validation and compaction-preservation coverage); drift-sentinel PASS using a read-only explorer fallback with the exact checklist after the dedicated role stalled; security-reviewer PASS with low residual notes (cross-instance delete race, Windows ACL hardening, raw helper exposure, wide-value capture cap, caller-supplied secret screening, lexical containment, and compaction durability); docs-keeper PASS after reconciling living docs; governance-verifier PASS as not applicable (no locked path); tech-scout PASS as not applicable (Node built-ins only); release-manager PASS as not applicable (M5 remains in progress and this is not a release build).
+- Next step: continue M5 with token-budget assembly (D4); bind the project/user memory review panel in the IDE, add the noted memory hardening before user-facing release, and align ADR-0003 with the JSONL implementation in a separately scoped docs slice.
 
 ### 2026-11-21 — M5 summary DAG and recall tools
 
@@ -27,7 +41,7 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 ### 2026-11-21 — M0 Vibecodium icon package
 
 - Goal / must-haves: replace the upstream Codium icon sources with Vibecodium-owned vectors and make the build generate its fallback PNG/ICO assets from those local sources instead of downloading upstream artwork. A1 (user-visible branding), G4 build-contract evidence only.
-- Files allowed: `icons/**`, `src/stable/resources/{win32,linux,server,[PERSON_NAME]}/*`, `src/stable/src/vs/workbench/browser/media/code-icon.svg`, `README.md`, `tests/vibe/icon-assets.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/CHANGELOG.md`, `docs/vibe/STATUS.md`.
+- Files allowed: `icons/**`, `src/stable/resources/{win32,linux,server,darwin}/*`, `src/stable/src/vs/workbench/browser/media/code-icon.svg`, `README.md`, `tests/vibe/icon-assets.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/CHANGELOG.md`, `docs/vibe/STATUS.md`.
 - Files forbidden: upstream source, build orchestration outside `icons/`, CI workflows, release infrastructure, installer templates, dependencies, locked docs.
 - Acceptance commands: `node --test tests/vibe/icon-assets.test.mjs`, `node vibe/tools/verify.mjs`.
 - Out of scope: a full Windows rebuild, installer/zip packaging, CI changes, signing, update-feed activation, trademark clearance.
