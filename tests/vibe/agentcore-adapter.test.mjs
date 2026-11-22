@@ -188,6 +188,7 @@ test('append mirrors only unmirrored records in bounded batches', async () => {
   const store = {
     async readAll() { return records; },
     async append() { throw new Error('append must not be called when hydrating remote state'); },
+    async appendIfUnchanged() { throw new Error('appendIfUnchanged must not be called when appending'); },
   };
   const batchSizes = [];
   const client = {
@@ -220,6 +221,7 @@ test('a resume cursor skips records already mirrored', async () => {
   const store = {
     async readAll() { return records; },
     async append() {},
+    async appendIfUnchanged() {},
   };
   const adapter = new AgentCoreAdapter({ store, sessionId: 'resume-session', client, mirrored: 2 });
 
@@ -245,6 +247,7 @@ test('cumulative remote session size is capped', async () => {
   const store = {
     async readAll() { return []; },
     async append() {},
+    async appendIfUnchanged() {},
   };
   const client = {
     async hydrate() { return { records }; },
@@ -376,6 +379,7 @@ test('input and remote caps fail closed before touching the remote or local stor
     store: {
       async readAll() { return [remoteRecord(0, 'x'.repeat(MAX_REMOTE_RECORD_BYTES))]; },
       async append() {},
+      async appendIfUnchanged() {},
     },
     sessionId: 'oversized',
     client: { async hydrate() { return { records: [] }; }, async append() { throw new Error('must not be called'); }, async close() {} },
@@ -387,6 +391,7 @@ test('input and remote caps fail closed before touching the remote or local stor
     store: {
       async readAll() { return snapshots.shift(); },
       async append() {},
+      async appendIfUnchanged() {},
     },
     sessionId: 'shrinking',
     client: { async hydrate() { return { records: [] }; }, async append() { return { accepted: 2 }; }, async close() {} },
@@ -402,7 +407,7 @@ test('input and remote caps fail closed before touching the remote or local stor
   await assert.rejects(invalidResponse.hydrate(), /must include a records array/);
 
   const badAck = new AgentCoreAdapter({
-    store: { async readAll() { return [remoteRecord(0)]; }, async append() {} },
+    store: { async readAll() { return [remoteRecord(0)]; }, async append() {}, async appendIfUnchanged() {} },
     sessionId: 'bad-ack',
     client: { async hydrate() { return { records: [] }; }, async append() { return { accepted: 0 }; }, async close() {} },
   });
@@ -589,7 +594,7 @@ test('a record of exactly the documented byte cap is accepted', async (t) => {
 
 test('the payload budget matches JSON byte length across random payloads', async () => {
   const holder = { records: [] };
-  const store = { async readAll() { return []; }, async append() {} };
+  const store = { async readAll() { return []; }, async append() {}, async appendIfUnchanged() {} };
   const client = {
     async hydrate() { return { records: holder.records }; },
     async append() { return { accepted: 0 }; },
@@ -767,4 +772,72 @@ test('client response accessors and record-array proxies fail as adapter errors 
     assert.doesNotMatch(error.message, /MARKER/);
     return true;
   });
+});
+
+test('hydrate refuses to race a concurrent local append and leaves the local transcript intact', async (t) => {
+  const local = await createStore(t);
+  const remoteRecords = [remoteRecord(0), remoteRecord(1)];
+  const client = {
+    async hydrate() {
+      await local.append('assistant', 'local during hydrate');
+      return { records: remoteRecords };
+    },
+    async append() { throw new Error('append must not be called during hydrate'); },
+    async close() {},
+  };
+  const adapter = new AgentCoreAdapter({ store: local, sessionId: 'session-race', client });
+
+  await assert.rejects(adapter.hydrate(), (error) => {
+    assert.ok(error instanceof AgentCoreAdapterError);
+    assert.equal(error.phase, 'hydrate');
+    assert.doesNotMatch(error.message, /local during hydrate|remote record/);
+    return true;
+  });
+
+  const records = await readAllOrEmpty(local);
+  assert.equal(records.length, 1, 'hydration must not append the stale remote tail');
+  assert.deepEqual(records[0], { kind: 'assistant', payload: 'local during hydrate', sequence: 0 });
+  assert.equal(adapter.mirrored, 0, 'the cursor must not advance past an unmirrored local record');
+});
+
+test('hydrate matches a repeated null-prototype transcript and ignores key order', async (t) => {
+  const local = await createStore(t);
+  const nullProto = (value) => {
+    const out = Object.create(null);
+    for (const key of Object.keys(value)) out[key] = value[key];
+    return out;
+  };
+  const firstPayload = {
+    name: 'read_file',
+    args: nullProto({ path: 'src/app.ts', options: nullProto({ recursive: true }) }),
+  };
+  const secondPayload = {
+    args: { options: { recursive: true }, path: 'src/app.ts' },
+    name: 'read_file',
+  };
+  let call = 0;
+  const client = {
+    async hydrate() {
+      call += 1;
+      return {
+        records: [{
+          kind: 'tool_call',
+          payload: call === 1 ? firstPayload : secondPayload,
+          sequence: 0,
+        }],
+      };
+    },
+    async append() { return { accepted: 0 }; },
+    async close() {},
+  };
+  const adapter = new AgentCoreAdapter({ store: local, sessionId: 'session-null-proto', client });
+
+  const first = await adapter.hydrate();
+  assert.equal(first.hydrated, 1);
+  assert.equal(first.sourceTrust, 'untrusted-session-content');
+
+  const second = await adapter.hydrate();
+  assert.equal(second.hydrated, 0, 'an unchanged transcript must not conflict on prototype or key order');
+  assert.equal(second.total, 1);
+  assert.equal((await readAllOrEmpty(local)).length, 1);
 });

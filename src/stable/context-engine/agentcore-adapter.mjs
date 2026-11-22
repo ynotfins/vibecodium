@@ -1,5 +1,3 @@
-import { isDeepStrictEqual } from 'node:util';
-
 import {
   MAX_FILE_SIZE, MAX_NESTING_DEPTH, MAX_RECORD_SIZE, MAX_RECORDS,
 } from './session-store.mjs';
@@ -250,11 +248,45 @@ function validateRecords(records, options) {
   return { bytes: totalBytes, payloads, kinds };
 }
 
+function sameJsonValue(left, right) {
+  if (left === right) return true;
+  if (left === null || right === null) return false;
+  if (typeof left !== 'object' || typeof right !== 'object') return false;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+      return false;
+    }
+    for (let index = 0; index < left.length; index += 1) {
+      if (!sameJsonValue(left[index], right[index])) return false;
+    }
+    return true;
+  }
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  for (const key of leftKeys) {
+    if (!Object.prototype.hasOwnProperty.call(right, key)) return false;
+    if (!sameJsonValue(left[key], right[key])) return false;
+  }
+  return true;
+}
+
+function sameRecordContent(left, right) {
+  return left.kind === right.kind
+    && left.sequence === right.sequence
+    && sameJsonValue(left.payload, right.payload);
+}
+
 export class AgentCoreAdapter {
   constructor({ store, sessionId, client, mirrored = 0 } = {}) {
     this.sessionId = validateSessionId(sessionId);
-    if (!store || typeof store.readAll !== 'function' || typeof store.append !== 'function') {
-      throw new Error('store must provide readAll() and append()');
+    if (
+      !store
+      || typeof store.readAll !== 'function'
+      || typeof store.append !== 'function'
+      || typeof store.appendIfUnchanged !== 'function'
+    ) {
+      throw new Error('store must provide readAll(), append() and appendIfUnchanged()');
     }
     if (!Number.isInteger(mirrored) || mirrored < 0) {
       throw new Error('mirrored must be a non-negative integer');
@@ -380,7 +412,7 @@ export class AgentCoreAdapter {
         );
       }
       for (let index = 0; index < local.length; index += 1) {
-        if (!isDeepStrictEqual(local[index], remote[index])) {
+        if (!sameRecordContent(local[index], remote[index])) {
           throw new AgentCoreAdapterError(
             `agentcore hydrate record ${index} conflicts with local record ${index} for session ${this.sessionId}`,
             { phase: 'hydrate', sessionId: this.sessionId },
@@ -389,8 +421,12 @@ export class AgentCoreAdapter {
       }
 
       const missing = remote.slice(local.length);
-      for (let index = 0; index < missing.length; index += 1) {
-        await this.store.append(remoteResult.kinds[local.length + index], remoteResult.payloads[local.length + index]);
+      if (missing.length > 0) {
+        const records = missing.map((record, position) => ({
+          kind: remoteResult.kinds[local.length + position],
+          payload: remoteResult.payloads[local.length + position],
+        }));
+        await this.store.appendIfUnchanged(local, records);
       }
       if (remote.length > this.mirrored) this.mirrored = remote.length;
       return {
