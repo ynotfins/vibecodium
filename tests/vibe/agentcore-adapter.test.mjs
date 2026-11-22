@@ -881,3 +881,40 @@ test('appendIfUnchanged validates the whole batch before writing any record', as
   assert.equal(records.length, 1, 'a failed batch must not leave a partial write');
   assert.deepEqual(records[0], { kind: 'user', payload: 'original', sequence: 0 });
 });
+
+test('hydrate matches a null-prototype remote payload against a plain local transcript', async (t) => {
+  const local = await createStore(t);
+  const plainPayload = {
+    name: 'read_file',
+    args: { path: 'src/app.ts', options: { recursive: true } },
+  };
+  const nestedArgs = Object.create(null);
+  const nestedOptions = Object.create(null);
+  nestedOptions.recursive = true;
+  nestedArgs.path = 'src/app.ts';
+  nestedArgs.options = nestedOptions;
+  const nullProtoPayload = Object.create(null);
+  nullProtoPayload.name = 'read_file';
+  nullProtoPayload.args = nestedArgs;
+  let call = 0;
+  const client = {
+    async hydrate() {
+      call += 1;
+      return {
+        records: [{
+          kind: 'tool_call',
+          payload: call === 1 ? plainPayload : nullProtoPayload,
+          sequence: 0,
+        }],
+      };
+    },
+    async append() { return { accepted: 0 }; },
+    async close() {},
+  };
+  const adapter = new AgentCoreAdapter({ store: local, sessionId: 'session-null-proto-remote', client });
+
+  assert.equal((await adapter.hydrate()).hydrated, 1);
+  const second = await adapter.hydrate();
+  assert.equal(second.hydrated, 0, 'a null-prototype remote payload must match the plain local payload');
+  assert.equal((await readAllOrEmpty(local)).length, 1);
+});
