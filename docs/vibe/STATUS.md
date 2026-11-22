@@ -11,6 +11,19 @@ Current milestone: M0 (in progress)
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
 
+### 2026-11-21 — M5 summary DAG and recall tools
+
+- Goal / must-haves: build the standalone Vibe Context Engine summary DAG over lossless session records: leaf and condensed summary nodes, a protected fresh tail, and bounded `grep`, `describe`, and `expand` recall tools. D2 (summary DAG and expand retrieval); D1 remains satisfied by the unchanged append-only store.
+- Files allowed: `src/stable/context-engine/**`, `tests/vibe/context-engine.test.mjs`, `docs/vibe/dev/BUILD.md`, `docs/vibe/CHANGELOG.md`, `docs/vibe/ROADMAP.md`, `docs/vibe/STATUS.md`.
+- Files forbidden: upstream source, IDE integration, dependencies, AgentCore adapter, project/user memory, SQLite persistence, cache-stable prompt assembly, release infrastructure, locked docs.
+- Acceptance commands: `node --test tests/vibe/context-engine.test.mjs`, `node vibe/tools/verify.mjs`.
+- Out of scope: model-backed summary quality, streaming/incremental compaction, SQLite schema, UI, prompt assembly, AgentCore mirroring, project and user memory.
+- Branch: `vibe/m5/summary-dag` → PR into `vibe/main`.
+- Delivered: `src/stable/context-engine/summary-dag.mjs` builds leaf and condensed summary nodes over the append-only session store, keeps a configurable fresh tail unsummarized, and exposes bounded `grep`, `describe`, `list`, and `expand` recall. `grep` is case-insensitive literal substring matching with no caller-supplied regular expressions; `expand` pages through the original records; content-bearing results carry `sourceTrust: untrusted-session-content`; and the raw transcript is never rewritten.
+- Tests: `node --test tests/vibe/context-engine.test.mjs` PASS (8/8), including recovery of a turn-5 detail through `grep` and `expand` from a 210-record session; `node vibe/tools/verify.mjs` PASS (4/4 steps, 57 tests); `git diff --check` clean.
+- Guardians: qa-verifier PASS after the security follow-up; drift-sentinel PASS; security-reviewer PASS after removing regex execution and bounding outputs; docs-keeper PASS after reconciling the living docs; governance-verifier PASS as not applicable (no locked path changed); tech-scout PASS as not applicable (no dependency change); release-manager PASS as not applicable (not a milestone exit or release build).
+- Next step: continue M5 with project/user memory (D3) and token-budget assembly (D4) as separate standalone slices; the M4-backed graph integration remains outstanding.
+
 ### 2026-11-21 — M0 Vibecodium icon package
 
 - Goal / must-haves: replace the upstream Codium icon sources with Vibecodium-owned vectors and make the build generate its fallback PNG/ICO assets from those local sources instead of downloading upstream artwork. A1 (user-visible branding), G4 build-contract evidence only.
