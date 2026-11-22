@@ -532,6 +532,13 @@ test('remote-supplied values never reach adapter error messages', async (t) => {
     return true;
   });
 
+  holder.records = [{ kind: 'user', payload: 'x', sequence: 987654 }];
+  await assert.rejects(adapter.hydrate(), (error) => {
+    assert.match(error.message, /contiguous/);
+    assert.doesNotMatch(error.message, /987654/);
+    return true;
+  });
+
   accepted = 1.5;
   await assert.rejects(adapter.append(), (error) => {
     assert.match(error.message, /acknowledgement/);

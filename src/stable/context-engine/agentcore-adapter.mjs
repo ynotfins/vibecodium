@@ -187,7 +187,7 @@ function validateRecordBody(record, index, { sessionId, phase, source, capture }
     fail('has an invalid sequence');
   }
   if (sequence !== index) {
-    fail(`has sequence ${sequence}, but ${source} records must be contiguous from sequence 0`);
+    fail(`has a non-contiguous sequence; ${source} records must be contiguous from sequence 0`);
   }
   const envelopeBytes = RECORD_ENVELOPE_BYTES + jsonStringBytes(kind) + String(sequence).length;
   const state = { seen: new WeakSet(), nodes: 0, bytes: envelopeBytes, capture };
