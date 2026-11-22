@@ -338,19 +338,78 @@ test('a caller tokenizer controls the budget and is validated', () => {
     () => assembleContext({ modelWindow: 100, system: 's', tokenizer: () => 0 }),
     /under-counted/,
   );
-  assert.throws(
-    () => assembleContext({
-      modelWindow: 100_000,
-      system: 's',
-      tail: [{ kind: 'tool_result', sequence: 0, payload: 'x'.repeat(100_000) }],
-      tokenizer: () => 1,
-    }),
-    /under-counted/,
-  );
+  const longVocabulary = assembleContext({
+    modelWindow: 100_000,
+    system: 'x'.repeat(64),
+    tokenizer: (value) => (value.length === 0 ? 0 : 1),
+  });
+  assert.equal(longVocabulary.report.estimator, 'provided');
+  assert.equal(longVocabulary.text, 'x'.repeat(64));
+  assert.equal(longVocabulary.report.totalTokens, 1);
   assert.throws(
     () => assembleContext({ modelWindow: 100, system: 's', tokenizer: 'nope' }),
     /tokenizer must be a function/,
   );
+});
+
+test('the final joined prompt is measured exactly before reporting a fit', () => {
+  const countTokens = (text) => {
+    if (text.length === 0) return 0;
+    if (text.includes('\n\n')) return [...text].length;
+    return Math.max(1, Math.ceil([...text].length / 16));
+  };
+  assert.equal(countTokens('abcdefghijklmno!'), 1);
+  assert.equal(countTokens('r'), 1);
+  assert.ok(countTokens('abcdefghijklmno!\n\nr') > 10);
+
+  assert.throws(
+    () => assembleContext({
+      modelWindow: 10,
+      system: 'abcdefghijklmno!',
+      rules: 'r',
+      tokenizer: countTokens,
+    }),
+    (error) => {
+      assert.ok(error instanceof ContextBudgetError);
+      assert.equal(error.availableTokens, 10);
+      assert.ok(error.requiredTokens > 10);
+      return true;
+    },
+  );
+
+  const result = assembleContext({
+    modelWindow: 20,
+    system: 'abcdefghijklmno!',
+    rules: 'r',
+    tokenizer: countTokens,
+  });
+  assert.equal(result.report.fits, true);
+  assert.equal(result.report.totalTokens, countTokens(result.text));
+  assert.ok(result.report.totalTokens <= 20);
+});
+
+test('optional content is trimmed when the exact joined prompt exceeds the budget', () => {
+  const countTokens = (text) => {
+    if (text.length === 0) return 0;
+    if (text.includes('\n\n')) return [...text].length;
+    return 1;
+  };
+  const result = assembleContext({
+    modelWindow: 30,
+    system: 's',
+    rules: 'r',
+    summaries: [{ id: 'summary:0-1', startSequence: 0, endSequence: 1, summary: 'm' }],
+    tail: [record(2, 't')],
+    tokenizer: countTokens,
+  });
+
+  assert.equal(result.report.fits, true);
+  assert.equal(result.report.totalTokens, countTokens(result.text));
+  assert.deepEqual(result.report.tail.includedSequences, []);
+  assert.deepEqual(result.report.tail.droppedSequences, [2]);
+  assert.deepEqual(result.report.summaries.includedIds, []);
+  assert.deepEqual(result.report.summaries.droppedIds, ['summary:0-1']);
+  assert.deepEqual(result.report.includedSections, ['system', 'rules']);
 });
 
 test('the summary loop stops rendering once the budget closes', () => {

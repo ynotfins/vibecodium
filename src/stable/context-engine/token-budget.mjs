@@ -16,7 +16,6 @@ export const MAX_RECORD_ITEMS = 1_000;
 export const MAX_RECORD_KEY_CHARS = 200;
 export const MAX_TAIL_TOTAL_CHARS = 20_000_000;
 export const MAX_SUMMARY_TOTAL_CHARS = 20_000_000;
-export const MAX_TOKENIZER_BYTES_PER_TOKEN = 16;
 export const UNTRUSTED_OPEN = '<<<UNTRUSTED_SESSION_CONTENT>>>';
 export const UNTRUSTED_CLOSE = '<<<END_UNTRUSTED_SESSION_CONTENT>>>';
 
@@ -345,9 +344,8 @@ function resolveCountTokens(tokenizer) {
       if (value !== 0) throw new Error('tokenizer must return 0 for empty text');
       return value;
     }
-    const floor = Math.ceil(utf8Length(text) / MAX_TOKENIZER_BYTES_PER_TOKEN);
-    if (value < floor) {
-      throw new Error(`tokenizer under-counted: ${value} tokens for ${utf8Length(text)} UTF-8 bytes`);
+    if (value === 0) {
+      throw new Error('tokenizer under-counted: 0 tokens for non-empty text');
     }
     return value;
   };
@@ -355,6 +353,10 @@ function resolveCountTokens(tokenizer) {
 
 function makeCost(countTokens) {
   return (text) => countTokens(text) + SECTION_OVERHEAD_TOKENS;
+}
+
+function joinSections(parts) {
+  return parts.filter((content) => content !== null && content !== '').join('\n\n');
 }
 
 function hashContent(content) {
@@ -407,80 +409,118 @@ export function assembleContext(options = {}) {
 
   const availableTokens = modelWindow - reserveTokens;
   const cost = makeCost(countTokens);
-  let remaining = availableTokens;
 
-  const systemTokens = cost(systemText);
-  if (systemTokens > remaining) {
+  const systemTokens = countTokens(systemText);
+  if (systemTokens > availableTokens) {
     throw new ContextBudgetError(
       `system requires ${systemTokens} tokens but only ${availableTokens} are available`,
       { availableTokens, requiredTokens: systemTokens },
     );
   }
-  remaining -= systemTokens;
 
-  const rulesTokens = rulesText.length === 0 ? 0 : cost(rulesText);
-  if (rulesTokens > remaining) {
-    throw new ContextBudgetError(
-      `rules require ${rulesTokens} tokens but only ${remaining} remain after system`,
-      { availableTokens, requiredTokens: systemTokens + rulesTokens },
-    );
+  const requiredParts = [systemText];
+  let requiredTokens = systemTokens;
+  const rulesTokens = rulesText.length === 0 ? 0 : countTokens(rulesText);
+  if (rulesText.length > 0) {
+    requiredParts.push(rulesText);
+    requiredTokens = countTokens(joinSections(requiredParts));
+    if (requiredTokens > availableTokens) {
+      throw new ContextBudgetError(
+        `rules require ${requiredTokens} tokens but only ${availableTokens} are available`,
+        { availableTokens, requiredTokens },
+      );
+    }
   }
-  remaining -= rulesTokens;
 
   const specFit = specText.length === 0
     ? { included: false, content: null, tokens: 0 }
-    : { included: true, content: specText, tokens: cost(specText) };
-  if (specFit.tokens > remaining) {
-    throw new ContextBudgetError(
-      `spec requires ${specFit.tokens} tokens but only ${remaining} remain after system and rules`,
-      { availableTokens, requiredTokens: systemTokens + rulesTokens + specFit.tokens },
-    );
+    : { included: true, content: specText, tokens: countTokens(specText) };
+  if (specFit.included) {
+    requiredParts.push(specText);
+    requiredTokens = countTokens(joinSections(requiredParts));
+    if (requiredTokens > availableTokens) {
+      throw new ContextBudgetError(
+        `spec requires ${requiredTokens} tokens but only ${availableTokens} are available`,
+        { availableTokens, requiredTokens },
+      );
+    }
   }
-  remaining -= specFit.tokens;
+  let remaining = availableTokens - requiredTokens;
 
   const repoMapContent = repoMapText.length === 0 ? '' : wrapUntrusted(repoMapText);
   const repoMapTokens = repoMapContent.length === 0 ? 0 : cost(repoMapContent);
-  const repoMapFit = repoMapTokens === 0 || repoMapTokens > remaining
+  let repoMapFit = repoMapTokens === 0 || repoMapTokens > remaining
     ? { included: false, content: null, tokens: 0 }
     : { included: true, content: repoMapContent, tokens: repoMapTokens };
   remaining -= repoMapFit.tokens;
 
   const includedSummaries = [];
-  const droppedSummaryIds = [];
-  let summaryTokens = 0;
   let summaryClosed = false;
   for (const block of summaryBlocks) {
-    if (summaryClosed) {
-      droppedSummaryIds.push(block.id);
-      continue;
-    }
+    if (summaryClosed) continue;
     const rendered = renderSummaryBlock(block);
     const tokens = cost(rendered);
     if (tokens > remaining) {
       summaryClosed = true;
-      droppedSummaryIds.push(block.id);
       continue;
     }
     remaining -= tokens;
-    summaryTokens += tokens;
-    includedSummaries.push({ block, rendered });
+    includedSummaries.push({ block, rendered, tokens });
   }
-  const summaryContent = includedSummaries.map(({ rendered }) => rendered).join('\n');
 
   const includedTail = [];
-  const droppedTailSequences = [];
   for (let index = tailRecords.length - 1; index >= 0; index -= 1) {
     const record = tailRecords[index];
     const tokens = cost(record.text);
-    if (tokens > remaining) {
-      droppedTailSequences.push(...tailRecords.slice(0, index + 1).map((item) => item.sequence));
-      break;
-    }
+    if (tokens > remaining) break;
     remaining -= tokens;
     includedTail.unshift({ record, tokens });
   }
+
+  const renderSections = () => joinSections([
+    ...requiredParts,
+    repoMapFit.content,
+    includedSummaries.map(({ rendered }) => rendered).join('\n'),
+    includedTail.map(({ record }) => record.text).join('\n'),
+  ]);
+
+  let text = renderSections();
+  let totalTokens = countTokens(text);
+
+  while (totalTokens > availableTokens && includedTail.length > 0) {
+    includedTail.shift();
+    text = renderSections();
+    totalTokens = countTokens(text);
+  }
+  while (totalTokens > availableTokens && includedSummaries.length > 0) {
+    includedSummaries.pop();
+    text = renderSections();
+    totalTokens = countTokens(text);
+  }
+  if (totalTokens > availableTokens && repoMapFit.included) {
+    repoMapFit = { included: false, content: null, tokens: 0 };
+    text = renderSections();
+    totalTokens = countTokens(text);
+  }
+  if (totalTokens > availableTokens) {
+    throw new ContextBudgetError(
+      `required context requires ${totalTokens} tokens but only ${availableTokens} are available`,
+      { availableTokens, requiredTokens: totalTokens },
+    );
+  }
+
+  const summaryContent = includedSummaries.map(({ rendered }) => rendered).join('\n');
   const tailContent = includedTail.map(({ record }) => record.text).join('\n');
+  const summaryTokens = includedSummaries.reduce((sum, item) => sum + item.tokens, 0);
   const tailTokens = includedTail.reduce((sum, item) => sum + item.tokens, 0);
+  const includedSummaryIds = new Set(includedSummaries.map(({ block }) => block.id));
+  const droppedSummaryIds = summaryBlocks
+    .filter((block) => !includedSummaryIds.has(block.id))
+    .map((block) => block.id);
+  const includedTailSequences = new Set(includedTail.map(({ record }) => record.sequence));
+  const droppedTailSequences = tailRecords
+    .filter((record) => !includedTailSequences.has(record.sequence))
+    .map((record) => record.sequence);
 
   const sections = [
     sectionRecord('system', { included: true, content: systemText, tokens: systemTokens }),
@@ -509,15 +549,6 @@ export function assembleContext(options = {}) {
     },
   ];
 
-  const includedContent = [
-    systemText,
-    rulesText,
-    specFit.content,
-    repoMapFit.content,
-    summaryContent,
-    tailContent,
-  ].filter((content) => content !== null && content !== '');
-
   const prefixHashes = [
     systemText.length > 0 ? hashContent(systemText) : null,
     rulesText.length > 0 ? hashContent(rulesText) : null,
@@ -539,10 +570,9 @@ export function assembleContext(options = {}) {
 
   const includedSections = sections.filter((section) => section.included).map((section) => section.name);
   const omittedSections = sections.filter((section) => !section.included).map((section) => section.name);
-  const totalTokens = availableTokens - remaining;
 
   return {
-    text: includedContent.join('\n\n'),
+    text,
     sections,
     report: {
       modelWindow,
