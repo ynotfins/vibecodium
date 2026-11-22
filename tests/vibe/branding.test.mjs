@@ -4,6 +4,8 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { generateUpdateFeeds } from '../../vibe/tools/update-feed.mjs';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (rel) => readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
 
@@ -20,6 +22,7 @@ test('stable build metadata identifies Vibecodium with an independent Windows id
   assert.match(utils, /^APP_NAME="\$\{APP_NAME:-Vibecodium\}"$/m);
   assert.match(utils, /^BINARY_NAME="\$\{BINARY_NAME:-vibecodium\}"$/m);
   assert.match(utils, /^GH_REPO_PATH="\$\{GH_REPO_PATH:-ynotfins\/vibecodium\}"$/m);
+  assert.match(utils, /^ASSETS_REPOSITORY="\$\{ASSETS_REPOSITORY:-ynotfins\/vibecodium\}"$/m);
   assert.match(utils, /^ORG_NAME="\$\{ORG_NAME:-Vibecodium\}"$/m);
 
   for (const [field, value] of Object.entries({
@@ -78,11 +81,11 @@ test('dev/build.sh must not defeat the branded identity defaults', () => {
   // The wrapper `vibe/dev/build-windows.sh` calls `dev/build.sh` unconditionally;
   // upstream's hardcoded exports would override the branded defaults in utils.sh
   // for every patch placeholder (!!APP_NAME!!, !!ORG_NAME!!, ...) and artifact name.
-  // ASSETS_REPOSITORY deliberately mirrors utils.sh: it stays on the upstream assets
-  // feed until the own-update-feed slice (M0) brands the download/update endpoints.
+  // ASSETS_REPOSITORY now mirrors utils.sh too: it points at the Vibecodium product
+  // repository, whose releases and generated update feeds the build consumes.
   for (const [key, value] of Object.entries({
     APP_NAME: 'Vibecodium',
-    ASSETS_REPOSITORY: 'VSCodium/vscodium',
+    ASSETS_REPOSITORY: 'ynotfins/vibecodium',
     BINARY_NAME: 'vibecodium',
     GH_REPO_PATH: 'ynotfins/vibecodium',
     ORG_NAME: 'Vibecodium',
@@ -98,6 +101,76 @@ test('dev/build.sh must not defeat the branded identity defaults', () => {
   assert.match(build, /^export CI_BUILD="no"$/m);
 
   // The insider flag forces insider identity (plain assignments, like upstream).
-  assert.match(build, /export ASSETS_REPOSITORY="VSCodium\/vscodium-insiders"/);
+  assert.match(build, /export ASSETS_REPOSITORY="ynotfins\/vibecodium-insiders"/);
   assert.match(build, /export BINARY_NAME="vibecodium-insiders"/);
+});
+
+const UPDATE_BLOCK_START = 'if [[ "${DISABLE_UPDATE}" != "yes" ]]; then';
+
+function updateBlock() {
+  const prepare = read('prepare_vscode.sh');
+  const start = prepare.indexOf(UPDATE_BLOCK_START);
+  const end = prepare.indexOf('\nfi\n', start);
+  assert.ok(start >= 0 && end > start, 'the update configuration block must exist');
+  return prepare.slice(start, end);
+}
+
+function resolveDefault(value) {
+  return value.replace(/\$\{(?:GH_REPO_PATH|ASSETS_REPOSITORY):-([^}]+)\}/g, '$1');
+}
+
+test('update and download endpoints use the Vibecodium feed and release page', () => {
+  const block = updateBlock();
+  const update = block.match(/setpath "product" "updateUrl" "([^"]+)"/);
+  const download = block.match(/setpath "product" "downloadUrl" "([^"]+)"/);
+
+  assert.ok(update, 'updateUrl must be set');
+  assert.ok(download, 'downloadUrl must be set');
+  assert.equal(
+    resolveDefault(update[1]),
+    'https://raw.githubusercontent.com/ynotfins/vibecodium/refs/heads/vibe/main/update-feed',
+  );
+  assert.equal(resolveDefault(download[1]), 'https://github.com/ynotfins/vibecodium/releases');
+  assert.doesNotMatch(block, /VSCodium|vscodium/);
+  assert.doesNotMatch(read('prepare_vscode.sh'), /raw\.githubusercontent\.com\/VSCodium\/versions/);
+});
+
+test('Linux package metadata endpoints point at Vibecodium', () => {
+  const prepare = read('prepare_vscode.sh');
+  const start = prepare.indexOf('# fix the packages metadata');
+  const end = prepare.indexOf('elif [[ "\${OS_NAME}" == "windows" ]]', start);
+  assert.ok(start >= 0 && end > start, 'the Linux package metadata block must exist');
+  const block = prepare.slice(start, end);
+  assert.match(block, /https:\/\/github\.com\/ynotfins\/vibecodium#download-install/);
+  assert.doesNotMatch(block, /VSCodium\/vscodium#download-install/);
+  assert.doesNotMatch(block, /vscodium\.com/);
+});
+
+test('the branded feed root matches the manifest generator paths', () => {
+  const update = updateBlock().match(/setpath "product" "updateUrl" "([^"]+)"/);
+  assert.ok(update, 'updateUrl must be set');
+  const feedRoot = resolveDefault(update[1]);
+
+  const feeds = generateUpdateFeeds({
+    name: 'Vibecodium',
+    version: '1.147.0',
+    commit: '0123456789abcdef0123456789abcdef01234567',
+    date: '2026-11-22',
+    quality: 'stable',
+    assets: [{
+      platform: 'win32',
+      architecture: 'x64',
+      target: 'system',
+      path: 'Vibecodium-x64-system-1.147.0.exe',
+      sha256: 'a'.repeat(64),
+      size: 123,
+    }],
+  }, { assetUrlRoot: 'https://github.com/ynotfins/vibecodium/releases/download/1.147.0' });
+
+  assert.equal(feeds.length, 1);
+  assert.equal(feeds[0].path, 'stable/win32/x64/system/latest.json');
+  assert.equal(
+    `${feedRoot}/${feeds[0].path}`,
+    'https://raw.githubusercontent.com/ynotfins/vibecodium/refs/heads/vibe/main/update-feed/stable/win32/x64/system/latest.json',
+  );
 });

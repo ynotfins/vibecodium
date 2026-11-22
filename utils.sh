@@ -2,7 +2,7 @@
 
 APP_NAME="${APP_NAME:-Vibecodium}"
 APP_NAME_LC="$( echo "${APP_NAME}" | awk '{print tolower($0)}' )"
-ASSETS_REPOSITORY="${ASSETS_REPOSITORY:-VSCodium/vscodium}"
+ASSETS_REPOSITORY="${ASSETS_REPOSITORY:-ynotfins/vibecodium}"
 BINARY_NAME="${BINARY_NAME:-vibecodium}"
 GH_REPO_PATH="${GH_REPO_PATH:-ynotfins/vibecodium}"
 ORG_NAME="${ORG_NAME:-Vibecodium}"

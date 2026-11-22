@@ -51,13 +51,9 @@ setpath "product" "tipsAndTricksUrl" "https://go.microsoft.com/fwlink/?linkid=85
 setpath "product" "twitterUrl" "https://go.microsoft.com/fwlink/?LinkID=533687"
 
 if [[ "${DISABLE_UPDATE}" != "yes" ]]; then
-  setpath "product" "updateUrl" "https://raw.githubusercontent.com/VSCodium/versions/refs/heads/master"
-
-  if [[ "${VSCODE_QUALITY}" == "insider" ]]; then
-    setpath "product" "downloadUrl" "https://github.com/VSCodium/vscodium-insiders/releases"
-  else
-    setpath "product" "downloadUrl" "https://github.com/VSCodium/vscodium/releases"
-  fi
+  # Own update feed: manifests are published under vibe/update-feed on vibe/main.
+  setpath "product" "updateUrl" "https://raw.githubusercontent.com/${GH_REPO_PATH:-ynotfins/vibecodium}/refs/heads/vibe/main/update-feed"
+  setpath "product" "downloadUrl" "https://github.com/${ASSETS_REPOSITORY:-ynotfins/vibecodium}/releases"
 fi
 
 # if [[ "${OS_NAME}" == "windows" ]]; then
@@ -264,22 +260,22 @@ if [[ "${OS_NAME}" == "linux" ]]; then
   # fix the packages metadata
   # code.appdata.xml
   sed -i 's|Visual Studio Code|VSCodium|g' resources/linux/code.appdata.xml
-  sed -i 's|https://code.visualstudio.com/docs/setup/linux|https://github.com/VSCodium/vscodium#download-install|' resources/linux/code.appdata.xml
-  sed -i 's|https://code.visualstudio.com/home/home-screenshot-linux-lg.png|https://vscodium.com/img/vscodium.png|' resources/linux/code.appdata.xml
-  sed -i 's|https://code.visualstudio.com|https://vscodium.com|' resources/linux/code.appdata.xml
+  sed -i 's|https://code.visualstudio.com/docs/setup/linux|https://github.com/ynotfins/vibecodium#download-install|' resources/linux/code.appdata.xml
+  sed -i 's|https://code.visualstudio.com/home/home-screenshot-linux-lg.png|https://raw.githubusercontent.com/ynotfins/vibecodium/vibe/main/src/stable/resources/linux/code.png|' resources/linux/code.appdata.xml
+  sed -i 's|https://code.visualstudio.com|https://github.com/ynotfins/vibecodium|' resources/linux/code.appdata.xml
 
   # control.template
   sed -i 's|Microsoft Corporation <vscode-linux@microsoft.com>|VSCodium Team https://github.com/VSCodium/vscodium/graphs/contributors|'  resources/linux/debian/control.template
   sed -i 's|Visual Studio Code|VSCodium|g' resources/linux/debian/control.template
-  sed -i 's|https://code.visualstudio.com/docs/setup/linux|https://github.com/VSCodium/vscodium#download-install|' resources/linux/debian/control.template
-  sed -i 's|https://code.visualstudio.com|https://vscodium.com|' resources/linux/debian/control.template
+  sed -i 's|https://code.visualstudio.com/docs/setup/linux|https://github.com/ynotfins/vibecodium#download-install|' resources/linux/debian/control.template
+  sed -i 's|https://code.visualstudio.com|https://github.com/ynotfins/vibecodium|' resources/linux/debian/control.template
 
   # code.spec.template
   sed -i 's|Microsoft Corporation|VSCodium Team|' resources/linux/rpm/code.spec.template
   sed -i 's|Visual Studio Code Team <vscode-linux@microsoft.com>|VSCodium Team https://github.com/VSCodium/vscodium/graphs/contributors|' resources/linux/rpm/code.spec.template
   sed -i 's|Visual Studio Code|VSCodium|' resources/linux/rpm/code.spec.template
-  sed -i 's|https://code.visualstudio.com/docs/setup/linux|https://github.com/VSCodium/vscodium#download-install|' resources/linux/rpm/code.spec.template
-  sed -i 's|https://code.visualstudio.com|https://vscodium.com|' resources/linux/rpm/code.spec.template
+  sed -i 's|https://code.visualstudio.com/docs/setup/linux|https://github.com/ynotfins/vibecodium#download-install|' resources/linux/rpm/code.spec.template
+  sed -i 's|https://code.visualstudio.com|https://github.com/ynotfins/vibecodium|' resources/linux/rpm/code.spec.template
 
   # snapcraft.yaml
   sed -i 's|Visual Studio Code|VSCodium|' resources/linux/rpm/code.spec.template
