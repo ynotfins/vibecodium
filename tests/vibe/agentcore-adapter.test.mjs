@@ -252,7 +252,7 @@ test('cumulative remote session size is capped', async () => {
     async close() {},
   };
   const adapter = new AgentCoreAdapter({ store, sessionId: 'huge-session', client });
-  await assert.rejects(adapter.hydrate(), /exceeds 50000000 bytes/);
+  await assert.rejects(adapter.hydrate(), /exceeds 49900000 bytes/);
 });
 
 test('concurrent append calls mirror each record exactly once', async (t) => {
@@ -380,7 +380,7 @@ test('input and remote caps fail closed before touching the remote or local stor
     sessionId: 'oversized',
     client: { async hydrate() { return { records: [] }; }, async append() { throw new Error('must not be called'); }, async close() {} },
   });
-  await assert.rejects(oversized.append(), /exceeds 1000000 bytes/);
+  await assert.rejects(oversized.append(), /exceeds 999999 bytes/);
 
   let snapshots = [[remoteRecord(0), remoteRecord(1)], [remoteRecord(0)]];
   const shrinking = new AgentCoreAdapter({
@@ -485,20 +485,24 @@ test('oversized remote payloads are rejected before serialization', async (t) =>
   t.after(() => { JSON.stringify = originalStringify; });
 
   holder.records = [{ kind: 'user', payload: { big: 'x'.repeat(5_000_000) }, sequence: 0 }];
-  await assert.rejects(adapter.hydrate(), /exceeds 1000000 bytes/);
+  await assert.rejects(adapter.hydrate(), /exceeds 999999 bytes/);
   assert.equal(stringifyCalls, 0, 'oversized payloads must be rejected before JSON.stringify');
 
   holder.records = [{ kind: 'user', payload: { ['k'.repeat(5_000_000)]: 'x' }, sequence: 0 }];
-  await assert.rejects(adapter.hydrate(), /exceeds 1000000 bytes/);
+  await assert.rejects(adapter.hydrate(), /exceeds 999999 bytes/);
   assert.equal(stringifyCalls, 0, 'oversized keys must be rejected before JSON.stringify');
 
   holder.records = [{ kind: 'user', payload: { big: '\u0000'.repeat(300_000) }, sequence: 0 }];
-  await assert.rejects(adapter.hydrate(), /exceeds 1000000 bytes/);
+  await assert.rejects(adapter.hydrate(), /exceeds 999999 bytes/);
   assert.equal(stringifyCalls, 0, 'escape inflation must be counted before JSON.stringify');
 
   holder.records = [{ kind: 'user', payload: 'x'.repeat(999_960), sequence: 0 }];
-  await assert.rejects(adapter.hydrate(), /exceeds 1000000 bytes/);
+  await assert.rejects(adapter.hydrate(), /exceeds 999999 bytes/);
   assert.equal(stringifyCalls, 0, 'the record envelope must be charged before JSON.stringify');
+  const sneaky = []; sneaky.toJSON = () => 'x'.repeat(5_000_000);
+  holder.records = [{ kind: 'user', payload: { list: sneaky }, sequence: 0 }];
+  await assert.rejects(adapter.hydrate(), /must not define toJSON|exceeds 999999 bytes/);
+  assert.equal(stringifyCalls, 0, 'an array toJSON must not bypass the payload walk');
 
   assert.deepEqual(await readAllOrEmpty(local), []);
 });
@@ -554,7 +558,72 @@ test('lone-surrogate payloads are rejected before serialization', async (t) => {
   // but JSON.stringify emits a 6-byte \ud800 escape. The walk therefore estimates
   // ~900KB while the real record is ~1.8MB.
   holder.records = [{ kind: 'user', payload: { big: '\ud800'.repeat(300_000) }, sequence: 0 }];
-  await assert.rejects(adapter.hydrate(), /exceeds 1000000 bytes/);
+  await assert.rejects(adapter.hydrate(), /exceeds 999999 bytes/);
   assert.equal(stringifyCalls, 0, 'lone-surrogate escape expansion must be counted before JSON.stringify');
   assert.deepEqual(await readAllOrEmpty(local), []);
+});
+test('a record of exactly the documented byte cap is accepted', async (t) => {
+  const local = await createStore(t);
+  const holder = { records: [{ kind: 'user', payload: 'x'.repeat(999_958), sequence: 0 }] };
+  const client = {
+    async hydrate() { return { records: holder.records }; },
+    async append() { return { accepted: 0 }; },
+    async close() {},
+  };
+  const adapter = new AgentCoreAdapter({ store: local, sessionId: 'session-cap', client });
+
+  assert.equal(Buffer.byteLength(JSON.stringify(holder.records[0]), 'utf8'), 999_999);
+  const accepted = await adapter.hydrate();
+  assert.equal(accepted.hydrated, 1);
+
+  holder.records = [{ kind: 'user', payload: 'x'.repeat(999_959), sequence: 0 }];
+  await assert.rejects(adapter.hydrate(), /exceeds 999999 bytes/);
+});
+
+test('the payload budget matches JSON byte length across random payloads', async () => {
+  const holder = { records: [] };
+  const store = { async readAll() { return []; }, async append() {} };
+  const client = {
+    async hydrate() { return { records: holder.records }; },
+    async append() { return { accepted: 0 }; },
+    async close() {},
+  };
+  const adapter = new AgentCoreAdapter({ store, sessionId: 'session-fuzz', client });
+
+  let seed = 123456789;
+  const next = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  const alphabet = ['a', 'Z', '0', '"', '\\', '\n', '\t', '\u0000', '\u001f', '\u007f', 'é', '✅', '\ud800', '\udc00', '\ud83d\ude00'];
+  const makeString = (max) => {
+    let out = '';
+    const length = 1 + Math.floor(next() * max);
+    for (let index = 0; index < length; index += 1) out += alphabet[Math.floor(next() * alphabet.length)];
+    return out;
+  };
+  const makePayload = (depth) => {
+    const pick = Math.floor(next() * 5);
+    if (depth >= 4 || pick === 0) return makeString(200);
+    if (pick === 1) return Math.floor(next() * 1_000_000) - 500_000;
+    if (pick === 2) return next() < 0.5;
+    if (pick === 3) return Array.from({ length: Math.floor(next() * 4) }, () => makePayload(depth + 1));
+    const object = {};
+    const count = Math.floor(next() * 4);
+    for (let index = 0; index < count; index += 1) object[makeString(6)] = makePayload(depth + 1);
+    return object;
+  };
+
+  for (let iteration = 0; iteration < 150; iteration += 1) {
+    const record = { kind: 'user', payload: makePayload(0), sequence: 0 };
+    holder.records = [record];
+    const expected = Buffer.byteLength(JSON.stringify(record), 'utf8') <= 999_999 && !Array.isArray(record.payload);
+    let failure = null;
+    const accepted = await adapter.hydrate().then(() => true, (error) => { failure = error; return false; });
+    assert.equal(
+      accepted,
+      expected,
+      `iteration ${iteration} disagreed with JSON byte length (size ${Buffer.byteLength(JSON.stringify(record), 'utf8')}): ${failure ? failure.message : 'accepted'}`,
+    );
+  }
 });

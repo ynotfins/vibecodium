@@ -1,10 +1,12 @@
 import { isDeepStrictEqual } from 'node:util';
 
+import { MAX_FILE_SIZE, MAX_RECORD_SIZE, MAX_RECORDS } from './session-store.mjs';
+
 export const MAX_SESSION_ID_CHARS = 200;
 export const MAX_MIRROR_BATCH = 1000;
-export const MAX_REMOTE_RECORDS = 100_000;
-export const MAX_REMOTE_RECORD_BYTES = 1_000_000;
-export const MAX_REMOTE_SESSION_BYTES = 50_000_000;
+export const MAX_REMOTE_RECORDS = MAX_RECORDS;
+export const MAX_REMOTE_RECORD_BYTES = MAX_RECORD_SIZE - 1;
+export const MAX_REMOTE_SESSION_BYTES = MAX_FILE_SIZE - MAX_RECORDS;
 export const MAX_PAYLOAD_NODES = 250_000;
 export const MAX_REMOTE_DEPTH = 32;
 export const AGENTCORE_SOURCE_TRUST = 'untrusted-session-content';
@@ -74,74 +76,84 @@ function jsonStringBytes(value) {
   return Buffer.byteLength(value, 'utf8') + 2 + extra;
 }
 
-function payloadProblem(value, state = { seen: new WeakSet(), nodes: 0, bytes: 0 }, depth = 1, requirePlainObject = false) {
+const RECORD_ENVELOPE_BYTES = 8 + 11 + 12 + 1;
+
+function capturePayload(value, state, depth = 1, requirePlainObject = false) {
   const tooBig = () => `payload exceeds ${MAX_REMOTE_RECORD_BYTES} bytes`;
   if (depth > MAX_REMOTE_DEPTH) {
-    return `payload nesting depth exceeds ${MAX_REMOTE_DEPTH}`;
+    return { error: `payload nesting depth exceeds ${MAX_REMOTE_DEPTH}` };
   }
   state.nodes += 1;
   if (state.nodes > MAX_PAYLOAD_NODES) {
-    return `payload node count exceeds ${MAX_PAYLOAD_NODES}`;
+    return { error: `payload node count exceeds ${MAX_PAYLOAD_NODES}` };
   }
   if (typeof value === 'string') {
-    if (value.length === 0) return 'payload strings must not be empty';
-    if (value.length > MAX_REMOTE_RECORD_BYTES - state.bytes) return tooBig();
+    if (value.length === 0) return { error: 'payload strings must not be empty' };
+    if (value.length > MAX_REMOTE_RECORD_BYTES - state.bytes) return { error: tooBig() };
     state.bytes += jsonStringBytes(value);
-    return state.bytes > MAX_REMOTE_RECORD_BYTES ? tooBig() : null;
+    if (state.bytes > MAX_REMOTE_RECORD_BYTES) return { error: tooBig() };
+    return { value };
   }
   if (typeof value === 'boolean') {
-    state.bytes += 5;
-    return state.bytes > MAX_REMOTE_RECORD_BYTES ? tooBig() : null;
+    state.bytes += value ? 4 : 5;
+    if (state.bytes > MAX_REMOTE_RECORD_BYTES) return { error: tooBig() };
+    return { value };
   }
-  if (value === null) return 'payload must not contain null';
+  if (value === null) return { error: 'payload must not contain null' };
   if (typeof value === 'number') {
-    if (!Number.isFinite(value) || Object.is(value, -0)) return 'payload numbers must be finite';
+    if (!Number.isFinite(value) || Object.is(value, -0)) return { error: 'payload numbers must be finite' };
     state.bytes += String(value).length;
-    return state.bytes > MAX_REMOTE_RECORD_BYTES ? tooBig() : null;
+    if (state.bytes > MAX_REMOTE_RECORD_BYTES) return { error: tooBig() };
+    return { value };
   }
   if (typeof value !== 'object') {
-    return `payload type ${typeof value} is not JSON-safe`;
+    return { error: `payload type ${typeof value} is not JSON-safe` };
   }
   if (state.seen.has(value)) {
-    return 'payload must not repeat object references';
+    return { error: 'payload must not repeat object references' };
   }
   state.seen.add(value);
 
   if (Array.isArray(value)) {
-    if (requirePlainObject) return 'payload must be a non-empty string, boolean, finite number or plain object';
-    state.bytes += 2 + Math.max(0, value.length - 1);
-    if (state.bytes > MAX_REMOTE_RECORD_BYTES) return tooBig();
-    for (const item of value) {
-      const problem = payloadProblem(item, state, depth + 1);
-      if (problem) return problem;
+    if (requirePlainObject) {
+      return { error: 'payload must be a non-empty string, boolean, finite number or plain object' };
     }
-    return null;
+    if (typeof value.toJSON === 'function') return { error: 'payload must not define toJSON' };
+    state.bytes += 2 + Math.max(0, value.length - 1);
+    if (state.bytes > MAX_REMOTE_RECORD_BYTES) return { error: tooBig() };
+    const captured = state.capture === false ? null : [];
+    for (const item of value) {
+      const result = capturePayload(item, state, depth + 1);
+      if (result.error) return result;
+      if (captured) captured.push(result.value);
+    }
+    return { value: captured };
   }
 
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) {
-    return 'payload must contain only plain objects';
+    return { error: 'payload must contain only plain objects' };
   }
-  if (Object.prototype.hasOwnProperty.call(value, 'toJSON')) {
-    return 'payload must not define toJSON';
-  }
+  if (typeof value.toJSON === 'function') return { error: 'payload must not define toJSON' };
   if (Object.getOwnPropertySymbols(value).length > 0) {
-    return 'payload must not contain symbol keys';
+    return { error: 'payload must not contain symbol keys' };
   }
   const keys = Object.keys(value);
   state.bytes += 2 + Math.max(0, keys.length - 1);
-  if (state.bytes > MAX_REMOTE_RECORD_BYTES) return tooBig();
+  if (state.bytes > MAX_REMOTE_RECORD_BYTES) return { error: tooBig() };
+  const captured = state.capture === false ? null : Object.create(null);
   for (const key of keys) {
-    if (key.length > MAX_REMOTE_RECORD_BYTES - state.bytes) return tooBig();
+    if (key.length > MAX_REMOTE_RECORD_BYTES - state.bytes) return { error: tooBig() };
     state.bytes += jsonStringBytes(key) + 1;
-    if (state.bytes > MAX_REMOTE_RECORD_BYTES) return tooBig();
-    const problem = payloadProblem(value[key], state, depth + 1);
-    if (problem) return problem;
+    if (state.bytes > MAX_REMOTE_RECORD_BYTES) return { error: tooBig() };
+    const result = capturePayload(value[key], state, depth + 1);
+    if (result.error) return result;
+    if (captured) captured[key] = result.value;
   }
-  return null;
+  return { value: captured };
 }
 
-function validateRecord(record, index, { sessionId, phase, source }) {
+function validateRecord(record, index, { sessionId, phase, source, capture }) {
   const prefix = `${source} record ${index}`;
   const fail = (reason) => {
     throw new AgentCoreAdapterError(
@@ -173,19 +185,20 @@ function validateRecord(record, index, { sessionId, phase, source }) {
   if (record.sequence !== index) {
     fail(`has sequence ${record.sequence}, but ${source} records must be contiguous from sequence 0`);
   }
-  const envelopeBytes = 9 + jsonStringBytes(record.kind) + 11 + 12 + String(record.sequence).length + 1;
-  const problem = payloadProblem(record.payload, { seen: new WeakSet(), nodes: 0, bytes: envelopeBytes }, 1, true);  if (problem) {
-    fail(`has an unsupported payload: ${problem}`);
+  const envelopeBytes = RECORD_ENVELOPE_BYTES + jsonStringBytes(record.kind) + String(record.sequence).length;
+  const state = { seen: new WeakSet(), nodes: 0, bytes: envelopeBytes, capture };
+  const captured = capturePayload(record.payload, state, 1, true);
+  if (captured.error) {
+    fail(`has an unsupported payload: ${captured.error}`);
   }
-  const bytes = Buffer.byteLength(JSON.stringify(record), 'utf8');
-  if (bytes > MAX_REMOTE_RECORD_BYTES) {
+  if (state.bytes > MAX_REMOTE_RECORD_BYTES) {
     fail(`exceeds ${MAX_REMOTE_RECORD_BYTES} bytes`);
   }
-  return bytes;
+  return { bytes: state.bytes, payload: captured.value };
 }
 
 function validateRecords(records, options) {
-  const { sessionId, phase, source } = options;
+  const { sessionId, phase, source, capture = true } = options;
   if (!Array.isArray(records)) {
     throw new AgentCoreAdapterError(
       `agentcore hydrate response for session ${sessionId} must include a records array`,
@@ -199,15 +212,19 @@ function validateRecords(records, options) {
     );
   }
   let totalBytes = 0;
+  const payloads = [];
   for (let index = 0; index < records.length; index += 1) {
-    totalBytes += validateRecord(records[index], index, options);
+    const result = validateRecord(records[index], index, { ...options, capture });
+    totalBytes += result.bytes;
     if (totalBytes > MAX_REMOTE_SESSION_BYTES) {
       throw new AgentCoreAdapterError(
         `${source} session ${sessionId} exceeds ${MAX_REMOTE_SESSION_BYTES} bytes`,
         { phase, sessionId },
       );
     }
+    payloads.push(result.payload);
   }
+  return { bytes: totalBytes, payloads };
 }
 
 export class AgentCoreAdapter {
@@ -269,6 +286,7 @@ export class AgentCoreAdapter {
       sessionId: this.sessionId,
       phase,
       source: 'local',
+      capture: false,
     });
     return local;
   }
@@ -326,7 +344,7 @@ export class AgentCoreAdapter {
         sessionId: this.sessionId,
       }));
       const remote = response?.records;
-      validateRecords(remote, {
+      const remoteResult = validateRecords(remote, {
         sessionId: this.sessionId,
         phase: 'hydrate',
         source: 'remote',
@@ -347,8 +365,8 @@ export class AgentCoreAdapter {
       }
 
       const missing = remote.slice(local.length);
-      for (const record of missing) {
-        await this.store.append(record.kind, record.payload);
+      for (let index = 0; index < missing.length; index += 1) {
+        await this.store.append(missing[index].kind, remoteResult.payloads[local.length + index]);
       }
       if (remote.length > this.mirrored) this.mirrored = remote.length;
       return {
