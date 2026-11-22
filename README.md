@@ -1,8 +1,8 @@
 <div id="vscodium-logo" align="center">
    <br />
-   <img src="./icons/stable/codium_cnl.svg" alt="VSCodium Logo" width="200"/>
-   <h1>VSCodium</h1>
-   <h3>Free/Libre Open Source Software Binaries of Visual Studio Code</h3>
+   <img src="./icons/stable/vibe_cnl.svg" alt="Vibecodium logo" width="200"/>
+   <h1>Vibecodium</h1>
+   <h3>Windows-first AI IDE built on VSCodium&apos;s free binaries of Visual Studio Code</h3>
 </div>
 
 <div id="badges" align="center">
