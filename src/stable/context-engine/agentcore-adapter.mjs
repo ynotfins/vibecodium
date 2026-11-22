@@ -155,7 +155,7 @@ function capturePayload(value, state, depth = 1, requirePlainObject = false) {
   return { value: captured };
 }
 
-function validateRecord(record, index, { sessionId, phase, source, capture }) {
+function validateRecordBody(record, index, { sessionId, phase, source, capture }) {
   const prefix = `${source} record ${index}`;
   const fail = (reason) => {
     throw new AgentCoreAdapterError(
@@ -202,6 +202,18 @@ function validateRecord(record, index, { sessionId, phase, source, capture }) {
     fail(`exceeds ${MAX_REMOTE_RECORD_BYTES} bytes`);
   }
   return { bytes: state.bytes, payload: captured.value };
+}
+
+function validateRecord(record, index, options) {
+  try {
+    return validateRecordBody(record, index, options);
+  } catch (error) {
+    if (error instanceof AgentCoreAdapterError) throw error;
+    throw new AgentCoreAdapterError(
+      `${options.source} record ${index} is unreadable for session ${options.sessionId}`,
+      { phase: options.phase, sessionId: options.sessionId },
+    );
+  }
 }
 
 function validateRecords(records, options) {

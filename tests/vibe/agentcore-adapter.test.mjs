@@ -681,3 +681,27 @@ test('unreadable payload properties fail as adapter errors without payload text'
   });
   assert.deepEqual(await readAllOrEmpty(local), []);
 });
+test('record-envelope accessors and proxies fail as adapter errors without payload text', async (t) => {
+  const local = await createStore(t);
+  const kindThrow = { payload: 'x', sequence: 0 };
+  Object.defineProperty(kindThrow, 'kind', { enumerable: true, get() { throw new Error('KIND_MARKER'); } });
+  const seqThrow = { kind: 'user', payload: 'x' };
+  Object.defineProperty(seqThrow, 'sequence', { enumerable: true, get() { throw new Error('SEQ_MARKER'); } });
+  const ownKeysThrow = new Proxy({ kind: 'user', payload: 'x', sequence: 0 }, { ownKeys() { throw new Error('OWNKEYS_MARKER'); } });
+  const protoThrow = new Proxy({ kind: 'user', payload: 'x', sequence: 0 }, { getPrototypeOf() { throw new Error('PROTO_MARKER'); } });
+  const cases = [kindThrow, seqThrow, ownKeysThrow, protoThrow];
+  for (let index = 0; index < cases.length; index += 1) {
+    const record = cases[index];
+    const client = {
+      async hydrate() { return { records: [record] }; },
+      async append() { return { accepted: 0 }; },
+      async close() {},
+    };
+    const adapter = new AgentCoreAdapter({ store: local, sessionId: 'session-envelope-' + index, client });
+    await assert.rejects(adapter.hydrate(), (error) => {
+      assert.ok(error instanceof AgentCoreAdapterError, 'case ' + index + ' must be an AgentCoreAdapterError');
+      assert.doesNotMatch(error.message, /MARKER/);
+      return true;
+    });
+  }
+});
