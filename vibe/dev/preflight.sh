@@ -12,7 +12,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 want_node="$(tr -d '[:space:]' < "${ROOT}/.nvmrc")"
 fail=0
 
-[[ -n "${VIBE_NODE_HOME:-}" ]] && export PATH="${VIBE_NODE_HOME}:${PATH}"
+if [[ -n "${VIBE_NODE_HOME:-}" ]]; then
+  # Accept Windows-style or POSIX paths: Git Bash mangles a raw Windows path in PATH, so normalise it.
+  if command -v cygpath >/dev/null 2>&1; then
+    _vibe_node="$(cygpath -u "${VIBE_NODE_HOME}")"
+  else
+    _vibe_node="${VIBE_NODE_HOME}"
+  fi
+  export PATH="${_vibe_node}:${PATH}"
+fi
 [[ -n "${VIBE_7Z_HOME:-}" ]] && export PATH="${VIBE_7Z_HOME}:${PATH}"
 if [[ -z "${VIBE_7Z_HOME:-}" && -d "/c/Program Files/7-Zip" ]]; then export PATH="/c/Program Files/7-Zip:${PATH}"; fi
 [[ -d "${HOME}/.cargo/bin" ]] && export PATH="${HOME}/.cargo/bin:${PATH}"
