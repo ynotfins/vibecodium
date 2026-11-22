@@ -59,8 +59,17 @@ function jsonStringBytes(value) {
   let extra = 0;
   for (let position = 0; position < value.length; position += 1) {
     const code = value.charCodeAt(position);
-    if (code === 0x22 || code === 0x5c) extra += 1;
-    else if (code < 0x20) extra += (code === 8 || code === 9 || code === 10 || code === 12 || code === 13) ? 1 : 5;
+    if (code === 0x22 || code === 0x5c) {
+      extra += 1;
+    } else if (code < 0x20) {
+      extra += (code === 8 || code === 9 || code === 10 || code === 12 || code === 13) ? 1 : 5;
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(position + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) position += 1;
+      else extra += 3;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      extra += 3;
+    }
   }
   return Buffer.byteLength(value, 'utf8') + 2 + extra;
 }
@@ -70,12 +79,10 @@ function payloadProblem(value, state = { seen: new WeakSet(), nodes: 0, bytes: 0
   if (depth > MAX_REMOTE_DEPTH) {
     return `payload nesting depth exceeds ${MAX_REMOTE_DEPTH}`;
   }
-  state.bytes += 1;
   state.nodes += 1;
   if (state.nodes > MAX_PAYLOAD_NODES) {
     return `payload node count exceeds ${MAX_PAYLOAD_NODES}`;
   }
-  if (state.bytes > MAX_REMOTE_RECORD_BYTES) return tooBig();
   if (typeof value === 'string') {
     if (value.length === 0) return 'payload strings must not be empty';
     if (value.length > MAX_REMOTE_RECORD_BYTES - state.bytes) return tooBig();
@@ -126,7 +133,7 @@ function payloadProblem(value, state = { seen: new WeakSet(), nodes: 0, bytes: 0
   if (state.bytes > MAX_REMOTE_RECORD_BYTES) return tooBig();
   for (const key of keys) {
     if (key.length > MAX_REMOTE_RECORD_BYTES - state.bytes) return tooBig();
-    state.bytes += jsonStringBytes(key) + 2;
+    state.bytes += jsonStringBytes(key) + 1;
     if (state.bytes > MAX_REMOTE_RECORD_BYTES) return tooBig();
     const problem = payloadProblem(value[key], state, depth + 1);
     if (problem) return problem;
@@ -166,8 +173,8 @@ function validateRecord(record, index, { sessionId, phase, source }) {
   if (record.sequence !== index) {
     fail(`has sequence ${record.sequence}, but ${source} records must be contiguous from sequence 0`);
   }
-  const problem = payloadProblem(record.payload, undefined, 1, true);
-  if (problem) {
+  const envelopeBytes = 9 + jsonStringBytes(record.kind) + 11 + 12 + String(record.sequence).length + 1;
+  const problem = payloadProblem(record.payload, { seen: new WeakSet(), nodes: 0, bytes: envelopeBytes }, 1, true);  if (problem) {
     fail(`has an unsupported payload: ${problem}`);
   }
   const bytes = Buffer.byteLength(JSON.stringify(record), 'utf8');

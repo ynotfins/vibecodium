@@ -496,6 +496,10 @@ test('oversized remote payloads are rejected before serialization', async (t) =>
   await assert.rejects(adapter.hydrate(), /exceeds 1000000 bytes/);
   assert.equal(stringifyCalls, 0, 'escape inflation must be counted before JSON.stringify');
 
+  holder.records = [{ kind: 'user', payload: 'x'.repeat(999_960), sequence: 0 }];
+  await assert.rejects(adapter.hydrate(), /exceeds 1000000 bytes/);
+  assert.equal(stringifyCalls, 0, 'the record envelope must be charged before JSON.stringify');
+
   assert.deepEqual(await readAllOrEmpty(local), []);
 });
 
@@ -530,4 +534,27 @@ test('remote-supplied values never reach adapter error messages', async (t) => {
     assert.doesNotMatch(error.message, /1\.5/);
     return true;
   });
+});
+test('lone-surrogate payloads are rejected before serialization', async (t) => {
+  const local = await createStore(t);
+  const holder = { records: [] };
+  const client = {
+    async hydrate() { return { records: holder.records }; },
+    async append() { return { accepted: 0 }; },
+    async close() {},
+  };
+  const adapter = new AgentCoreAdapter({ store: local, sessionId: 'session-surrogate', client });
+
+  const originalStringify = JSON.stringify;
+  let stringifyCalls = 0;
+  JSON.stringify = (...args) => { stringifyCalls += 1; return originalStringify(...args); };
+  t.after(() => { JSON.stringify = originalStringify; });
+
+  // 300k lone high surrogates: Buffer.byteLength counts each as 3 bytes (U+FFFD),
+  // but JSON.stringify emits a 6-byte \ud800 escape. The walk therefore estimates
+  // ~900KB while the real record is ~1.8MB.
+  holder.records = [{ kind: 'user', payload: { big: '\ud800'.repeat(300_000) }, sequence: 0 }];
+  await assert.rejects(adapter.hydrate(), /exceeds 1000000 bytes/);
+  assert.equal(stringifyCalls, 0, 'lone-surrogate escape expansion must be counted before JSON.stringify');
+  assert.deepEqual(await readAllOrEmpty(local), []);
 });
