@@ -1,6 +1,6 @@
-import { randomUUID } from 'node:crypto';
-import { appendFile, chmod, mkdir, readFile, stat } from 'node:fs/promises';
-import { dirname, join, relative, resolve } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { appendFile, chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, relative, resolve } from 'node:path';
 
 export const MAX_MEMORY_FILE_SIZE = 20_000_000;
 export const MAX_MEMORY_RECORD_SIZE = 256_000;
@@ -113,6 +113,12 @@ function validateId(id) {
   }
 }
 
+function validateRevision(revision) {
+  if (!Number.isInteger(revision) || revision < 1) {
+    throw new Error('revision must be a positive integer');
+  }
+}
+
 function publicEntry(entry) {
   const result = {
     id: entry.id,
@@ -135,6 +141,19 @@ function compareEntries(left, right) {
   if (byUpdated !== 0) return byUpdated;
   const byKey = left.key.localeCompare(right.key);
   return byKey !== 0 ? byKey : left.id.localeCompare(right.id);
+}
+
+function compareEvents(left, right) {
+  const byCreated = left.createdAt.localeCompare(right.createdAt);
+  if (byCreated !== 0) return byCreated;
+  const byKey = left.key.localeCompare(
+    right.key,
+  );
+  return byKey !== 0 ? byKey : left.id.localeCompare(right.id);
+}
+
+function projectStorageKey(projectId) {
+  return createHash('sha256').update(projectId, 'utf8').digest('hex');
 }
 
 function validateEvent(event) {
@@ -243,7 +262,7 @@ export class MemoryStore {
     this.userPath = resolve(this.root, 'user', 'memory.jsonl');
     assertContained(this.root, this.userPath);
     this.projectPath = this.projectId
-      ? resolve(this.root, 'projects', this.projectId, 'memory.jsonl')
+      ? resolve(this.root, 'projects', projectStorageKey(this.projectId), 'memory.jsonl')
       : null;
     if (this.projectPath) assertContained(this.root, this.projectPath);
     this.queues = {
@@ -294,7 +313,45 @@ export class MemoryStore {
     return current;
   }
 
-  async appendEvent(scope, event) {
+  async compact(scope, entries) {
+    const path = this.pathFor(scope);
+    const events = [...entries.values()]
+      .sort(compareEvents)
+      .map((entry) => {
+        const event = {
+          type: 'put',
+          id: entry.id,
+          scope: entry.scope,
+          key: entry.key,
+          value: entry.value,
+          status: entry.status,
+          revision: entry.revision,
+          origin: entry.origin,
+          createdAt: entry.createdAt,
+          updatedAt: entry.updatedAt,
+        };
+        if (entry.sessionId !== undefined) event.sessionId = entry.sessionId;
+        return event;
+      });
+    const lines = events.map((event) => `${JSON.stringify(event)}\n`);
+    const body = lines.join('');
+    if (Buffer.byteLength(body, 'utf8') > MAX_MEMORY_FILE_SIZE) {
+      throw new Error(`memory file cannot be compacted within ${MAX_MEMORY_FILE_SIZE} bytes`);
+    }
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const temporaryPath = `${path}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporaryPath, body, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      await chmod(temporaryPath, 0o600);
+      await rename(temporaryPath, path);
+      await chmod(path, 0o600);
+    } catch (error) {
+      await rm(temporaryPath, { force: true });
+      throw error;
+    }
+  }
+
+  async appendEvent(scope, event, entries) {
     validateEvent(event);
     const path = this.pathFor(scope);
     const line = `${JSON.stringify(event)}\n`;
@@ -303,7 +360,10 @@ export class MemoryStore {
       throw new Error(`memory event exceeds ${MAX_MEMORY_RECORD_SIZE} bytes`);
     }
     if (await this.fileSize(path) + lineSize > MAX_MEMORY_FILE_SIZE) {
-      throw new Error(`memory file exceeds ${MAX_MEMORY_FILE_SIZE} bytes`);
+      await this.compact(scope, entries ?? foldEvents(await this.readEvents(scope)));
+      if (await this.fileSize(path) + lineSize > MAX_MEMORY_FILE_SIZE) {
+        throw new Error(`memory file exceeds ${MAX_MEMORY_FILE_SIZE} bytes`);
+      }
     }
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     await appendFile(path, line, { encoding: 'utf8', mode: 0o600 });
@@ -321,6 +381,9 @@ export class MemoryStore {
     return this.enqueue(scope, async () => {
       const entries = foldEvents(await this.readEvents(scope));
       const found = [...entries.values()].find((entry) => entry.key === key);
+      if (!found && entries.size >= MAX_MEMORY_ENTRIES) {
+        throw new Error(`memory exceeds ${MAX_MEMORY_ENTRIES} entries`);
+      }
       const now = timestamp();
       const event = {
         type: 'put',
@@ -335,14 +398,15 @@ export class MemoryStore {
         updatedAt: now,
       };
       if (sessionId !== undefined) event.sessionId = sessionId;
-      await this.appendEvent(scope, event);
+      await this.appendEvent(scope, event, entries);
       return publicEntry(event);
     });
   }
 
-  async setStatus(scope, id, status) {
+  async setStatus(scope, id, status, revision) {
     assertScope(scope);
     validateId(id);
+    validateRevision(revision);
     if (status !== 'approved' && status !== 'rejected') {
       throw new Error('review status must be "approved" or "rejected"');
     }
@@ -350,38 +414,50 @@ export class MemoryStore {
       const entries = foldEvents(await this.readEvents(scope));
       const entry = entries.get(id);
       if (!entry) throw new Error(`memory entry not found: ${id}`);
+      if (entry.revision !== revision) {
+        throw new Error(
+          `memory revision changed: expected ${revision}, current ${entry.revision}`,
+        );
+      }
       if (entry.status === status) return publicEntry(entry);
       const reviewedAt = timestamp();
       await this.appendEvent(scope, {
         type: 'review',
         id,
         status,
-        revision: entry.revision,
+        revision,
         reviewedAt,
-      });
+      }, entries);
       return publicEntry({ ...entry, status, updatedAt: reviewedAt });
     });
   }
 
-  approve(scope, id) {
-    return this.setStatus(scope, id, 'approved');
+  approve(scope, id, revision) {
+    return this.setStatus(scope, id, 'approved', revision);
   }
 
-  reject(scope, id) {
-    return this.setStatus(scope, id, 'rejected');
+  reject(scope, id, revision) {
+    return this.setStatus(scope, id, 'rejected', revision);
   }
 
-  async forget(scope, id) {
+  async forget(scope, id, revision) {
     assertScope(scope);
     validateId(id);
+    validateRevision(revision);
     return this.enqueue(scope, async () => {
       const entries = foldEvents(await this.readEvents(scope));
-      if (!entries.has(id)) throw new Error(`memory entry not found: ${id}`);
+      const entry = entries.get(id);
+      if (!entry) throw new Error(`memory entry not found: ${id}`);
+      if (entry.revision !== revision) {
+        throw new Error(
+          `memory revision changed: expected ${revision}, current ${entry.revision}`,
+        );
+      }
       await this.appendEvent(scope, {
         type: 'delete',
         id,
         deletedAt: timestamp(),
-      });
+      }, entries);
       return { id, deleted: true };
     });
   }

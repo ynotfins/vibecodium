@@ -10,7 +10,7 @@ All notable user-visible changes to Vibecodium. Format: [Keep a Changelog](https
 
 - Project foundation: locked governing docs, documentation suite, guardian sub-agents, governance and docs checks, Windows build preflight.
 - The standalone Vibe Context Engine now builds leaf and condensed summary DAGs over lossless session records, protects a fresh tail, and exposes bounded `grep`, `describe`, and `expand` recall tools as module APIs (not yet surfaced in the IDE).
-- The standalone Vibe Context Engine now persists scoped project and user memory with a pending-review queue, revision tracking, approved-only recall, and source-trust tagging (review panel UI not yet surfaced in the IDE).
+- The standalone Vibe Context Engine now persists scoped project and user memory with a pending-review queue, revision-bound decisions, approved-only recall, source-trust tagging, case-safe project isolation, and capacity recovery through log compaction (review panel UI not yet surfaced in the IDE).
 
 ### Changed
 

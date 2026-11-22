@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -30,6 +30,64 @@ function deeplyNested(depth) {
     value = { value };
   }
   return value;
+}
+
+async function writeNearCapLog(path, { id, scope, status = 'pending', extra = [] }) {
+  await mkdir(dirname(path), { recursive: true });
+  const now = new Date().toISOString();
+  const extraLines = extra.map((entry) => JSON.stringify({
+    type: 'put',
+    scope,
+    origin: 'agent',
+    createdAt: now,
+    updatedAt: now,
+    ...entry,
+  }));
+  const lines = [...extraLines];
+  const targetSize = MAX_MEMORY_FILE_SIZE - 8;
+  let size = extraLines.reduce(
+    (total, line) => total + Buffer.byteLength(`${line}\n`, 'utf8'),
+    0,
+  );
+  let revision = 0;
+  for (;;) {
+    const nextRevision = revision + 1;
+    const baseLine = JSON.stringify({
+      type: 'put',
+      id,
+      scope,
+      key: 'near-cap.fact',
+      value: '',
+      status,
+      revision: nextRevision,
+      origin: 'agent',
+      createdAt: now,
+      updatedAt: now,
+    });
+    const baseSize = Buffer.byteLength(`${baseLine}\n`, 'utf8');
+    const remaining = targetSize - size;
+    const padding = Math.min(MAX_MEMORY_VALUE_CHARS, remaining - baseSize);
+    const line = JSON.stringify({
+        type: 'put',
+        id,
+        scope,
+        key: 'near-cap.fact',
+        value: 'x'.repeat(padding),
+        status,
+        revision: nextRevision,
+        origin: 'agent',
+        createdAt: now,
+        updatedAt: now,
+    });
+    const lineSize = Buffer.byteLength(`${line}\n`, 'utf8');
+    if (lineSize > remaining) throw new Error('near-cap fixture does not fit');
+    lines.push(line);
+    size += lineSize;
+    revision = nextRevision;
+    if (padding < MAX_MEMORY_VALUE_CHARS) break;
+  }
+  await writeFile(path, `${lines.join('\n')}\n`, 'utf8');
+  return { revision };
 }
 
 test('project and user memory survive a new store instance and stay scoped', async (t) => {
@@ -60,8 +118,8 @@ test('project and user memory survive a new store instance and stay scoped', asy
   assert.equal(pending.items[0].id, projectFact.id);
   assert.equal(pending.items[0].sourceTrust, 'untrusted-memory-content');
 
-  await first.approve('user', userFact.id);
-  await first.approve('project', projectFact.id);
+  await first.approve('user', userFact.id, userFact.revision);
+  await first.approve('project', projectFact.id, projectFact.revision);
 
   const second = new MemoryStore({ root, projectId: 'project-alpha' });
   const userRecall = await second.recall({ scope: 'user', key: 'preferred.shell' });
@@ -94,7 +152,7 @@ test('memory review gates recall, tracks revisions, rejection and deletion', asy
   assert.equal(first.revision, 1);
   assert.equal((await store.recall({ scope: 'project' })).total, 0);
 
-  await store.approve('project', first.id);
+  await store.approve('project', first.id, first.revision);
   assert.equal((await store.recall({ scope: 'project' })).total, 1);
 
   const revised = await store.remember({
@@ -107,20 +165,93 @@ test('memory review gates recall, tracks revisions, rejection and deletion', asy
   assert.equal(revised.status, 'pending');
   assert.equal((await store.recall({ scope: 'project' })).total, 0);
 
-  await store.approve('project', revised.id);
+  await store.approve('project', revised.id, revised.revision);
   const recalled = await store.recall({ scope: 'project', key: 'build.command' });
   assert.equal(recalled.total, 1);
   assert.equal(recalled.matches[0].value, 'node --test');
 
-  await store.reject('project', revised.id);
+  await store.reject('project', revised.id, revised.revision);
   assert.equal((await store.recall({ scope: 'project' })).total, 0);
   const rejected = await store.review({ scope: 'project', status: 'rejected' });
   assert.equal(rejected.total, 1);
   assert.equal(rejected.items[0].id, revised.id);
 
-  await store.forget('project', revised.id);
+  await store.forget('project', revised.id, revised.revision);
   assert.equal((await store.review({ scope: 'project' })).total, 0);
-  await assert.rejects(store.approve('project', revised.id), /not found/);
+  await assert.rejects(store.approve('project', revised.id, revised.revision), /not found/);
+});
+
+test('memory review decisions reject a revision that changed after review', async (t) => {
+  const root = await createRoot(t);
+  const store = new MemoryStore({ root, projectId: 'project-alpha' });
+  const first = await store.remember({
+    scope: 'project',
+    key: 'build.command',
+    value: 'npm test',
+  });
+  const reviewed = (await store.review({ scope: 'project' })).items[0];
+
+  const revised = await store.remember({
+    scope: 'project',
+    key: 'build.command',
+    value: 'node --test',
+  });
+  assert.equal(revised.id, first.id);
+  assert.equal(revised.revision, reviewed.revision + 1);
+
+  await assert.rejects(
+    store.approve('project', reviewed.id, reviewed.revision),
+    /revision changed/,
+  );
+  await assert.rejects(
+    store.reject('project', reviewed.id, reviewed.revision),
+    /revision changed/,
+  );
+  await assert.rejects(
+    store.forget('project', reviewed.id, reviewed.revision),
+    /revision changed/,
+  );
+  assert.equal((await store.get('project', first.id)).status, 'pending');
+
+  await store.approve('project', revised.id, revised.revision);
+  const recalled = await store.recall({ scope: 'project', key: 'build.command' });
+  assert.equal(recalled.total, 1);
+  assert.equal(recalled.matches[0].value, 'node --test');
+});
+
+test('memory decisions require a positive reviewed revision', async (t) => {
+  const root = await createRoot(t);
+  const store = new MemoryStore({ root, projectId: 'project-alpha' });
+  const fact = await store.remember({
+    scope: 'project',
+    key: 'build.command',
+    value: 'npm test',
+  });
+
+  await assert.rejects(store.approve('project', fact.id), /revision/);
+  await assert.rejects(store.reject('project', fact.id, 0), /revision/);
+  await assert.rejects(store.forget('project', fact.id, '1'), /revision/);
+
+  const current = await store.get('project', fact.id);
+  assert.equal(current.status, 'pending');
+  assert.equal(current.revision, fact.revision);
+});
+
+test('project memory isolates identifiers that differ only by case', async (t) => {
+  const root = await createRoot(t);
+  const mixedCase = new MemoryStore({ root, projectId: 'Project-A' });
+  const lowerCase = new MemoryStore({ root, projectId: 'project-a' });
+
+  assert.notEqual(mixedCase.pathFor('project'), lowerCase.pathFor('project'));
+  const fact = await mixedCase.remember({
+    scope: 'project',
+    key: 'test.command',
+    value: 'node --test',
+  });
+  await mixedCase.approve('project', fact.id, fact.revision);
+
+  assert.equal((await lowerCase.recall({ scope: 'project' })).total, 0);
+  assert.equal((await mixedCase.recall({ scope: 'project' })).total, 1);
 });
 
 test('memory recall filters approved facts by query and paginates results', async (t) => {
@@ -143,8 +274,8 @@ test('memory recall filters approved facts by query and paginates results', asyn
     key: 'draft.frontend',
     value: 'React draft',
   });
-  await store.approve('project', frontend.id);
-  await store.approve('project', backend.id);
+  await store.approve('project', frontend.id, frontend.revision);
+  await store.approve('project', backend.id, backend.revision);
 
   const caseInsensitive = await store.recall({ scope: 'project', query: 'react' });
   assert.equal(caseInsensitive.total, 1);
@@ -212,7 +343,7 @@ test('memory get returns the current entry and write queues serialize per scope'
   assert.equal(current.sourceTrust, 'untrusted-memory-content');
   assert.equal(await store.get('user', 'missing-id'), null);
 
-  await store.approve('user', first.id);
+  await store.approve('user', first.id, current.revision);
   assert.equal((await store.get('user', first.id)).status, 'approved');
   assert.equal((await store.recall({ scope: 'user', key: 'concurrent.fact' })).total, 1);
 });
@@ -250,7 +381,8 @@ test('memory store enforces review limits and resource caps', async (t) => {
   );
 
   const entriesRoot = await createRoot(t);
-  const entriesProjectDir = join(entriesRoot, 'projects', 'safe');
+  const entriesStore = new MemoryStore({ root: entriesRoot, projectId: 'safe' });
+  const entriesProjectDir = dirname(entriesStore.pathFor('project'));
   await mkdir(entriesProjectDir, { recursive: true });
   const now = new Date().toISOString();
   const records = Array.from({ length: MAX_MEMORY_ENTRIES + 1 }, (_, index) => JSON.stringify({
@@ -267,9 +399,92 @@ test('memory store enforces review limits and resource caps', async (t) => {
   }));
   await writeFile(join(entriesProjectDir, 'memory.jsonl'), `${records.join('\n')}\n`, 'utf8');
   await assert.rejects(
-    new MemoryStore({ root: entriesRoot, projectId: 'safe' }).review({ scope: 'project' }),
+    entriesStore.review({ scope: 'project' }),
     /memory exceeds .* entries/,
   );
+});
+
+test('memory rejects a new fact at the live-entry cap without blocking management', async (t) => {
+  const root = await createRoot(t);
+  const store = new MemoryStore({ root, projectId: 'full-project' });
+  const projectPath = store.pathFor('project');
+  await mkdir(dirname(projectPath), { recursive: true });
+  const now = new Date().toISOString();
+  const ids = Array.from({ length: MAX_MEMORY_ENTRIES }, () => randomUUID());
+  const records = ids.map((id, index) => JSON.stringify({
+    type: 'put',
+    id,
+    scope: 'project',
+    key: `key-${index}`,
+    value: 'value',
+    status: 'approved',
+    revision: 1,
+    origin: 'agent',
+    createdAt: now,
+    updatedAt: now,
+  }));
+  await writeFile(projectPath, `${records.join('\n')}\n`, 'utf8');
+
+  await assert.rejects(
+    store.remember({ scope: 'project', key: 'one-too-many', value: 'value' }),
+    /memory exceeds .* entries/,
+  );
+  assert.equal(
+    (await store.review({ scope: 'project', status: 'all', limit: 1 })).total,
+    MAX_MEMORY_ENTRIES,
+  );
+
+  const revised = await store.remember({ scope: 'project', key: 'key-0', value: 'updated' });
+  assert.equal(revised.id, ids[0]);
+  assert.equal(revised.revision, 2);
+  assert.equal((await store.recall({ scope: 'project', limit: 1 })).total, MAX_MEMORY_ENTRIES - 1);
+
+  await store.forget('project', ids[0], revised.revision);
+  assert.equal((await store.recall({ scope: 'project', limit: 1 })).total, MAX_MEMORY_ENTRIES - 1);
+  await store.remember({ scope: 'project', key: 'replacement', value: 'value' });
+});
+
+test('memory compacts a near-full log so decisions and deletion still work', async (t) => {
+  const root = await createRoot(t);
+  const store = new MemoryStore({ root });
+  const userPath = store.pathFor('user');
+  const firstId = randomUUID();
+  const keptId = randomUUID();
+  const first = await writeNearCapLog(userPath, {
+    id: firstId,
+    scope: 'user',
+    extra: [{
+      id: keptId,
+      key: 'kept.fact',
+      value: { kept: true },
+      status: 'approved',
+      revision: 3,
+    }],
+  });
+  const beforeReview = (await stat(userPath)).size;
+
+  const pending = await store.review({ scope: 'user' });
+  assert.equal(pending.total, 1);
+  assert.equal(pending.items[0].revision, first.revision);
+  await store.approve('user', firstId, first.revision);
+  assert.ok((await stat(userPath)).size < beforeReview);
+  assert.equal((await store.get('user', firstId)).status, 'approved');
+  const kept = await store.get('user', keptId);
+  assert.equal(kept.key, 'kept.fact');
+  assert.equal(kept.status, 'approved');
+  assert.equal(kept.revision, 3);
+  assert.deepEqual(kept.value, { kept: true });
+
+  const secondId = randomUUID();
+  const second = await writeNearCapLog(userPath, {
+    id: secondId,
+    scope: 'user',
+    status: 'approved',
+  });
+  assert.equal((await store.get('user', secondId)).revision, second.revision);
+  await store.forget('user', secondId, second.revision);
+  assert.equal(await store.get('user', secondId), null);
+  assert.equal((await store.recall({ scope: 'user' })).total, 0);
 });
 
 test('memory store rejects unsafe input and corrupt logs', async (t) => {
@@ -341,9 +556,9 @@ test('memory store rejects unsafe input and corrupt logs', async (t) => {
   );
 
   const corruptRoot = await createRoot(t);
-  const projectDir = join(corruptRoot, 'projects', 'safe');
+  const corrupt = new MemoryStore({ root: corruptRoot, projectId: 'safe' });
+  const projectDir = dirname(corrupt.pathFor('project'));
   await mkdir(projectDir, { recursive: true });
   await writeFile(join(projectDir, 'memory.jsonl'), '{"type":"put"}\n', 'utf8');
-  const corrupt = new MemoryStore({ root: corruptRoot, projectId: 'safe' });
   await assert.rejects(corrupt.review({ scope: 'project' }), /invalid memory/);
 });
