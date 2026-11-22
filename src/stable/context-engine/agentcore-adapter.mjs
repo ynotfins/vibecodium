@@ -1,6 +1,8 @@
 import { isDeepStrictEqual } from 'node:util';
 
-import { MAX_FILE_SIZE, MAX_RECORD_SIZE, MAX_RECORDS } from './session-store.mjs';
+import {
+  MAX_FILE_SIZE, MAX_NESTING_DEPTH, MAX_RECORD_SIZE, MAX_RECORDS,
+} from './session-store.mjs';
 
 export const MAX_SESSION_ID_CHARS = 200;
 export const MAX_MIRROR_BATCH = 1000;
@@ -8,7 +10,7 @@ export const MAX_REMOTE_RECORDS = MAX_RECORDS;
 export const MAX_REMOTE_RECORD_BYTES = MAX_RECORD_SIZE - 1;
 export const MAX_REMOTE_SESSION_BYTES = MAX_FILE_SIZE - MAX_RECORDS;
 export const MAX_PAYLOAD_NODES = 250_000;
-export const MAX_REMOTE_DEPTH = 32;
+export const MAX_REMOTE_DEPTH = MAX_NESTING_DEPTH;
 export const AGENTCORE_SOURCE_TRUST = 'untrusted-session-content';
 
 const RECORD_KINDS = new Set([
