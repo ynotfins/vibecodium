@@ -11,6 +11,21 @@ Current milestone: M0 and M5 (in progress)
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
 
+### 2026-11-22 — M0 stable Linux package identity
+
+- Goal / must-haves: brand the stable package metadata shipped by the build overlay and rewritten in the build script so the appstream entry, desktop keywords, Windows tile name, Debian maintainer, RPM vendor and packager, and the Snap description rewrite identify Vibecodium instead of upstream VSCodium or Visual Studio Code. A1.
+- Must-have IDs: A1.
+- Files allowed: `prepare_vscode.sh`, `src/stable/resources/linux/code.appdata.xml`, `src/stable/resources/linux/code.desktop`, `src/stable/resources/linux/code-url-handler.desktop`, `src/stable/resources/win32/VisualElementsManifest.xml`, `tests/vibe/branding.test.mjs`, `docs/vibe/CHANGELOG.md`, `docs/vibe/STATUS.md`.
+- Files forbidden: upstream source, CI workflows, dependencies, release scripts, Windows installer or packaging assets, signing, repository creation or settings, locked docs.
+- Acceptance commands: `node --test tests/vibe/branding.test.mjs`, `node vibe/tools/verify.mjs`.
+- Out of scope: Windows binary branding (already covered), insider branding, GitHub-hosted package publishing, actual Linux package builds, package names, file layout, post-install repository policy.
+- Delivered: the stable overlay now brands `code.appdata.xml` (homepage, summary, description, screenshot), both Linux desktop entries (`Keywords=vibecodium;vibecode;vscode;`), and the Windows shell tile (`ShortDisplayName="Vibecodium"`). `prepare_vscode.sh` now rewrites the upstream Debian maintainer, RPM vendor and packager, and Snap description to Vibecodium instead of VSCodium; the Snap rewrite targets `resources/linux/snap/snapcraft.yaml` (verified present at the pinned upstream tag) rather than repeating the RPM spec rewrite. No package was built or published.
+- Tests: `node --test tests/vibe/branding.test.mjs` PASS (7/7); `node vibe/tools/verify.mjs` PASS (4/4 steps, 123 tests); `node vibe/tools/docs-check.mjs --strict` PASS; `git diff --check` clean. The new package test uses the real appdata overlay and simulates the build-script rewrites; the new overlay test rejects VSCodium, Microsoft Corporation, Visual Studio Code and their URLs. Both fail on the base tree.
+- Guardians: qa-verifier PASS (after fixing the false-green overlay input; base-failure control and emitted-appdata simulation both PASS); drift-sentinel PASS (8 files in scope; medium notes only on the not-yet-committed branch and partial synthetic upstream-template coverage); security-reviewer PASS (no secrets, license, dependency, CI or runtime-network change; only owner-chosen [PERSON_NAME]); docs-keeper PASS through a read-only explorer fallback after the dedicated role stalled (strict docs check PASS; living docs unchanged beyond STATUS/CHANGELOG); governance-verifier PASS as not applicable (no locked path); tech-scout PASS as not applicable (no dependency or component change); release-manager PASS as not applicable (M0 remains in progress; no release build).
+- Next step: no unblocked M0 acceptance remains; Windows CI parity and the `-p` installer/zip smoke stay parked for the owner. Continue with the next unblocked M5 engine or integration work.
+- Branch: `vibe/m0/vendor-identity` -> PR #27 into `vibe/main`.
+- Build-evidence note: the Snap target was verified against pinned upstream VS Code `1.143.1` via the GitHub contents API; no Linux or Snap package was built here, so package-build acceptance remains unproven.
+
 ### 2026-11-22 — M0 update-feed branding
 
 - Goal / must-haves: point the shipped build's update and download endpoints at our own Vibecodium update feed and release page, using the standing feed-manifest contract and the product repository, without creating a repository or publishing release data. G2 (own update-feed wiring only), A1.
