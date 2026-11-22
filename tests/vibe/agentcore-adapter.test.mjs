@@ -293,7 +293,7 @@ test('hydrate rejects divergent, malformed and unsafe remote sessions', async (t
   await rejectWith([{ kind: 'user', payload: null, sequence: 0 }], /unsupported payload/);
   await rejectWith([{
     kind: 'user',
-    payload: { list: Array.from({ length: 1_000_001 }, () => ({})) },
+    payload: { list: new Array(300_000).fill(0) },
     sequence: 0,
   }], /node count exceeds/);
   await rejectWith([{ ...remoteRecord(0), extra: true }], /must contain exactly/);
@@ -327,7 +327,8 @@ test('client failures are isolated and reported without payload contents', async
     assert.equal(error.sessionId, 'session-failure');
     assert.match(error.message, /agentcore append failed for session session-failure/);
     assert.doesNotMatch(error.message, /secret token value/);
-    assert.match(error.cause.message, /secret token value/);
+    assert.equal(error.cause, undefined);
+    assert.doesNotMatch(String(error.stack), /secret token value/);
     return true;
   });
   assert.equal((await local.readAll()).length, 1);
@@ -466,4 +467,67 @@ test('hydrate rejects remote payloads the local store cannot persist before writ
     [],
     'a failed hydrate must not leave a partial local transcript',
   );
+});
+
+test('oversized remote payloads are rejected before serialization', async (t) => {
+  const local = await createStore(t);
+  const holder = { records: [] };
+  const client = {
+    async hydrate() { return { records: holder.records }; },
+    async append() { return { accepted: 0 }; },
+    async close() {},
+  };
+  const adapter = new AgentCoreAdapter({ store: local, sessionId: 'session-big', client });
+
+  const originalStringify = JSON.stringify;
+  let stringifyCalls = 0;
+  JSON.stringify = (...args) => { stringifyCalls += 1; return originalStringify(...args); };
+  t.after(() => { JSON.stringify = originalStringify; });
+
+  holder.records = [{ kind: 'user', payload: { big: 'x'.repeat(5_000_000) }, sequence: 0 }];
+  await assert.rejects(adapter.hydrate(), /exceeds 1000000 bytes/);
+  assert.equal(stringifyCalls, 0, 'oversized payloads must be rejected before JSON.stringify');
+
+  holder.records = [{ kind: 'user', payload: { ['k'.repeat(5_000_000)]: 'x' }, sequence: 0 }];
+  await assert.rejects(adapter.hydrate(), /exceeds 1000000 bytes/);
+  assert.equal(stringifyCalls, 0, 'oversized keys must be rejected before JSON.stringify');
+
+  holder.records = [{ kind: 'user', payload: { big: '\u0000'.repeat(300_000) }, sequence: 0 }];
+  await assert.rejects(adapter.hydrate(), /exceeds 1000000 bytes/);
+  assert.equal(stringifyCalls, 0, 'escape inflation must be counted before JSON.stringify');
+
+  assert.deepEqual(await readAllOrEmpty(local), []);
+});
+
+test('remote-supplied values never reach adapter error messages', async (t) => {
+  const local = await createStore(t);
+  const holder = { records: [] };
+  let accepted = 'ACKMARKER';
+  const client = {
+    async hydrate() { return { records: holder.records }; },
+    async append() { return { accepted }; },
+    async close() {},
+  };
+  const adapter = new AgentCoreAdapter({ store: local, sessionId: 'session-trust', client });
+
+  holder.records = [{ kind: 'KINDMARKER\u0000\n', payload: 'x', sequence: 0 }];
+  await assert.rejects(adapter.hydrate(), (error) => {
+    assert.match(error.message, /unsupported record kind/);
+    assert.doesNotMatch(error.message, /KINDMARKER/);
+    return true;
+  });
+
+  await local.append('user', 'one');
+  await assert.rejects(adapter.append(), (error) => {
+    assert.match(error.message, /acknowledgement/);
+    assert.doesNotMatch(error.message, /ACKMARKER/);
+    return true;
+  });
+
+  accepted = 1.5;
+  await assert.rejects(adapter.append(), (error) => {
+    assert.match(error.message, /acknowledgement/);
+    assert.doesNotMatch(error.message, /1\.5/);
+    return true;
+  });
 });
