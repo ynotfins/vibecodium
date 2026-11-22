@@ -1,5 +1,6 @@
 import { appendFile, chmod, readFile, stat } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
 export const MAX_FILE_SIZE = 50_000_000;
 export const MAX_NESTING_DEPTH = 32;
@@ -66,7 +67,9 @@ function capturePayload(
     const item = payload[key];
     const itemResult = capturePayload(item, seen, false, depth + 1);
     if (itemResult.error) return itemResult;
-    value[key] = itemResult.value;
+    Object.defineProperty(value, key, {
+      value: itemResult.value, enumerable: true, configurable: true, writable: true,
+    });
   }
   return { value };
 }
@@ -112,35 +115,94 @@ export class SessionStore {
       if (!RECORD_KINDS.has(kind)) {
         throw new Error(`unsupported record kind: ${kind}`);
       }
-
-      const payloadResult = capturePayload(payload);
-      if (payloadResult.error) throw new Error(payloadResult.error);
-
       const recordCount = await this.count();
-      if (recordCount >= MAX_RECORDS) {
-        throw new Error(`session exceeds ${MAX_RECORDS} records`);
-      }
-
-      const record = {
-        kind,
-        payload: payloadResult.value,
-        sequence: recordCount,
-      };
-      const line = `${JSON.stringify(record)}\n`;
-      const lineSize = Buffer.byteLength(line, 'utf8');
-      if (lineSize > MAX_RECORD_SIZE) {
-        throw new Error(`record exceeds ${MAX_RECORD_SIZE} bytes`);
-      }
-      if (await this.fileSize() + lineSize > MAX_FILE_SIZE) {
-        throw new Error(`session exceeds ${MAX_FILE_SIZE} bytes`);
-      }
-
-      await appendFile(this.path, line, { encoding: 'utf8', mode: 0o600 });
-      await chmod(this.path, 0o600);
-      return record;
+      return this.#writeRecord(recordCount, kind, payload);
     });
     this.appendQueue = task.catch(() => {});
     return task;
+  }
+
+  appendIfUnchanged(expected, records) {
+    if (!Array.isArray(expected)) {
+      throw new Error('expected must be an array of records');
+    }
+    if (!Array.isArray(records)) {
+      throw new Error('records must be an array');
+    }
+    const task = this.appendQueue.then(async () => {
+      const current = await this.readAll().catch((error) => {
+        if (error?.code === 'ENOENT') return [];
+        throw error;
+      });
+      if (current.length !== expected.length) {
+        throw new Error(`session changed: expected ${expected.length} records but found ${current.length}`);
+      }
+      for (let index = 0; index < expected.length; index += 1) {
+        if (!isDeepStrictEqual(current[index], expected[index])) {
+          throw new Error(`session changed: record ${index} no longer matches`);
+        }
+      }
+      const prepared = [];
+      let projectedSize = await this.fileSize();
+      for (let offset = 0; offset < records.length; offset += 1) {
+        const record = records[offset];
+        if (!record || typeof record !== 'object') {
+          throw new Error('record must be an object with kind and payload');
+        }
+        const item = await this.#prepareRecord(
+          current.length + offset,
+          record.kind,
+          record.payload,
+          projectedSize,
+        );
+        projectedSize += item.lineSize;
+        prepared.push(item);
+      }
+      for (const item of prepared) {
+        await appendFile(this.path, item.line, { encoding: 'utf8', mode: 0o600 });
+      }
+      if (prepared.length > 0) await chmod(this.path, 0o600);
+      return prepared.map((item) => item.record);
+    });
+    this.appendQueue = task.catch(() => {});
+    return task;
+  }
+
+  async #prepareRecord(recordCount, kind, payload, projectedSize) {
+    if (!RECORD_KINDS.has(kind)) {
+      throw new Error(`unsupported record kind: ${kind}`);
+    }
+
+    const payloadResult = capturePayload(payload);
+    if (payloadResult.error) throw new Error(payloadResult.error);
+
+    if (recordCount >= MAX_RECORDS) {
+      throw new Error(`session exceeds ${MAX_RECORDS} records`);
+    }
+
+    const record = {
+      kind,
+      payload: payloadResult.value,
+      sequence: recordCount,
+    };
+    const line = `${JSON.stringify(record)}\n`;
+    const lineSize = Buffer.byteLength(line, 'utf8');
+    if (lineSize > MAX_RECORD_SIZE) {
+      throw new Error(`record exceeds ${MAX_RECORD_SIZE} bytes`);
+    }
+    if (projectedSize + lineSize > MAX_FILE_SIZE) {
+      throw new Error(`session exceeds ${MAX_FILE_SIZE} bytes`);
+    }
+
+    return { record, line, lineSize };
+  }
+
+  async #writeRecord(recordCount, kind, payload) {
+    const projectedSize = await this.fileSize();
+    const { record, line } = await this.#prepareRecord(recordCount, kind, payload, projectedSize);
+    await appendFile(this.path, line, { encoding: 'utf8', mode: 0o600 });
+    await chmod(this.path, 0o600);
+    return record;
   }
 
   async fileSize() {
