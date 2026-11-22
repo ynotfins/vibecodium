@@ -51,13 +51,17 @@ try { [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = 'BelowNo
 if (-not $Codex) { $Codex = (Get-Command codex.cmd -ErrorAction Stop).Source }
 if (-not $OpenCode) { $OpenCode = (Get-Command opencode -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source }
 
-# Git uses the GitHub CLI (and therefore GH_TOKEN) as its credential helper, for this process tree
-# only. OpenSSL is used because the elevated Codex sandbox cannot use Windows certificate channels.
+# Git identity for this process tree only. The GitHub CLI is the credential helper (GH_TOKEN), so no
+# token ever appears on a command line. safe.directory lets the sandboxed user operate on the clone.
 $env:GIT_CONFIG_COUNT = '3'
 $env:GIT_CONFIG_KEY_0 = 'credential.helper'; $env:GIT_CONFIG_VALUE_0 = ''
 $env:GIT_CONFIG_KEY_1 = 'credential.helper'; $env:GIT_CONFIG_VALUE_1 = '!gh auth git-credential'
 $env:GIT_CONFIG_KEY_2 = 'safe.directory'; $env:GIT_CONFIG_VALUE_2 = '*'
+# OpenSSL is required, not optional: measured inside the sandbox, schannel TLS fails with
+# SEC_E_NO_CREDENTIALS (curl exit 35, git ls-remote 128), while http.sslBackend=openssl clones, commits
+# and pushes cleanly. Do not "fix" a transport error by switching back to schannel. Prompts stay off.
 $env:GIT_SSL_BACKEND = 'openssl'
+$env:GIT_TERMINAL_PROMPT = '0'
 
 # Single instance.
 $lockFile = Join-Path $LogDir 'runner.lock'
@@ -341,6 +345,9 @@ try {
       Write-Log 'runner script changed on trunk; exiting so the scheduler starts the new version'
       break
     }
+
+    # The sandbox can write inside <clone>.worktrees but cannot create that folder itself.
+    New-Item -ItemType Directory -Force -Path ($Root + '.worktrees') | Out-Null
 
     $models = Get-Models
     $chosen = Select-Provider $models
