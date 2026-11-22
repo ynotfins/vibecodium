@@ -142,21 +142,33 @@ export class SessionStore {
           throw new Error(`session changed: record ${index} no longer matches`);
         }
       }
-      const written = [];
+      const prepared = [];
+      let projectedSize = await this.fileSize();
       for (let offset = 0; offset < records.length; offset += 1) {
         const record = records[offset];
         if (!record || typeof record !== 'object') {
           throw new Error('record must be an object with kind and payload');
         }
-        written.push(await this.#writeRecord(current.length + offset, record.kind, record.payload));
+        const item = await this.#prepareRecord(
+          current.length + offset,
+          record.kind,
+          record.payload,
+          projectedSize,
+        );
+        projectedSize += item.lineSize;
+        prepared.push(item);
       }
-      return written;
+      for (const item of prepared) {
+        await appendFile(this.path, item.line, { encoding: 'utf8', mode: 0o600 });
+      }
+      if (prepared.length > 0) await chmod(this.path, 0o600);
+      return prepared.map((item) => item.record);
     });
     this.appendQueue = task.catch(() => {});
     return task;
   }
 
-  async #writeRecord(recordCount, kind, payload) {
+  async #prepareRecord(recordCount, kind, payload, projectedSize) {
     if (!RECORD_KINDS.has(kind)) {
       throw new Error(`unsupported record kind: ${kind}`);
     }
@@ -178,10 +190,16 @@ export class SessionStore {
     if (lineSize > MAX_RECORD_SIZE) {
       throw new Error(`record exceeds ${MAX_RECORD_SIZE} bytes`);
     }
-    if (await this.fileSize() + lineSize > MAX_FILE_SIZE) {
+    if (projectedSize + lineSize > MAX_FILE_SIZE) {
       throw new Error(`session exceeds ${MAX_FILE_SIZE} bytes`);
     }
 
+    return { record, line, lineSize };
+  }
+
+  async #writeRecord(recordCount, kind, payload) {
+    const projectedSize = await this.fileSize();
+    const { record, line } = await this.#prepareRecord(recordCount, kind, payload, projectedSize);
     await appendFile(this.path, line, { encoding: 'utf8', mode: 0o600 });
     await chmod(this.path, 0o600);
     return record;

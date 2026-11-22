@@ -841,3 +841,43 @@ test('hydrate matches a repeated null-prototype transcript and ignores key order
   assert.equal(second.total, 1);
   assert.equal((await readAllOrEmpty(local)).length, 1);
 });
+
+test('hydrate compares the validated remote snapshot rather than re-reading a payload accessor', async (t) => {
+  const local = await createStore(t);
+  await local.append('user', 'local read');
+  let reads = 0;
+  const record = { kind: 'user', sequence: 0 };
+  Object.defineProperty(record, 'payload', {
+    enumerable: true,
+    get() {
+      reads += 1;
+      return reads === 1 ? 'validated remote' : 'local read';
+    },
+  });
+  const client = {
+    async hydrate() { return { records: [record] }; },
+    async append() { return { accepted: 0 }; },
+    async close() {},
+  };
+  const adapter = new AgentCoreAdapter({ store: local, sessionId: 'session-snapshot-compare', client });
+
+  await assert.rejects(adapter.hydrate(), /conflicts with local record 0/);
+  assert.equal(adapter.mirrored, 0);
+});
+
+test('appendIfUnchanged validates the whole batch before writing any record', async (t) => {
+  const store = await createStore(t);
+  await store.append('user', 'original');
+  const snapshot = await store.readAll();
+
+  await assert.rejects(
+    store.appendIfUnchanged(snapshot, [
+      { kind: 'user', payload: 'valid first candidate' },
+      { kind: 'user', payload: 'x'.repeat(1_000_000) },
+    ]),
+    /record exceeds 1000000 bytes/,
+  );
+  const records = await store.readAll();
+  assert.equal(records.length, 1, 'a failed batch must not leave a partial write');
+  assert.deepEqual(records[0], { kind: 'user', payload: 'original', sequence: 0 });
+});

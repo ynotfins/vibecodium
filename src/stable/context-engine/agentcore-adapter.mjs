@@ -412,7 +412,12 @@ export class AgentCoreAdapter {
         );
       }
       for (let index = 0; index < local.length; index += 1) {
-        if (!sameRecordContent(local[index], remote[index])) {
+        const remoteRecord = {
+          kind: remoteResult.kinds[index],
+          payload: remoteResult.payloads[index],
+          sequence: index,
+        };
+        if (!sameRecordContent(local[index], remoteRecord)) {
           throw new AgentCoreAdapterError(
             `agentcore hydrate record ${index} conflicts with local record ${index} for session ${this.sessionId}`,
             { phase: 'hydrate', sessionId: this.sessionId },
