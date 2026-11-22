@@ -72,6 +72,16 @@ Token counts default to a conservative UTF-8 byte upper bound (`bytes + 1`) plus
 node --test tests/vibe/token-budget.test.mjs
 ```
 
+### Context engine: optional AgentCore adapter
+
+`AgentCoreAdapter` mirrors a `SessionStore` transcript to `agentcore-memory` when the caller supplies a client with `hydrate({ sessionId })`, `append({ sessionId, records })` and `close({ sessionId })`. Without a client the adapter is a local-only no-op, so the context engine keeps working offline. `hydrate()` copies missing remote records into the local append-only store and fails closed on a shorter or conflicting remote transcript; `append()` sends only unmirrored records in batches of at most 1,000 and requires an `accepted` count for each batch; `close()` flushes the tail, then closes the remote session. A caller can pass `mirrored` to resume from a persisted cursor. The local store stays authoritative: remote failures are wrapped in `AgentCoreAdapterError` with the phase and session id, do not include payload text, and do not alter the local transcript, and a later call retries.
+
+Caps fail closed before any local write: 200 characters per session id, 100,000 records, 1,000,000 bytes per record, 50,000,000 bytes per session, 32 levels of payload nesting and 1,000,000 payload nodes; records must be contiguous from sequence 0 and contain exactly `kind`, `payload` and `sequence`, with a `kind` the session store supports. Hydrated results carry `sourceTrust: untrusted-session-content`. The `append` client call must be idempotent per `(sessionId, sequence)` because a batch whose acknowledgement is lost may be retried. The adapter has not been exercised against a live AgentCore gateway or PostgreSQL; the contract test uses an in-memory fake:
+
+```bash
+node --test tests/vibe/agentcore-adapter.test.mjs
+```
+
 ### Update-feed manifests - local staging only
 
 To prepare the platform-scoped `latest.json` files for the own update feed without publishing, create a release manifest containing the product fields and one entry per artifact:

@@ -11,6 +11,16 @@ Current milestone: M0 and M5 (in progress)
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
 
+### 2026-11-22 — M5 optional AgentCore adapter
+
+- Goal / must-haves: add the optional AgentCore adapter to the standalone Vibe Context Engine so a session transcript can be mirrored to `agentcore-memory` and hydrated, appended and closed without making the local store depend on the remote. D5.
+- Must-have IDs: D5.
+- Files allowed: `src/stable/context-engine/**`, `tests/vibe/agentcore-adapter.test.mjs`, `docs/vibe/CHANGELOG.md`, `docs/vibe/ROADMAP.md`, `docs/vibe/STATUS.md`, `docs/vibe/dev/BUILD.md`.
+- Files forbidden: upstream source, IDE integration, dependencies, real gateway or PostgreSQL clients, credentials, other context-engine modules, release infrastructure, locked docs.
+- Acceptance commands: `node --test tests/vibe/agentcore-adapter.test.mjs`, `node vibe/tools/verify.mjs`.
+- Out of scope: live AgentCore transport and auth, retry/backoff policy, offline queue persistence, IDE binding, memory review UI, MCP, SQLite.
+- Branch: `vibe/m5/agentcore-adapter` → PR into `vibe/main`.
+
 ### 2026-11-22 — M5 token-budget context assembly
 
 - Goal / must-haves: add cache-stable token-budget assembly to the standalone Vibe Context Engine so assembled context never exceeds the model window, uses the fixed section order, and reports exactly what was included, omitted or dropped. D4.
