@@ -3,7 +3,8 @@ import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, realpath, rename, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 
-export const INDEX_VERSION = 2;
+export const INDEX_VERSION = 3;
+export const LEXICAL_SYMBOL_PROVIDER_ID = 'lexical';
 export const MAX_FILE_BYTES = 1_000_000;
 export const MAX_FILES = 10_000;
 export const MAX_SYMBOLS_PER_FILE = 2_000;
@@ -512,16 +513,18 @@ function hashBuffer(buffer) {
   return createHash('sha256').update(buffer).digest('hex');
 }
 
-function fileEntry(buffer, options) {
+function fileEntry(buffer, options, provider, filePath) {
   const source = buffer.toString('utf8').replace(/^\uFEFF/, '');
-  const symbols = extractSymbols(source, { maxSymbols: options.maxSymbolsPerFile });
+  const symbols = provider.extract(source, { filePath, maxSymbols: options.maxSymbolsPerFile });
+  if (symbols === null) fail(`symbol provider does not support ${filePath}`);
+  const validated = validateSymbols(symbols, filePath, options.maxSymbolsPerFile);
   const calls = extractCalls(source, {
     maxCalls: options.maxCallsPerFile,
     maxSymbols: options.maxSymbolsPerFile,
-    symbols,
+    symbols: validated,
   });
   const tokens = extractTokens(maskNonCode(source), options.maxTokensPerFile);
-  return { hash: hashBuffer(buffer), bytes: buffer.byteLength, symbols, calls, tokens };
+  return { hash: hashBuffer(buffer), bytes: buffer.byteLength, symbols: validated, calls, tokens };
 }
 
 function rebuildSymbols(files, maxSymbols = MAX_TOTAL_SYMBOLS) {
@@ -536,7 +539,7 @@ function rebuildSymbols(files, maxSymbols = MAX_TOTAL_SYMBOLS) {
     a.file.localeCompare(b.file) || a.line - b.line || a.column - b.column || a.name.localeCompare(b.name));
 }
 
-function makeIndex(files) {
+function makeIndex(files, provider) {
   const symbols = rebuildSymbols(files);
   let tokenCount = 0;
   let callCount = 0;
@@ -547,13 +550,14 @@ function makeIndex(files) {
     if (callCount > MAX_TOTAL_CALLS) fail('index contains too many calls');
   }
   const fileCount = Object.keys(files).length;
-  return { version: INDEX_VERSION, files, symbols, text: { tokenCount, fileCount }, fileCount };
+  return { version: INDEX_VERSION, provider, files, symbols, text: { tokenCount, fileCount }, fileCount };
 }
 
 const SYMBOL_KINDS = new Set(['class', 'constructor', 'enum', 'function', 'getter', 'interface', 'method', 'namespace', 'setter', 'type', 'variable']);
 
-function validateLoadedIndex(value) {
+function validateLoadedIndex(value, provider) {
   if (!value || typeof value !== 'object' || value.version !== INDEX_VERSION) fail('index file has an unsupported format');
+  if (value.provider !== provider) fail('index file was built by a different symbol provider');
   if (!value.files || typeof value.files !== 'object' || Array.isArray(value.files)) fail('index file has an invalid files map');
   const files = Object.entries(value.files);
   if (files.length > MAX_FILES) fail('index file contains too many files');
@@ -612,6 +616,7 @@ function validateLoadedIndex(value) {
   }
   return {
     version: value.version,
+    provider: value.provider,
     files: value.files,
     symbols: rebuildSymbols(value.files),
     text: { tokenCount, fileCount },
@@ -725,6 +730,7 @@ async function ensureIndexRoot(root, indexRoot) {
 async function writeIndexFile(root, indexRoot, indexFile, index) {
   const persisted = {
     version: index.version,
+    provider: index.provider,
     files: index.files,
     text: index.text,
     fileCount: index.fileCount,
@@ -801,6 +807,7 @@ export class ProjectIndex {
       maxTokensPerFile: validateInteger('maxTokensPerFile', options.maxTokensPerFile ?? MAX_TOKENS_PER_FILE, 1, MAX_TOKENS_PER_FILE),
       maxCallsPerFile: validateInteger('maxCallsPerFile', options.maxCallsPerFile ?? MAX_CALLS_PER_FILE, 1, MAX_CALLS_PER_FILE),
     };
+    this.symbolProvider = validateSymbolProvider(options.symbolProvider ?? createLexicalSymbolProvider());
     this.current = null;
   }
 
@@ -830,7 +837,7 @@ export class ProjectIndex {
     } catch {
       fail('index file is not valid JSON');
     }
-    const loaded = validateLoadedIndex(parsed);
+    const loaded = validateLoadedIndex(parsed, this.symbolProvider.id);
     if (pinned) await this.verifySnapshot(loaded, pinned);
     this.current = loaded;
     return { index: this.current, stats: { files: Object.keys(this.current.files).length, symbols: this.current.symbols.length } };
@@ -884,7 +891,7 @@ export class ProjectIndex {
         entry = previous;
         reused += 1;
       } else {
-        entry = fileEntry(buffer, this.options);
+        entry = fileEntry(buffer, this.options, this.symbolProvider, rel);
         changed += 1;
       }
       totalSymbols += entry.symbols.length;
@@ -893,7 +900,7 @@ export class ProjectIndex {
       if (totalTokens > MAX_TOTAL_TOKENS) fail('index contains too many tokens');
       files[rel] = entry;
     }
-    const index = makeIndex(files);
+    const index = makeIndex(files, this.symbolProvider.id);
     if (expectedRoot !== undefined) await this.verifySnapshot(index, expectedRoot);
     if (expectedRoot !== undefined) await assertExpectedRoot(this.root, expectedRoot);
     if (this.persist) await writeIndexFile(this.root, this.indexDir, this.indexFile, index);
@@ -947,7 +954,7 @@ export class ProjectIndex {
     const rootReal = await realpath(this.root).catch(() => null);
     if (!rootReal) fail('project root does not exist');
     const buffer = await readFileWithin(rootReal, rel, this.options.maxFileBytes);
-    const entry = fileEntry(buffer, this.options);
+    const entry = fileEntry(buffer, this.options, this.symbolProvider, rel);
     const previous = this.current.files[rel];
     if (previous && previous.hash === entry.hash) {
       return { index: this.current, changed: false };
@@ -961,7 +968,7 @@ export class ProjectIndex {
     }
     if (totalSymbols > MAX_TOTAL_SYMBOLS) fail('index contains too many symbols');
     if (totalTokens > MAX_TOTAL_TOKENS) fail('index contains too many tokens');
-    const index = makeIndex(files);
+    const index = makeIndex(files, this.symbolProvider.id);
     if (this.persist) await writeIndexFile(this.root, this.indexDir, this.indexFile, index);
     this.current = index;
     return { index, changed: true };
@@ -1115,4 +1122,45 @@ export function extractCalls(source, options = {}) {
     calls.push({ name, line, column, endLine, depth, kind, ...(receiver ? { receiver } : {}) });
   }
   return calls;
+}
+
+function validateSymbols(symbols, filePath, limit) {
+  if (!Array.isArray(symbols)) fail(`symbol provider returned no symbol array for ${filePath}`);
+  const seen = new Set();
+  const ordered = [];
+  for (const symbol of symbols) {
+    if (!symbol || typeof symbol !== 'object' ||
+        typeof symbol.name !== 'string' || symbol.name.length < 1 || symbol.name.length > 512 ||
+        !IDENTIFIER_NAME.test(symbol.name) || !SYMBOL_KINDS.has(symbol.kind) ||
+        !Number.isInteger(symbol.line) || symbol.line < 1 || symbol.line > 10_000_000 ||
+        !Number.isInteger(symbol.column) || symbol.column < 1 || symbol.column > 10_000_000 ||
+        (symbol.container !== undefined && (typeof symbol.container !== 'string' ||
+            symbol.container.length < 1 || symbol.container.length > 512 || !IDENTIFIER_NAME.test(symbol.container)))) {
+      fail(`symbol provider returned an invalid symbol for ${filePath}`);
+    }
+    const key = `${symbol.line}:${symbol.column}:${symbol.name}:${symbol.kind}:${symbol.container ?? ''}`;
+    if (!seen.has(key)) { seen.add(key); ordered.push(symbol); }
+  }
+  ordered.sort((a, b) =>
+    a.line - b.line || a.column - b.column || a.name.localeCompare(b.name) ||
+    a.kind.localeCompare(b.kind) || (a.container ?? '').localeCompare(b.container ?? ''));
+  return ordered.slice(0, limit);
+}
+
+export function createLexicalSymbolProvider() {
+  return Object.freeze({
+    id: LEXICAL_SYMBOL_PROVIDER_ID,
+    languages: Object.freeze(['javascript', 'typescript', 'tsx']),
+    extractSymbols: (source, options = {}) => extractSymbols(source, options),
+    extract: (source, options = {}) => extractSymbols(source, options),
+  });
+}
+
+function validateSymbolProvider(provider) {
+  if (!provider || typeof provider !== 'object' || Array.isArray(provider)) fail('symbolProvider must be an object');
+  if (typeof provider.id !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(provider.id)) {
+    fail('symbolProvider.id must be a short lowercase identifier');
+  }
+  if (typeof provider.extract !== 'function') fail('symbolProvider.extract must be a function');
+  return provider;
 }

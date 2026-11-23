@@ -394,6 +394,7 @@ test('rejects a persisted index above the total token cap', async (t) => {
   await mkdir(path.dirname(index.indexPath), { recursive: true });
   const value = {
     version: INDEX_VERSION,
+    provider: 'lexical',
     files,
     text: { tokenCount: 2_004_000, fileCount: 501 },
     fileCount: 501,
