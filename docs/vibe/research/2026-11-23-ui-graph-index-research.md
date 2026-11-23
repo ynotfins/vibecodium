@@ -1,6 +1,8 @@
 # In-Product UI, Cross-Project Graph, and M4 Index Research
 
-> Doc class: living · Owner: tech-scout · Last reviewed: 2026-11-23 · Next review: 2026-12-07
+> Doc class: living · Owner: tech-scout · Last reviewed: 2026-11-23
+>
+> Next review: 2026-12-07
 
 ## Scope and governing constraints
 
