@@ -1,6 +1,6 @@
 # Building Vibecodium on Windows
 
-> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-22
+> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-23
 
 Vibecodium builds with VSCodium's scripts. Run everything in **Git Bash** from the repository root.
 
@@ -95,6 +95,16 @@ node --test tests/vibe/index-engine.test.mjs
 ```
 
 The fixture at `tests/fixtures/repo-ts` has 24 known symbols. The test requires at least 95% of them to be indexed and requires a one-file reindex to finish in under 2 seconds. It also covers persistence, corrupt-index rejection, identifier search, symlink and oversized-file skipping, path traversal rejection, BOM handling, and declaration extraction without false matches from comments or strings.
+
+### Code index: multi-project registry
+
+`src/stable/index-engine/project-registry.mjs` registers up to 32 project roots by caller-supplied id. Each project keeps its own `ProjectIndex` and the registry-owned index stays in memory; persistence remains the standalone index engine's default, but the registry does not publish to disk until a later verified IDE binding. Registration resolves and pins the real root plus its device/inode identity, rejects duplicate roots and unsafe ids, refreshes the index, revalidates the root after indexing, records the project, installs watchers, and performs a catch-up refresh. A failed catch-up clears the timer and watchers before the project is removed. `ProjectIndex` accepts a pinned `expectedRoot` identity; pinned indexes enforce their stored identity on every refresh and reject reindex calls, reject a root that changes around reads, and `verifySnapshot()` re-hashes every candidate file against the pinned root. Every registry refresh validates the pinned root before and after indexing; if a check fails, the previous in-memory snapshot is restored instead of serving content from the moved tree. Unix uses a bounded per-directory `fs.watch` tree that excludes ignored directory names before installing watches; Windows uses reconciliation polling at the configured interval because recursive watches can crash on unreadable directories and open directory handles can block root swaps. The watcher ignores the resolved index file and its temporary files, while source files in a custom index directory remain watched outside standard ignored directories; moving that directory out of the project drops its stale entries and watches. Ignored path segments are compared case-insensitively, and registration and refresh queues are bounded to 32 pending operations. If watcher creation fails, a directory cannot be listed, a watcher errors, or an event arrives without a usable filename, polling takes over at the configured interval. Watcher events are coalesced into an immediate refresh plus at most one queued follow-up; after rename reconciliation attaches nested watches, it schedules a coalesced refresh so files created during attachment are indexed; refreshes are serialized per project, and one project's failure is recorded in `stats()` without stopping the others. `stats()` exposes `mode` (`watch` or `poll`) and the number of active directory watchers. `list()` reports registered ids and roots; `get()`, `index()`, `symbols()` and `searchText()` read one project without crossing boundaries; `refresh()`, `refreshAll()` and `close()` manage lifecycle. The registry is in-memory only, and IDE binding is later M4/M6 work.
+
+```bash
+node --test tests/vibe/project-registry.test.mjs
+```
+
+The registry test copies the fixture three times, registers all three repositories, edits the same relative source file in parallel, and waits for each project to expose only its own new symbol. It also covers duplicate roots, unsafe ids, unknown projects, case-insensitive duplicate ids, root swaps during registration and refresh, forged snapshots built from outside content, conflicting caller identities that cannot override the stored pin, empty-filename watcher events falling back to polling, native per-directory watches on Unix, Windows reconciliation polling, files saved during registration, a file created while a moved subtree attaches, atomic file replacement, ignored-tree exclusion, source edits inside a custom index directory, custom-directory moves, generated index files that must not feed the watcher, valid Linux filenames that cannot be indexed, the `index()` accessor, and a parallel `refreshAll()`. Five cases skip on Windows: the Unix native watcher tree, moved-directory discovery, the post-attachment reconciliation race, ignored-tree watch counts, and POSIX filename cases.
 
 ### Update-feed manifests - local staging only
 

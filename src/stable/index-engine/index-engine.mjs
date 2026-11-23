@@ -27,6 +27,7 @@ const CONTROL_WORDS = new Set([
 ]);
 const MODIFIERS = '(?:public|private|protected|readonly|static|async|abstract|override|declare)';
 const IDENT = '([A-Za-z_$#][\\w$]*)';
+const PINNED_INDEXES = new WeakMap();
 
 export class IndexEngineError extends Error {
   constructor(message) {
@@ -80,7 +81,34 @@ function isContained(root, candidate) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-async function readFileWithin(rootReal, relativePath, maxFileBytes) {
+function rootKey(root) {
+  return process.platform === 'win32' ? root.toLowerCase() : root;
+}
+
+function validateExpectedRoot(expectedRoot) {
+  if (!expectedRoot || typeof expectedRoot !== 'object' || Array.isArray(expectedRoot) ||
+      typeof expectedRoot.rootKey !== 'string' || expectedRoot.rootKey.length === 0 ||
+      !Number.isInteger(expectedRoot.rootDev) || expectedRoot.rootDev < 0 ||
+      !Number.isInteger(expectedRoot.rootIno) || expectedRoot.rootIno < 0) {
+    fail('expectedRoot must contain a pinned root identity');
+  }
+  return Object.freeze({
+    rootKey: expectedRoot.rootKey,
+    rootDev: expectedRoot.rootDev,
+    rootIno: expectedRoot.rootIno,
+  });
+}
+
+async function assertExpectedRoot(root, expectedRoot) {
+  const real = await realpath(root).catch(() => null);
+  if (!real || rootKey(real) !== expectedRoot.rootKey) fail('project root changed after registration');
+  const info = await stat(real).catch(() => null);
+  if (!info || !info.isDirectory() || info.dev !== expectedRoot.rootDev || info.ino !== expectedRoot.rootIno) {
+    fail('project root changed after registration');
+  }
+}
+
+async function readFileWithin(rootReal, relativePath, maxFileBytes, expectedRoot) {
   const absolute = path.join(rootReal, relativePath);
   const info = await lstat(absolute).catch(() => null);
   if (!info || !info.isFile() || info.isSymbolicLink()) fail('file is not a regular file within the project root');
@@ -108,6 +136,7 @@ async function readFileWithin(rootReal, relativePath, maxFileBytes) {
       fail('file could not be read safely');
     }
     if (buffer.byteLength > maxFileBytes) fail(`file exceeds ${maxFileBytes} bytes`);
+    if (expectedRoot !== undefined) await assertExpectedRoot(rootReal, expectedRoot);
     return buffer;
   } finally {
     await handle.close().catch(() => {});
@@ -595,6 +624,15 @@ async function listFiles(root, options) {
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
       const rel = dir ? `${dir}/${entry.name}` : entry.name;
+      try {
+        if (normalizeRelative(rel) !== rel) {
+          skipped.unsupported += 1;
+          continue;
+        }
+      } catch {
+        skipped.unsupported += 1;
+        continue;
+      }
       if (entry.isSymbolicLink()) {
         skipped.symlinks += 1;
         continue;
@@ -717,6 +755,9 @@ export class ProjectIndex {
     if (typeof root !== 'string' || root.length === 0) fail('root must be a non-empty path string');
     if (options === null || typeof options !== 'object') fail('options must be an object');
     this.root = path.resolve(root);
+    this.persist = options.persist !== false;
+    if (options.persist !== undefined && typeof options.persist !== 'boolean') fail('persist must be a boolean');
+    if (options.expectedRoot !== undefined) PINNED_INDEXES.set(this, validateExpectedRoot(options.expectedRoot));
     this.indexDir = resolveIndexRoot(this.root, options.indexDir ?? '.vibe/index');
     this.indexFile = options.indexFile ?? 'index.json';
     if (typeof this.indexFile !== 'string' || !/^[A-Za-z0-9._-]+\.json$/.test(this.indexFile) ||
@@ -743,10 +784,12 @@ export class ProjectIndex {
     if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_INDEX_BYTES) fail('index file is not a valid index');
     const rootReal = await realpath(this.root).catch(() => null);
     if (!rootReal) fail('project root does not exist');
+    const pinned = PINNED_INDEXES.get(this);
+    if (pinned) await assertExpectedRoot(this.root, pinned);
     const relativePath = path.relative(this.root, this.indexPath).replace(/\\/g, '/');
     let raw;
     try {
-      const buffer = await readFileWithin(rootReal, relativePath, MAX_INDEX_BYTES);
+      const buffer = await readFileWithin(rootReal, relativePath, MAX_INDEX_BYTES, pinned);
       raw = buffer.toString('utf8');
     } catch {
       fail('index file could not be read');
@@ -757,25 +800,40 @@ export class ProjectIndex {
     } catch {
       fail('index file is not valid JSON');
     }
-    this.current = validateLoadedIndex(parsed);
+    const loaded = validateLoadedIndex(parsed);
+    if (pinned) await this.verifySnapshot(loaded, pinned);
+    this.current = loaded;
     return { index: this.current, stats: { files: Object.keys(this.current.files).length, symbols: this.current.symbols.length } };
   }
 
-  async refresh({ full = false } = {}) {
+  async refresh({ full = false, expectedRoot } = {}) {
     if (typeof full !== 'boolean') fail('full must be a boolean');
+    const pinned = PINNED_INDEXES.get(this);
+    if (pinned) expectedRoot = pinned;
+    else if (expectedRoot !== undefined) validateExpectedRoot(expectedRoot);
     const rootReal = await realpath(this.root).catch(() => null);
     if (!rootReal) fail('project root does not exist');
     const rootInfo = await stat(rootReal).catch(() => null);
     if (!rootInfo || !rootInfo.isDirectory()) fail('project root must be a directory');
+    if (expectedRoot !== undefined &&
+        (rootKey(rootReal) !== expectedRoot.rootKey ||
+        rootInfo.dev !== expectedRoot.rootDev || rootInfo.ino !== expectedRoot.rootIno)) {
+      fail('project root changed after registration');
+    }
     let previousFiles = {};
     if (!full) {
-      try {
-        previousFiles = (await this.load()).index.files;
-      } catch {
-        previousFiles = {};
+      if (this.persist) {
+        try {
+          previousFiles = (await this.load()).index.files;
+        } catch {
+          previousFiles = {};
+        }
+      } else if (this.current) {
+        previousFiles = this.current.files;
       }
     }
     const { files: relFiles, skipped } = await listFiles(rootReal, this.options);
+    if (expectedRoot !== undefined) await assertExpectedRoot(this.root, expectedRoot);
     const files = {};
     let changed = 0;
     let reused = 0;
@@ -784,7 +842,7 @@ export class ProjectIndex {
     for (const rel of relFiles) {
       let buffer;
       try {
-        buffer = await readFileWithin(rootReal, rel, this.options.maxFileBytes);
+        buffer = await readFileWithin(rootReal, rel, this.options.maxFileBytes, expectedRoot);
       } catch {
         skipped.raced = (skipped.raced ?? 0) + 1;
         continue;
@@ -806,7 +864,9 @@ export class ProjectIndex {
       files[rel] = entry;
     }
     const index = makeIndex(files);
-    await writeIndexFile(this.root, this.indexDir, this.indexFile, index);
+    if (expectedRoot !== undefined) await this.verifySnapshot(index, expectedRoot);
+    if (expectedRoot !== undefined) await assertExpectedRoot(this.root, expectedRoot);
+    if (this.persist) await writeIndexFile(this.root, this.indexDir, this.indexFile, index);
     this.current = index;
     return {
       index,
@@ -822,7 +882,35 @@ export class ProjectIndex {
     };
   }
 
+  async verifySnapshot(index, expectedRoot) {
+    const pinned = PINNED_INDEXES.get(this);
+    if (pinned) expectedRoot = pinned;
+    else validateExpectedRoot(expectedRoot);
+    if (!index || typeof index !== 'object' || !index.files || typeof index.files !== 'object' ||
+        Array.isArray(index.files)) {
+      fail('index snapshot is not valid');
+    }
+    const rootReal = await realpath(this.root).catch(() => null);
+    if (!rootReal) fail('project root does not exist');
+    const rootInfo = await stat(rootReal).catch(() => null);
+    if (!rootInfo || !rootInfo.isDirectory() || rootKey(rootReal) !== expectedRoot.rootKey ||
+        rootInfo.dev !== expectedRoot.rootDev || rootInfo.ino !== expectedRoot.rootIno) {
+      fail('project root changed after registration');
+    }
+    for (const [file, entry] of Object.entries(index.files)) {
+      if (!entry || typeof entry !== 'object' || !/^[a-f0-9]{64}$/.test(entry.hash ?? '')) {
+        fail('index snapshot is not valid');
+      }
+      const rel = normalizeRelative(file);
+      const buffer = await readFileWithin(rootReal, rel, this.options.maxFileBytes, expectedRoot);
+      if (hashBuffer(buffer) !== entry.hash) fail('index snapshot does not match the project root');
+    }
+    await assertExpectedRoot(this.root, expectedRoot);
+    return true;
+  }
+
   async reindexFile(filePath) {
+    if (PINNED_INDEXES.has(this)) fail('reindexFile is unavailable for pinned indexes');
     const rel = normalizeRelative(filePath);
     if (!isIndexableFile(rel)) fail('file is not an indexable source file');
     if (!this.current) await this.load();
@@ -844,7 +932,7 @@ export class ProjectIndex {
     if (totalSymbols > MAX_TOTAL_SYMBOLS) fail('index contains too many symbols');
     if (totalTokens > MAX_TOTAL_TOKENS) fail('index contains too many tokens');
     const index = makeIndex(files);
-    await writeIndexFile(this.root, this.indexDir, this.indexFile, index);
+    if (this.persist) await writeIndexFile(this.root, this.indexDir, this.indexFile, index);
     this.current = index;
     return { index, changed: true };
   }
