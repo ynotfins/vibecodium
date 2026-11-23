@@ -1,6 +1,6 @@
 # Vibecodium Documentation
 
-> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-22
+> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-23
 
 Vibecodium is a standalone, Windows-first AI IDE built on VSCodium. This folder is the product's documentation suite. The upstream VSCodium docs in `docs/` (outside `docs/vibe/`) describe the base build and are left unchanged.
 
@@ -21,6 +21,7 @@ Vibecodium is a standalone, Windows-first AI IDE built on VSCodium. This folder 
 | [ROADMAP.md](ROADMAP.md) | Milestones and their status |
 | [STATUS.md](STATUS.md) | Current state, task log, parked decisions |
 | [TECH_RADAR.md](TECH_RADAR.md) | Every component, its version, the latest release and alternatives |
+| [research/2026-11-23-ui-graph-index-research.md](research/2026-11-23-ui-graph-index-research.md) | UI mechanics, one cross-project graph authority, and the M4 index stack |
 | [CHANGELOG.md](CHANGELOG.md) | User-visible changes per release |
 | [SECURITY.md](SECURITY.md) | Security model and how to report issues |
 | [adr/README.md](adr/README.md) | Architecture decision records |
