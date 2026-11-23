@@ -16,3 +16,7 @@ docs/vibe/research/**
 
 # Governance proposals embed exact unified diffs (blank context lines are a single space)
 .vibe/governance/proposals/**
+
+# Vendored tree-sitter WASM runtime and grammars: third-party artifacts whose
+# formatting is pinned by size and checksum in the vendor README.
+src/stable/index-engine/vendor/tree-sitter/**
