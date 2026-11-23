@@ -19,6 +19,7 @@ Rings: `adopt` (in use, keep), `trial` (in use, under evaluation), `assess` (wat
 | Context engine reference | lossless-claw (pattern only, MIT) | — | active (2026-11-19) | 2026-11-20 | agentcore-context-engine 0.2.5 (owner's, adapter only) | assess | 2026-12-04 |
 | Vector store | LanceDB | not yet used | v0.41.0 (carried) | 2026-11-08 carried | sqlite-vec (pre-1.0) | adopt | 2026-11-27 |
 | Code parsing | tree-sitter (WASM) vendored from `@vscode/tree-sitter-wasm` | 0.3.1 (runtime + JavaScript, TypeScript and TSX grammars; MIT; checksums in `src/stable/index-engine/vendor/tree-sitter/README.md`) | 0.3.1 (published 2026-04-07) | 2026-11-23 | ast-grep (`@ast-grep/napi`, MIT); LSP providers; SCIP indexers; `web-tree-sitter` 0.27.2 | trial | 2026-12-07 |
+| Structural patterns | ast-grep CLI contract, caller-supplied and not bundled | provider targets ast-grep 0.51.3 `sg run --stdin --json=stream` | 0.51.3 (published 2026-11-16) | 2026-11-23 | `@ast-grep/napi` (MIT); SCIP indexers; tree-sitter queries | assess | 2026-12-07 |
 | Code graph reference | code-review-graph (MIT) | not used | multi-repo registry + daemon (docs, 2026-11-20) | 2026-11-20 | Understand-Anything, Serena | assess | 2026-11-27 |
 | Semantic / visual graph | Understand-Anything (MIT) | installed on workstation | carried | 2026-11-08 carried | CodeGraphContext, code-graph-rag | adopt | 2026-11-27 |
 | Local model runtime | llama.cpp `llama-server` | not yet bundled | carried | 2026-11-08 carried | Ollama, LocalAI | adopt | 2026-11-27 |
