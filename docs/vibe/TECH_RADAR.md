@@ -20,8 +20,12 @@ Rings: `adopt` (in use, keep), `trial` (in use, under evaluation), `assess` (wat
 | Vector store | LanceDB | optional driver-injected adapter; `@lancedb/lancedb` 0.41.0 (Apache-2.0, Node >=22, win32-x64 supported) is supplied by the embedding host, never bundled here | 0.41.0 (published 2026-10-29) | 2026-11-23 | sqlite-vec (pre-1.0) | adopt | 2026-12-07 |
 | Code parsing | tree-sitter (WASM) vendored from `@vscode/tree-sitter-wasm` | 0.3.1 (runtime + JavaScript, TypeScript and TSX grammars; MIT; checksums in `src/stable/index-engine/vendor/tree-sitter/README.md`) | 0.3.1 (published 2026-04-07) | 2026-11-23 | ast-grep (`@ast-grep/napi`, MIT); LSP providers; SCIP indexers; `web-tree-sitter` 0.27.2 | trial | 2026-12-07 |
 | Structural patterns | ast-grep CLI contract, caller-supplied and not bundled | provider targets ast-grep 0.51.3 `sg run --stdin --json=stream` | 0.51.3 (published 2026-11-16) | 2026-11-23 | `@ast-grep/napi` (MIT); SCIP indexers; tree-sitter queries | assess | 2026-12-07 |
+| Semantic index enrichment | LSP | not yet used | LSP 3.18 current; 3.19 upcoming | 2026-11-23 | SCIP compiler indexers | adopt | 2026-12-07 |
+| Semantic index interchange | SCIP (Apache-2.0) | not yet used | protocol and indexer ecosystem active on 2026-11-23 | 2026-11-23 | Language-specific LSP exports | assess | 2026-12-07 |
+| Cross-project edge authority | Vibecodium Graph Engine + SQLite typed edge tables | not yet used | Architecture decision current | 2026-11-23 | Tentra, Depwire, Understand Anything, and codebase-analyzer as evidence feeds | adopt | 2026-12-07 |
 | Code graph reference | code-review-graph (MIT) | not used | multi-repo registry + daemon (docs, 2026-11-20) | 2026-11-20 | Understand-Anything, Serena | assess | 2026-11-27 |
-| Semantic / visual graph | Understand-Anything (MIT) | installed on workstation | carried | 2026-11-08 carried | CodeGraphContext, code-graph-rag | adopt | 2026-11-27 |
+| Semantic / visual graph | Understand-Anything (MIT) | installed on workstation | v2.9.8 (2026-11-15) | 2026-11-23 | CodeGraphContext, code-graph-rag; SCIP as symbol/reference feed | adopt | 2026-12-07 |
+| Vector-core challenger | USearch (Apache-2.0) | not used | v2.26.6 (2026-10-25) | 2026-11-23 | LanceDB embedded vector index | assess | 2026-12-07 |
 | Local model runtime | llama.cpp `llama-server` | not yet bundled | carried | 2026-11-08 carried | Ollama, LocalAI | adopt | 2026-11-27 |
 | Sandbox | anthropics/sandbox-runtime | not yet used | carried | 2026-11-08 carried | devcontainers, microsandbox | adopt | 2026-11-27 |
 | Autonomous lane | OpenHands Agent Canvas | 1.43.0 stable, `main` edge (workstation) | 1.43.0 (2026-11-20) | 2026-11-20 | — | trial | 2026-11-27 |
