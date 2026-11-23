@@ -524,7 +524,7 @@ function hashBuffer(buffer) {
 
 async function fileEntry(buffer, options, provider, embeddingProvider, filePath) {
   const source = buffer.toString('utf8').replace(/^\uFEFF/, '');
-  const symbols = provider.extract(source, { filePath, maxSymbols: options.maxSymbolsPerFile });
+  const symbols = await provider.extract(source, { filePath, maxSymbols: options.maxSymbolsPerFile });
   if (symbols === null) fail(`symbol provider does not support ${filePath}`);
   const validated = validateSymbols(symbols, filePath, options.maxSymbolsPerFile);
   const calls = extractCalls(source, {
