@@ -8,7 +8,7 @@ Vibecodium is not released yet. This guide grows with each milestone; every sect
 |---|---|---|
 | Install from the `.exe` or the portable zip | not yet | M12 (test builds from M0) |
 | Set up model providers with point-and-click | not yet | M2 |
-| Index and graph several projects | not yet | M5 for the graph; M6 for IDE binding (M4 index engine accepted) |
+| Index and graph several projects | not yet | M5 standalone cross-project edge layer landed; M5 graph panel (C4) and M6 IDE binding outstanding (M4 index engine accepted) |
 | Memory and long context | not yet | M5 |
 | Prompt Studio (long prompt → approved spec) | not yet | M9 |
 | Autonomous agents and the autonomy dial | not yet | M6–M8 |
