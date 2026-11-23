@@ -5,11 +5,25 @@
 Goal state: active
 Owner priorities (2026-11-20): alongside M0/M1, begin the standalone engine packages (Vibe Context Engine, multi-project indexer/graph) - they are testable without the IDE build. Build-dependent work continues now that the MSVC Spectre component is installed. Milestone numbering is unchanged.
 
-Current milestone: M0, M4 and M5 (in progress)
+Current milestone: M0 and M5 (in progress)
 
 ## Task log
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
+
+### 2026-11-23 - M4 milestone exit
+
+- Goal / must-haves: close M4 by independently confirming every must-have acceptance check (C1, C2, C5) on the merged trunk, running the milestone-exit guardians, and recording the evidence and status transition. No product code changes.
+- Must-have IDs: C1, C2, C5.
+- Files allowed: `docs/vibe/STATUS.md`, `docs/vibe/ROADMAP.md`, `docs/vibe/CHANGELOG.md`, `docs/vibe/dev/BUILD.md`, `docs/vibe/user/README.md`.
+- Files forbidden: source code, tests, dependencies, IDE integration, build scripts, CI workflows, release infrastructure, locked docs.
+- Acceptance commands: `node --test tests/vibe/index-engine.test.mjs tests/vibe/tree-sitter-provider.test.mjs tests/vibe/lsp-provider.test.mjs tests/vibe/ast-grep-provider.test.mjs tests/vibe/embedding-retrieval.test.mjs tests/vibe/lancedb-vector-store.test.mjs tests/vibe/project-registry.test.mjs tests/vibe/structural-query.test.mjs`, `node vibe/tools/verify.mjs --strict`.
+- Out of scope: new index features, IDE binding, native LanceDB loading in Electron, graph work (C3/C4), M5 task cards, release builds or publication.
+- Delivered: closed M4 on the merged trunk. C1 is met by the per-project symbol/text/embedding index, the tree-sitter WASM, generic LSP and ast-grep providers, local embeddings, placeholder-free hybrid retrieval and the optional driver-injected LanceDB store; the fixture tests prove at least 95% symbol coverage and a one-file reindex under 2 seconds. C2 is met by three registered repositories staying current while edited in parallel, with the watcher/polling fallback proven on Windows. C5 is met by bounded callers/impact/path answers that return counts, bytes and truncation instead of source dumps. `ROADMAP.md` now records M4 `done`, and the current milestone is narrowed to M0 and M5. No product code changed. Honest boundary: IDE binding and loading the native LanceDB module inside Electron remain later M6/M12 integration work; ast-grep route/env/table graph rules belong to C3 in M5. M4 was accepted ahead of its nominal M3 dependency under the owner's 2026-11-20 standalone-engine priority; its IDE-binding dependency carries into M6. The build and user guides were reconciled with the closure.
+- Tests: M4 acceptance command PASS (139 tests: 134 pass, 5 Windows skips); `node vibe/tools/verify.mjs --strict` PASS (4/4 steps, 262 tests: 257 pass, 5 Windows skips, 0 fail); `git diff --check` clean. The 95%/reindex, three-repo watcher and bounded-answer checks were also independently probed by qa-verifier.
+- Guardians: qa-verifier initial FAIL on the interim card (M4 still in progress, no milestone evidence, focused command missing the LSP/ast-grep tests) -> all findings fixed -> final re-check PASS (139 acceptance tests: 134 pass, 5 Windows skips; verify --strict 262 tests: 257 pass, 5 skips; docs-check --strict 0/0). drift-sentinel PASS with medium notes (stale test counts, BUILD.md M4/M5 wording, M3 ordering, user-guide range) all reconciled. security-reviewer PASS (four docs only; no secret, license, dependency, CI or packaging change; corrected the user-guide IDE-binding milestone). docs-keeper PASS (fixed BUILD.md IDE-binding wording and the user-guide review date; docs-check --strict 0 errors, 0 warnings). governance-verifier PASS as not applicable (no locked path changed; 13/13 locks match; governance check 0 errors, 0 warnings). tech-scout PASS (no new dependency; M4 radar rows current; live facts fetched through Node's OpenSSL fetch because schannel failed). release-manager PASS (milestone-exit checklist; build, signing, smoke, feed and draft-release steps correctly not applicable, not failed).
+- Next step: start M5 with the cross-project graph edge layer (C3), then the graph panel (C4) and the memory review UI.
+- Branch: `vibe/m4/milestone-exit` -> PR into `vibe/main`.
 
 ### 2026-11-23 - M4 C1 LanceDB vector persistence
 
