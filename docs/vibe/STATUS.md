@@ -24,7 +24,7 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 - Review fixes: stored a frozen copy of `expectedRoot` instead of the caller object; made pinned `load()` verify the snapshot before publishing `this.current`; added regression tests for the constructor pin, load ordering and a conflicting caller pin; corrected CHANGELOG/BUILD wording (custom index directory, pinned-index reindex rejection).
 - Residual hardening (non-blocking, accepted by security): pinned `load()` re-hashes each file but still trusts the JSON `symbols`/`tokens` metadata, so a same-user writer that preserves file hashes could inject symbols; rebuilding entries from the verified buffers or signing the index belongs with the verified IDE-binding work. A same-user rename/junction swap-and-restore around the path-based root checks remains theoretical OS-handle hardening (true `openat`/`NtCreateFile` anchoring is outside C2). Neither is a demonstrated outside-root or cross-project leak; registry indexes stay in memory.
 - Next step: continue M4 with tree-sitter/ast-grep/LSP adapters, embeddings, LanceDB and hybrid retrieval, then C5 structural queries and IDE binding; the residual index-metadata hardening is scheduled with the verified binding.
-- Branch: `vibe/m4/project-registry` -> PR into `vibe/main`.
+- Branch: `vibe/m4/project-registry` -> PR #28 into `vibe/main`.
 
 ### 2026-11-22 — M0 stable Linux package identity
 
