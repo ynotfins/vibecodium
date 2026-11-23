@@ -388,19 +388,27 @@ test('rejects a persisted index above the total token cap', async (t) => {
   for (let fileIndex = 0; fileIndex < 501; fileIndex += 1) {
     const tokens = {};
     for (let tokenIndex = 0; tokenIndex < 4000; tokenIndex += 1) tokens[`t${tokenIndex}`] = [1];
-    files[`src/f${fileIndex}.ts`] = { hash: 'a'.repeat(64), bytes: 0, symbols: [], tokens };
+    files[`src/f${fileIndex}.ts`] = {
+      hash: 'a'.repeat(64),
+      bytes: 0,
+      symbols: [],
+      calls: [],
+      tokens,
+      embedding: Array(256).fill(0),
+    };
   }
   const index = new ProjectIndex(root);
   await mkdir(path.dirname(index.indexPath), { recursive: true });
   const value = {
     version: INDEX_VERSION,
     provider: 'lexical',
+    embedding: { provider: 'local-hash-v1', dimensions: 256, version: 1 },
     files,
     text: { tokenCount: 2_004_000, fileCount: 501 },
     fileCount: 501,
   };
   await writeFile(index.indexPath, JSON.stringify(value));
-  await assert.rejects(new ProjectIndex(root).load(), IndexEngineError);
+  await assert.rejects(new ProjectIndex(root).load(), /too many tokens/);
 });
 
 test('rejects a legacy or malformed derived symbol array', async (t) => {

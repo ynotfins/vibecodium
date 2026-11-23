@@ -3,7 +3,16 @@ import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, realpath, rename, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 
-export const INDEX_VERSION = 3;
+import {
+  EMBEDDING_INDEX_VERSION,
+  LocalHashEmbeddingProvider,
+  MAX_EMBEDDING_VALUE,
+  hybridSearch,
+  validateEmbeddingProvider,
+  validateEmbeddingVector,
+} from './embedding-index.mjs';
+
+export const INDEX_VERSION = 4;
 export const LEXICAL_SYMBOL_PROVIDER_ID = 'lexical';
 export const MAX_FILE_BYTES = 1_000_000;
 export const MAX_FILES = 10_000;
@@ -513,7 +522,7 @@ function hashBuffer(buffer) {
   return createHash('sha256').update(buffer).digest('hex');
 }
 
-function fileEntry(buffer, options, provider, filePath) {
+async function fileEntry(buffer, options, provider, embeddingProvider, filePath) {
   const source = buffer.toString('utf8').replace(/^\uFEFF/, '');
   const symbols = provider.extract(source, { filePath, maxSymbols: options.maxSymbolsPerFile });
   if (symbols === null) fail(`symbol provider does not support ${filePath}`);
@@ -524,7 +533,11 @@ function fileEntry(buffer, options, provider, filePath) {
     symbols: validated,
   });
   const tokens = extractTokens(maskNonCode(source), options.maxTokensPerFile);
-  return { hash: hashBuffer(buffer), bytes: buffer.byteLength, symbols: validated, calls, tokens };
+  const vectors = await embeddingProvider.embed([`${filePath}\n${source}`]);
+  if (!Array.isArray(vectors) || vectors.length !== 1) fail('embedding provider returned an invalid batch');
+  const validatedEmbedding = validateEmbeddingVector(vectors[0], embeddingProvider.dimensions, `embedding for ${filePath}`);
+  const embedding = Array.isArray(validatedEmbedding) ? validatedEmbedding : Array.from(validatedEmbedding);
+  return { hash: hashBuffer(buffer), bytes: buffer.byteLength, symbols: validated, calls, tokens, embedding };
 }
 
 function rebuildSymbols(files, maxSymbols = MAX_TOTAL_SYMBOLS) {
@@ -539,7 +552,7 @@ function rebuildSymbols(files, maxSymbols = MAX_TOTAL_SYMBOLS) {
     a.file.localeCompare(b.file) || a.line - b.line || a.column - b.column || a.name.localeCompare(b.name));
 }
 
-function makeIndex(files, provider) {
+function makeIndex(files, provider, embedding) {
   const symbols = rebuildSymbols(files);
   let tokenCount = 0;
   let callCount = 0;
@@ -550,14 +563,26 @@ function makeIndex(files, provider) {
     if (callCount > MAX_TOTAL_CALLS) fail('index contains too many calls');
   }
   const fileCount = Object.keys(files).length;
-  return { version: INDEX_VERSION, provider, files, symbols, text: { tokenCount, fileCount }, fileCount };
+  return { version: INDEX_VERSION, provider, embedding, files, symbols, text: { tokenCount, fileCount }, fileCount };
 }
 
 const SYMBOL_KINDS = new Set(['class', 'constructor', 'enum', 'function', 'getter', 'interface', 'method', 'namespace', 'setter', 'type', 'variable']);
 
-function validateLoadedIndex(value, provider) {
+function validateLoadedIndex(value, provider, embeddingProvider) {
   if (!value || typeof value !== 'object' || value.version !== INDEX_VERSION) fail('index file has an unsupported format');
   if (value.provider !== provider) fail('index file was built by a different symbol provider');
+  if (!value.embedding || typeof value.embedding !== 'object' || Array.isArray(value.embedding)) {
+    fail('index file has invalid embedding metadata');
+  }
+  if (value.embedding.provider !== embeddingProvider.id) {
+    fail('index file was built by a different embedding provider');
+  }
+  if (value.embedding.dimensions !== embeddingProvider.dimensions) {
+    fail('index file was built with different embedding dimensions');
+  }
+  if (value.embedding.version !== EMBEDDING_INDEX_VERSION) {
+    fail('index file has an unsupported embedding format');
+  }
   if (!value.files || typeof value.files !== 'object' || Array.isArray(value.files)) fail('index file has an invalid files map');
   const files = Object.entries(value.files);
   if (files.length > MAX_FILES) fail('index file contains too many files');
@@ -570,6 +595,10 @@ function validateLoadedIndex(value, provider) {
         !entry.tokens || typeof entry.tokens !== 'object' || Array.isArray(entry.tokens)) {
       fail('index file has an invalid file entry');
     }
+    if (!Array.isArray(entry.embedding)) {
+      fail('index file has an invalid embedding');
+    }
+    validateEmbeddingVector(entry.embedding, embeddingProvider.dimensions, 'index file embedding');
     for (const symbol of entry.symbols) {
       if (!symbol || typeof symbol.name !== 'string' || symbol.name.length < 1 || symbol.name.length > 512 ||
           !IDENTIFIER_NAME.test(symbol.name) ||
@@ -617,6 +646,7 @@ function validateLoadedIndex(value, provider) {
   return {
     version: value.version,
     provider: value.provider,
+    embedding: value.embedding,
     files: value.files,
     symbols: rebuildSymbols(value.files),
     text: { tokenCount, fileCount },
@@ -731,6 +761,7 @@ async function writeIndexFile(root, indexRoot, indexFile, index) {
   const persisted = {
     version: index.version,
     provider: index.provider,
+    embedding: index.embedding,
     files: index.files,
     text: index.text,
     fileCount: index.fileCount,
@@ -808,6 +839,12 @@ export class ProjectIndex {
       maxCallsPerFile: validateInteger('maxCallsPerFile', options.maxCallsPerFile ?? MAX_CALLS_PER_FILE, 1, MAX_CALLS_PER_FILE),
     };
     this.symbolProvider = validateSymbolProvider(options.symbolProvider ?? createLexicalSymbolProvider());
+    this.embeddingProvider = validateEmbeddingProvider(options.embeddingProvider ?? new LocalHashEmbeddingProvider());
+    this.embedding = Object.freeze({
+      provider: this.embeddingProvider.id,
+      dimensions: this.embeddingProvider.dimensions,
+      version: EMBEDDING_INDEX_VERSION,
+    });
     this.current = null;
   }
 
@@ -837,7 +874,7 @@ export class ProjectIndex {
     } catch {
       fail('index file is not valid JSON');
     }
-    const loaded = validateLoadedIndex(parsed, this.symbolProvider.id);
+    const loaded = validateLoadedIndex(parsed, this.symbolProvider.id, this.embeddingProvider);
     if (pinned) await this.verifySnapshot(loaded, pinned);
     this.current = loaded;
     return { index: this.current, stats: { files: Object.keys(this.current.files).length, symbols: this.current.symbols.length } };
@@ -887,11 +924,14 @@ export class ProjectIndex {
       const hash = hashBuffer(buffer);
       const previous = previousFiles[rel];
       let entry;
-      if (previous && previous.hash === hash && Array.isArray(previous.symbols) && Array.isArray(previous.calls) && previous.tokens) {
+      if (previous && previous.hash === hash && Array.isArray(previous.symbols) && Array.isArray(previous.calls) &&
+          previous.tokens && Array.isArray(previous.embedding) &&
+          previous.embedding.length === this.embeddingProvider.dimensions &&
+          previous.embedding.every((value) => Number.isFinite(value) && Math.abs(value) <= MAX_EMBEDDING_VALUE)) {
         entry = previous;
         reused += 1;
       } else {
-        entry = fileEntry(buffer, this.options, this.symbolProvider, rel);
+        entry = await fileEntry(buffer, this.options, this.symbolProvider, this.embeddingProvider, rel);
         changed += 1;
       }
       totalSymbols += entry.symbols.length;
@@ -900,7 +940,7 @@ export class ProjectIndex {
       if (totalTokens > MAX_TOTAL_TOKENS) fail('index contains too many tokens');
       files[rel] = entry;
     }
-    const index = makeIndex(files, this.symbolProvider.id);
+    const index = makeIndex(files, this.symbolProvider.id, this.embedding);
     if (expectedRoot !== undefined) await this.verifySnapshot(index, expectedRoot);
     if (expectedRoot !== undefined) await assertExpectedRoot(this.root, expectedRoot);
     if (this.persist) await writeIndexFile(this.root, this.indexDir, this.indexFile, index);
@@ -954,11 +994,12 @@ export class ProjectIndex {
     const rootReal = await realpath(this.root).catch(() => null);
     if (!rootReal) fail('project root does not exist');
     const buffer = await readFileWithin(rootReal, rel, this.options.maxFileBytes);
-    const entry = fileEntry(buffer, this.options, this.symbolProvider, rel);
+    const hash = hashBuffer(buffer);
     const previous = this.current.files[rel];
-    if (previous && previous.hash === entry.hash) {
+    if (previous && previous.hash === hash) {
       return { index: this.current, changed: false };
     }
+    const entry = await fileEntry(buffer, this.options, this.symbolProvider, this.embeddingProvider, rel);
     const files = { ...this.current.files, [rel]: entry };
     let totalSymbols = 0;
     let totalTokens = 0;
@@ -968,7 +1009,7 @@ export class ProjectIndex {
     }
     if (totalSymbols > MAX_TOTAL_SYMBOLS) fail('index contains too many symbols');
     if (totalTokens > MAX_TOTAL_TOKENS) fail('index contains too many tokens');
-    const index = makeIndex(files, this.symbolProvider.id);
+    const index = makeIndex(files, this.symbolProvider.id, this.embedding);
     if (this.persist) await writeIndexFile(this.root, this.indexDir, this.indexFile, index);
     this.current = index;
     return { index, changed: true };
@@ -1002,6 +1043,11 @@ export class ProjectIndex {
       hits.push({ file, lines, score });
     }
     return hits.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file)).slice(0, limit);
+  }
+
+  async searchHybrid(query, { limit = 20 } = {}) {
+    if (!this.current) fail('index not loaded; run refresh() or load() first');
+    return hybridSearch(this, query, { limit });
   }
 }
 const IDENTIFIER_NAME = /^#?[A-Za-z_$][\w$]*$/;
