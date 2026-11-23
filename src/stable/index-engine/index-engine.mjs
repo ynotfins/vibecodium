@@ -808,7 +808,7 @@ export class ProjectIndex {
     if (!rootInfo || !rootInfo.isDirectory()) fail('project root must be a directory');
     if (expectedRoot !== undefined &&
         (rootKey(rootReal) !== expectedRoot.rootKey ||
-         rootInfo.dev !== expectedRoot.rootDev || rootInfo.ino !== expectedRoot.rootIno)) {
+        rootInfo.dev !== expectedRoot.rootDev || rootInfo.ino !== expectedRoot.rootIno)) {
       fail('project root changed after registration');
     }
     let previousFiles = {};

@@ -161,12 +161,9 @@ test('registration is serialized and close releases the registry', async (t) => 
   ]);
   assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
   assert.ok(results.some((result) => result.status ===
-'rejected'
- && result.reason instanceof ProjectRegistryError));
-  await
-assert
-.rejects(
-registry.register(roots.gamma, { id: 'BETA' }), ProjectRegistryError);
+    'rejected' && result.reason instanceof ProjectRegistryError));
+  await assert.rejects(
+    registry.register(roots.gamma, { id: 'BETA' }), ProjectRegistryError);
 
   await registry.close();
   assert.throws(() => registry.list(), ProjectRegistryError);
