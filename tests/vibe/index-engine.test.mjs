@@ -464,3 +464,21 @@ test('extracts declarations without matching comments or string literals', () =>
   assert.ok(!names.includes('fakeString'));
   assert.ok(!names.includes('FakeTemplate'));
 });
+
+
+test('persists call sites and rejects a previous index version', async (t) => {
+  const { dir, root } = await tempCopy();
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  const index = new ProjectIndex(root);
+  const report = await index.refresh();
+  const entry = report.index.files['src/server.ts'];
+  assert.ok(Array.isArray(entry.calls));
+  assert.ok(entry.calls.some((call) => call.name === 'createServer'));
+  assert.ok(entry.calls.some((call) => call.name === 'AuthMiddleware' && call.kind === 'new'));
+
+  const parsed = JSON.parse(await readFile(index.indexPath, 'utf8'));
+  parsed.version = 1;
+  await writeFile(index.indexPath, JSON.stringify(parsed));
+  await assert.rejects(new ProjectIndex(root).load(), /unsupported format/);
+});

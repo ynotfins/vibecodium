@@ -3,14 +3,16 @@ import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, realpath, rename, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 
-export const INDEX_VERSION = 1;
+export const INDEX_VERSION = 2;
 export const MAX_FILE_BYTES = 1_000_000;
 export const MAX_FILES = 10_000;
 export const MAX_SYMBOLS_PER_FILE = 2_000;
 export const MAX_TOKENS_PER_FILE = 4_000;
+export const MAX_CALLS_PER_FILE = 2_000;
 export const MAX_INDEX_BYTES = 64_000_000;
 export const MAX_TOTAL_SYMBOLS = 500_000;
 export const MAX_TOTAL_TOKENS = 2_000_000;
+export const MAX_TOTAL_CALLS = 200_000;
 export const MAX_DIRECTORIES = 50_000;
 
 const CODE_EXTENSIONS = new Set([
@@ -513,8 +515,13 @@ function hashBuffer(buffer) {
 function fileEntry(buffer, options) {
   const source = buffer.toString('utf8').replace(/^\uFEFF/, '');
   const symbols = extractSymbols(source, { maxSymbols: options.maxSymbolsPerFile });
+  const calls = extractCalls(source, {
+    maxCalls: options.maxCallsPerFile,
+    maxSymbols: options.maxSymbolsPerFile,
+    symbols,
+  });
   const tokens = extractTokens(maskNonCode(source), options.maxTokensPerFile);
-  return { hash: hashBuffer(buffer), bytes: buffer.byteLength, symbols, tokens };
+  return { hash: hashBuffer(buffer), bytes: buffer.byteLength, symbols, calls, tokens };
 }
 
 function rebuildSymbols(files, maxSymbols = MAX_TOTAL_SYMBOLS) {
@@ -532,9 +539,12 @@ function rebuildSymbols(files, maxSymbols = MAX_TOTAL_SYMBOLS) {
 function makeIndex(files) {
   const symbols = rebuildSymbols(files);
   let tokenCount = 0;
+  let callCount = 0;
   for (const entry of Object.values(files)) {
     tokenCount += Object.keys(entry.tokens).length;
+    callCount += entry.calls.length;
     if (tokenCount > MAX_TOTAL_TOKENS) fail('index contains too many tokens');
+    if (callCount > MAX_TOTAL_CALLS) fail('index contains too many calls');
   }
   const fileCount = Object.keys(files).length;
   return { version: INDEX_VERSION, files, symbols, text: { tokenCount, fileCount }, fileCount };
@@ -552,6 +562,7 @@ function validateLoadedIndex(value) {
     if (!entry || typeof entry !== 'object' || !/^[a-f0-9]{64}$/.test(entry.hash ?? '') ||
         !Number.isInteger(entry.bytes) || entry.bytes < 0 || entry.bytes > MAX_FILE_BYTES ||
         !Array.isArray(entry.symbols) || entry.symbols.length > MAX_SYMBOLS_PER_FILE ||
+        !Array.isArray(entry.calls) || entry.calls.length > MAX_CALLS_PER_FILE ||
         !entry.tokens || typeof entry.tokens !== 'object' || Array.isArray(entry.tokens)) {
       fail('index file has an invalid file entry');
     }
@@ -561,6 +572,17 @@ function validateLoadedIndex(value) {
           !Number.isInteger(symbol.column) || symbol.column < 1 ||
           (symbol.container !== undefined && (typeof symbol.container !== 'string' || symbol.container.length > 512))) {
         fail('index file has an invalid symbol');
+      }
+    }
+    for (const call of entry.calls) {
+      if (!call || typeof call.name !== 'string' || call.name.length < 1 || call.name.length > 512 ||
+          (call.kind !== 'call' && call.kind !== 'new') ||
+          !Number.isInteger(call.line) || call.line < 1 ||
+          !Number.isInteger(call.column) || call.column < 1 ||
+          !Number.isInteger(call.endLine) || call.endLine < call.line || call.endLine > 10_000_000 ||
+          !Number.isInteger(call.depth) || call.depth < 0 || call.depth > 1_000_000 ||
+          (call.receiver !== undefined && (typeof call.receiver !== 'string' || call.receiver.length > 512))) {
+        fail('index file has an invalid call site');
       }
     }
     const tokens = Object.entries(entry.tokens);
@@ -575,6 +597,9 @@ function validateLoadedIndex(value) {
   if (value.symbols !== undefined) fail('index file has an unsupported format');
   let tokenCount = 0;
   for (const [, entry] of files) tokenCount += Object.keys(entry.tokens).length;
+  let callCount = 0;
+  for (const [, entry] of files) callCount += entry.calls.length;
+  if (callCount > MAX_TOTAL_CALLS) fail('index contains too many calls');
   if (tokenCount > MAX_TOTAL_TOKENS) fail('index contains too many tokens');
   const fileCount = files.length;
   if (value.fileCount !== fileCount || !value.text || typeof value.text !== 'object' ||
@@ -770,6 +795,7 @@ export class ProjectIndex {
       maxFileBytes: validateInteger('maxFileBytes', options.maxFileBytes ?? MAX_FILE_BYTES, 1, MAX_FILE_BYTES),
       maxSymbolsPerFile: validateInteger('maxSymbolsPerFile', options.maxSymbolsPerFile ?? MAX_SYMBOLS_PER_FILE, 1, MAX_SYMBOLS_PER_FILE),
       maxTokensPerFile: validateInteger('maxTokensPerFile', options.maxTokensPerFile ?? MAX_TOKENS_PER_FILE, 1, MAX_TOKENS_PER_FILE),
+      maxCallsPerFile: validateInteger('maxCallsPerFile', options.maxCallsPerFile ?? MAX_CALLS_PER_FILE, 1, MAX_CALLS_PER_FILE),
     };
     this.current = null;
   }
@@ -850,7 +876,7 @@ export class ProjectIndex {
       const hash = hashBuffer(buffer);
       const previous = previousFiles[rel];
       let entry;
-      if (previous && previous.hash === hash && Array.isArray(previous.symbols) && previous.tokens) {
+      if (previous && previous.hash === hash && Array.isArray(previous.symbols) && Array.isArray(previous.calls) && previous.tokens) {
         entry = previous;
         reused += 1;
       } else {
@@ -966,4 +992,86 @@ export class ProjectIndex {
     }
     return hits.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file)).slice(0, limit);
   }
+}
+
+const CALL_WORD = /(#?[A-Za-z_$][\w$]*)(?:<[A-Za-z0-9_$.,\[\]<>]{0,200}>)?\s*\(/g;
+
+function wordBefore(masked, index) {
+  let i = index - 1;
+  while (i >= 0 && /\s/.test(masked[i])) i -= 1;
+  const end = i + 1;
+  while (i >= 0 && /[\w$#]/.test(masked[i])) i -= 1;
+  return masked.slice(i + 1, end);
+}
+
+function receiverBefore(masked, index) {
+  let i = index - 1;
+  while (i >= 0 && /\s/.test(masked[i])) i -= 1;
+  if (i < 1 || masked[i] !== '.') return undefined;
+  let end = i;
+  if (masked[end - 1] === '?') end -= 1;
+  let start = end - 1;
+  while (start >= 0 && /[\w$#]/.test(masked[start])) start -= 1;
+  const name = masked.slice(start + 1, end);
+  return /^#?[A-Za-z_$][\w$]*$/.test(name) ? name : undefined;
+}
+
+function nextNonSpace(masked, index) {
+  let i = index;
+  while (i < masked.length && /\s/.test(masked[i])) i += 1;
+  return i < masked.length ? masked[i] : '';
+}
+
+function closeParenAfter(masked, open, limit) {
+  let depth = 0;
+  for (let i = open; i < masked.length && i < open + limit; i += 1) {
+    if (masked[i] === '(') depth += 1;
+    else if (masked[i] === ')') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+// Extracts call sites from code only. Declarations and object-literal method shorthand are not calls.
+export function extractCalls(source, options = {}) {
+  if (typeof source !== 'string') fail('source must be a string');
+  source = source.replace(/^\uFEFF/, '');
+  const maxCalls = validateInteger('maxCalls', options.maxCalls ?? MAX_CALLS_PER_FILE, 1, MAX_CALLS_PER_FILE);
+  const masked = maskNonCode(source);
+  const symbols = options.symbols ?? extractSymbols(source, {
+    maxSymbols: options.maxSymbols ?? MAX_SYMBOLS_PER_FILE,
+  });
+  const declarations = new Set(symbols.map((symbol) => `${symbol.line}:${symbol.column}:${symbol.name}`));
+  const lineStarts = lineStartsOf(masked);
+  const calls = [];
+  const seen = new Set();
+  let match;
+  let scan = 0;
+  let depth = 0;
+  CALL_WORD.lastIndex = 0;
+  while ((match = CALL_WORD.exec(masked)) !== null && calls.length < maxCalls) {
+    for (; scan < match.index; scan += 1) {
+      if (masked[scan] === '{') depth += 1;
+      else if (masked[scan] === '}') depth = Math.max(0, depth - 1);
+    }
+    const name = match[1];
+    const bare = name.replace(/^#/, '');
+    if (CONTROL_WORDS.has(bare)) continue;
+    const line = lineOfOffset(lineStarts, match.index) + 1;
+    const column = match.index - lineStarts[line - 1] + 1;
+    if (declarations.has(`${line}:${column}:${name}`)) continue;
+    const open = match.index + match[0].length - 1;
+    const close = closeParenAfter(masked, open, 4_000);
+    if (close >= 0 && nextNonSpace(masked, close + 1) === '{') continue;
+    const endLine = close >= 0 ? lineOfOffset(lineStarts, close) + 1 : line;
+    const receiver = receiverBefore(masked, match.index);
+    const kind = wordBefore(masked, match.index) === 'new' ? 'new' : 'call';
+    const key = `${line}:${column}:${name}:${kind}:${receiver ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    calls.push({ name, line, column, endLine, depth, kind, ...(receiver ? { receiver } : {}) });
+  }
+  return calls;
 }
