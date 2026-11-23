@@ -96,6 +96,16 @@ node --test tests/vibe/index-engine.test.mjs
 
 The fixture at `tests/fixtures/repo-ts` has 24 known symbols. The test requires at least 95% of them to be indexed and requires a one-file reindex to finish in under 2 seconds. It also covers persistence, corrupt-index rejection, identifier search, symlink and oversized-file skipping, path traversal rejection, BOM handling, and declaration extraction without false matches from comments or strings.
 
+### Code index: multi-project registry
+
+`src/stable/index-engine/project-registry.mjs` registers up to 32 project roots by caller-supplied id. Each project keeps its own `ProjectIndex` and the registry-owned index stays in memory; persistence remains the standalone index engine's default, but the registry does not publish to disk until a later verified IDE binding. Registration resolves and pins the real root plus its device/inode identity, rejects duplicate roots and unsafe ids, refreshes the index, revalidates the root after indexing, and only then records the project. `ProjectIndex` accepts a pinned `expectedRoot` identity; pinned indexes enforce their stored identity on every refresh and reject reindex calls, reject a root that changes around reads, and `verifySnapshot()` re-hashes every candidate file against the pinned root. Every registry refresh validates the pinned root before and after indexing; if a check fails, the previous in-memory snapshot is restored instead of serving content from the moved tree. The watcher ignores the resolved index file, its temporary files and directory-level events for the index directory, without ignoring source files in that directory except where a standard ignored directory segment applies; ignored path segments are compared case-insensitively, and registration and refresh queues are bounded to 32 pending operations. If watcher creation fails, the watcher errors, or an event arrives without a usable filename, polling takes over at the configured interval. Watcher events are coalesced into an immediate refresh plus at most one queued follow-up; refreshes are serialized per project, and one project's failure is recorded in `stats()` without stopping the others. `list()` reports registered ids and roots; `get()`, `index()`, `symbols()` and `searchText()` read one project without crossing boundaries; `refresh()`, `refreshAll()` and `close()` manage lifecycle. The registry is in-memory only, and IDE binding is later M4/M6 work.
+
+```bash
+node --test tests/vibe/project-registry.test.mjs
+```
+
+The registry test copies the fixture three times, registers all three repositories, edits the same relative source file in parallel, and waits for each project to expose only its own new symbol. It also covers duplicate roots, unsafe ids, unknown projects, case-insensitive duplicate ids, root swaps during registration and refresh, forged snapshots built from outside content, conflicting caller identities that cannot override the stored pin, empty-filename watcher events falling back to polling, source edits inside a custom index directory, and generated index files that must not feed the watcher.
+
 ### Update-feed manifests - local staging only
 
 To prepare the platform-scoped `latest.json` files for the own update feed without publishing, create a release manifest containing the product fields and one entry per artifact:

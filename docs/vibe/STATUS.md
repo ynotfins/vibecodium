@@ -5,11 +5,26 @@
 Goal state: active
 Owner priorities (2026-11-20): alongside M0/M1, begin the standalone engine packages (Vibe Context Engine, multi-project indexer/graph) — they are testable without the IDE build. Build-dependent work continues now that the MSVC Spectre component is installed. Milestone numbering is unchanged.
 
-Current milestone: M0 and M5 (in progress)
+Current milestone: M0, M4 and M5 (in progress)
 
 ## Task log
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
+### 2026-11-22 - M4 C2 multi-project registry and background watchers
+
+- Goal / must-haves: add a standalone registry that indexes and watches several project roots at once, so three registered repositories stay current while their files are edited without an IDE build.
+- Must-have IDs: C2.
+- Files allowed: `src/stable/index-engine/index-engine.mjs`, `src/stable/index-engine/project-registry.mjs`, `tests/vibe/project-registry.test.mjs`, `docs/vibe/CHANGELOG.md`, `docs/vibe/ROADMAP.md`, `docs/vibe/STATUS.md`, `docs/vibe/dev/BUILD.md`.
+- Files forbidden: upstream source, IDE integration, dependencies, tree-sitter/ast-grep/LSP binaries, embeddings provider calls, vector store, graph layer, reranker, release infrastructure, locked docs.
+- Acceptance commands: `node --test tests/vibe/project-registry.test.mjs`, `node vibe/tools/verify.mjs`.
+- Out of scope: cross-project graph (C3), graph panel (C4), structural query answers (C5), semantic retrieval and LanceDB, IDE binding, LSP, embeddings model calls, persisted registry configuration, and replacing the existing per-project index semantics.
+- Delivered: added `src/stable/index-engine/project-registry.mjs`, an in-memory multi-project registry for up to 32 project roots. Each project gets its own `ProjectIndex`, is refreshed in parallel, and is watched by a recursive `fs.watch` with a bounded polling fallback when watcher creation fails, the watcher errors, or an event has no usable filename. Registration resolves and pins the real root plus its `dev`/`ino` identity, rejects duplicate roots and unsafe ids, refreshes, and revalidates the root before recording. Registry-owned indexes use `persist:false` and a frozen internal `expectedRoot`; `ProjectIndex` rechecks that identity around reads, re-hashes the candidate with `verifySnapshot()` before publishing, and `load()` verifies before assigning `this.current`. Failed refreshes restore the previous snapshot; a conflicting caller pin cannot override the stored pin; generated index-file and temporary events are ignored while source files in a custom index directory stay watched; ignored segments are case-insensitive; registration and refresh queues are bounded; `close()` releases watchers, timers and lookups.
+- Tests: `node --test tests/vibe/project-registry.test.mjs` PASS (22/22, including three-repo parallel isolation, root swaps, forged snapshots, pinned `load()` ordering, frozen constructor pin, caller-pin conflict, watcher fallback, custom index directory and queue bounds); `node vibe/tools/verify.mjs` PASS (4/4 steps, 170 tests); `node vibe/tools/docs-check.mjs --strict` PASS; `git diff --check` clean. QA mutation controls fail without the constructor-copy, load-ordering, caller-pin, persist:false, swap-rejection, watcher-fallback, isolation and queue-bound behaviours.
+- Guardians: qa-verifier PASS (fresh final tree; 22/22 and 170 tests; mutation controls for every changed behaviour); drift-sentinel PASS (7 allowed paths, no locked path or dependency change; medium doc-wording finding fixed and covered by a new test); security-reviewer PASS (frozen pin copy and load verify-before-publish confirmed fixed; no secrets, dependency/license, CI or network change); docs-keeper PASS (fixed an overgeneralized CHANGELOG claim and the reindex wording; strict docs check clean); governance-verifier PASS as not applicable (no locked path); tech-scout PASS as not applicable (Node built-ins only; no radar row); release-manager PASS as not applicable (M4 in progress; no release build).
+- Review fixes: stored a frozen copy of `expectedRoot` instead of the caller object; made pinned `load()` verify the snapshot before publishing `this.current`; added regression tests for the constructor pin, load ordering and a conflicting caller pin; corrected CHANGELOG/BUILD wording (custom index directory, pinned-index reindex rejection).
+- Residual hardening (non-blocking, accepted by security): pinned `load()` re-hashes each file but still trusts the JSON `symbols`/`tokens` metadata, so a same-user writer that preserves file hashes could inject symbols; rebuilding entries from the verified buffers or signing the index belongs with the verified IDE-binding work. A same-user rename/junction swap-and-restore around the path-based root checks remains theoretical OS-handle hardening (true `openat`/`NtCreateFile` anchoring is outside C2). Neither is a demonstrated outside-root or cross-project leak; registry indexes stay in memory.
+- Next step: continue M4 with tree-sitter/ast-grep/LSP adapters, embeddings, LanceDB and hybrid retrieval, then C5 structural queries and IDE binding; the residual index-metadata hardening is scheduled with the verified binding.
+- Branch: `vibe/m4/project-registry` -> PR into `vibe/main`.
 
 ### 2026-11-22 — M0 stable Linux package identity
 
