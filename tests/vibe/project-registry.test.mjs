@@ -441,9 +441,23 @@ test('a file created while a moved subtree attaches is indexed after reconciliat
   t.after(() => registry.close());
   await registry.register(roots.alpha, { id: 'alpha' });
 
+  // Isolate the moved-subtree path. The root watcher also sees `src` mtime
+  // changes, and duplicate `incoming` events would schedule independent
+  // refreshes that could mask whether reconciliation scheduled one.
+  let renameHandled = false;
+  const originalHandle = registry.handleWatchEvent.bind(registry);
+  registry.handleWatchEvent = (record, relativeDir, eventType, filename) => {
+    if (relativeDir === '') return;
+    if (relativeDir === 'src' && String(filename) === 'incoming') {
+      if (renameHandled) return;
+      if (eventType === 'rename') renameHandled = true;
+    }
+    return originalHandle(record, relativeDir, eventType, filename);
+  };
+
   // Wait for the refresh queued by the rename to finish scanning, then create a
-  // file in a subdirectory whose watch has not attached yet. Nothing can observe
-  // that write except a refresh scheduled after reconciliation completes.
+  // file in a subdirectory whose watch has not attached yet. With other refresh
+  // sources isolated, only a post-reconciliation refresh can observe that write.
   let refreshDone;
   const refreshSeen = new Promise((resolve) => { refreshDone = resolve; });
   const originalRefresh = ProjectIndex.prototype.refresh;
@@ -460,6 +474,7 @@ test('a file created while a moved subtree attaches is indexed after reconciliat
     if (!injected && relativeDir === 'src/incoming') {
       injected = true;
       await refreshSeen;
+      await registry.waitForIdle();
       await writeFile(
         path.join(record.root, 'src', 'incoming', 'deep', 'late.ts'),
         'export function lateSubtreeProbe(): string { return "late"; }\n',
