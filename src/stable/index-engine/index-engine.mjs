@@ -11,6 +11,7 @@ import {
   validateEmbeddingProvider,
   validateEmbeddingVector,
 } from './embedding-index.mjs';
+import { validateLanceVectorStore, validateVectorHits } from './lancedb-vector-store.mjs';
 
 export const INDEX_VERSION = 4;
 export const LEXICAL_SYMBOL_PROVIDER_ID = 'lexical';
@@ -845,6 +846,9 @@ export class ProjectIndex {
       dimensions: this.embeddingProvider.dimensions,
       version: EMBEDDING_INDEX_VERSION,
     });
+    this.vectorStore = options.vectorStore === undefined
+      ? null
+      : validateLanceVectorStore(options.vectorStore, this.embeddingProvider);
     this.current = null;
   }
 
@@ -895,17 +899,16 @@ export class ProjectIndex {
       fail('project root changed after registration');
     }
     let previousFiles = {};
-    if (!full) {
-      if (this.persist) {
-        try {
-          previousFiles = (await this.load()).index.files;
-        } catch {
-          previousFiles = {};
-        }
-      } else if (this.current) {
-        previousFiles = this.current.files;
+    if (this.persist) {
+      try {
+        previousFiles = (await this.load()).index.files;
+      } catch {
+        previousFiles = {};
       }
+    } else if (this.current) {
+      previousFiles = this.current.files;
     }
+    const reusableFiles = full ? {} : previousFiles;
     const { files: relFiles, skipped } = await listFiles(rootReal, this.options);
     if (expectedRoot !== undefined) await assertExpectedRoot(this.root, expectedRoot);
     const files = {};
@@ -922,7 +925,7 @@ export class ProjectIndex {
         continue;
       }
       const hash = hashBuffer(buffer);
-      const previous = previousFiles[rel];
+      const previous = reusableFiles[rel];
       let entry;
       if (previous && previous.hash === hash && Array.isArray(previous.symbols) && Array.isArray(previous.calls) &&
           previous.tokens && Array.isArray(previous.embedding) &&
@@ -942,6 +945,7 @@ export class ProjectIndex {
     }
     const index = makeIndex(files, this.symbolProvider.id, this.embedding);
     if (expectedRoot !== undefined) await this.verifySnapshot(index, expectedRoot);
+    if (this.vectorStore) await this.#syncVectorStore(previousFiles, files, { force: full });
     if (expectedRoot !== undefined) await assertExpectedRoot(this.root, expectedRoot);
     if (this.persist) await writeIndexFile(this.root, this.indexDir, this.indexFile, index);
     this.current = index;
@@ -957,6 +961,22 @@ export class ProjectIndex {
         skipped,
       },
     };
+  }
+
+  async #syncVectorStore(previousFiles, files, { force = false } = {}) {
+    const upserts = [];
+    const removals = [];
+    for (const [file, entry] of Object.entries(files)) {
+      const previous = previousFiles[file];
+      if (!force && previous && previous.hash === entry.hash) continue;
+      if (!Array.isArray(entry.embedding)) fail('index entry has no embedding');
+      upserts.push({ file, hash: entry.hash, vector: entry.embedding });
+    }
+    for (const file of Object.keys(previousFiles)) {
+      if (!Object.hasOwn(files, file)) removals.push(file);
+    }
+    if (upserts.length > 0) await this.vectorStore.upsert(upserts);
+    if (removals.length > 0) await this.vectorStore.delete(removals);
   }
 
   async verifySnapshot(index, expectedRoot) {
@@ -1010,6 +1030,9 @@ export class ProjectIndex {
     if (totalSymbols > MAX_TOTAL_SYMBOLS) fail('index contains too many symbols');
     if (totalTokens > MAX_TOTAL_TOKENS) fail('index contains too many tokens');
     const index = makeIndex(files, this.symbolProvider.id, this.embedding);
+    if (this.vectorStore) {
+      await this.vectorStore.upsert([{ file: rel, hash: entry.hash, vector: entry.embedding }]);
+    }
     if (this.persist) await writeIndexFile(this.root, this.indexDir, this.indexFile, index);
     this.current = index;
     return { index, changed: true };
@@ -1043,6 +1066,18 @@ export class ProjectIndex {
       hits.push({ file, lines, score });
     }
     return hits.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file)).slice(0, limit);
+  }
+
+  async searchVectors(query, { limit = 20 } = {}) {
+    if (!this.current) fail('index not loaded; run refresh() or load() first');
+    if (!this.vectorStore) fail('vectorStore is not configured');
+    if (typeof query !== 'string' || query.trim().length === 0 || query.length > 200) {
+      fail('query must be a non-empty string of at most 200 characters');
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) fail('limit must be between 1 and 100');
+    const [queryVector] = await this.embeddingProvider.embed([query]);
+    const vector = validateEmbeddingVector(queryVector, this.embedding.dimensions, 'query embedding');
+    return validateVectorHits(await this.vectorStore.search(vector, { limit }), { limit });
   }
 
   async searchHybrid(query, { limit = 20 } = {}) {

@@ -139,6 +139,37 @@ node --test tests/vibe/embedding-retrieval.test.mjs
 
 The tests cover deterministic normalized vectors, in-place bounded validation, stable cosine scoring for bounded large components, persisted vectors and reload, provider-id, dimension and embedding-format mismatch, malformed provider output, a forged `1e308` vector rejected on load, finite score bounds, incremental reindex, query validation, no invented hits, and the natural-language top-three query. The existing index test `reindexes one changed file in under 2 seconds and keeps other files intact` keeps the C1 reindex bound covered. LanceDB persistence, neural or hosted embeddings, ast-grep route and table rule extraction, reranking and cross-project retrieval remain M4/M5 work.
 
+### Code index: optional LanceDB vector persistence
+
+`src/stable/index-engine/lancedb-vector-store.mjs` adds optional LanceDB persistence for the file vectors. It is driver-injected on purpose: this repository ships no package manager and no native binary, so the application that embeds the index installs the pinned `@lancedb/lancedb` 0.41.0 package (Apache-2.0, Node >=22, published 2026-10-29) and passes the module in. Nothing here downloads or loads a native module by itself, and nothing is added to the repository's own dependencies.
+
+```js
+import * as lancedb from '@lancedb/lancedb';
+import { openLanceDbVectorStore } from 'src/stable/index-engine/lancedb-vector-store.mjs';
+import { ProjectIndex } from 'src/stable/index-engine/index-engine.mjs';
+
+const store = await openLanceDbVectorStore({
+   driver: lancedb,
+   uri: '.vibe/index/lance',
+   dimensions: 256,
+   provider: 'local-hash-v1',
+});
+const index = new ProjectIndex(projectRoot, { vectorStore: store });
+await index.refresh();
+await index.searchVectors('where is auth middleware');
+```
+
+The store only accepts a local database uri (remote schemes are rejected), requires `connect()`, `tableNames()` and `openTable()`/`createTable()` on the driver connection, and requires `mergeInsert()`, `delete()` and `vectorSearch()` on the table. Upserts validate the provider, dimensions, SHA-256 file hash, project-relative file name, vector, duplicate ids and unreadable row accessors, then merge-insert by `id`; the store never deletes a live row before the new row exists, so a failed merge keeps the previous vector. Search validates the returned distance, score, file name and hash, tags hits `untrusted-repository-content`, and bounds the limit at 200. `refresh()` verifies the index snapshot, then mirrors changed files and deletes removed files, then writes the JSON index; a store failure rejects the refresh before the index is committed, and `searchVectors()` revalidates every returned hit. The index and the vector store are not one transaction: a failure after the store sync can leave newer vectors in the store until the next refresh reconciles them, while the index stays authoritative for `searchHybrid()`. `refresh({ full: true })` re-reads every file, backfills a newly configured store and still deletes files that disappeared since the previous snapshot; `load()` uses the store that was already populated.
+
+`searchHybrid()` remains the in-memory lexical-plus-vector path; `searchVectors()` is the persisted-store path and requires a configured `vectorStore`. Generated indexes live under `.vibe/index/`, which is ignored by git. Run the focused checks:
+
+```bash
+node --test tests/vibe/lancedb-vector-store.test.mjs
+node --test tests/vibe/embedding-retrieval.test.mjs
+```
+
+The tests use an in-memory fake driver that implements the LanceDB 0.41.0 surface (`connect`, `tableNames`, `openTable`, `createTable`, `mergeInsert`, `add`, `delete`, `vectorSearch`), so they run on a bare Node install. They cover duplicate ids, bidi and format file names and database uris, trailing-dot, trailing-space and Windows device-name file keys, unreadable row and builder accessors, a store whose metadata disagrees with the embedding provider, forged search hits with an out-of-range cosine distance, chunked deletes and a store failure that must not commit the index. Neural or hosted embeddings, reranking, ast-grep route and table rule extraction, cross-project retrieval and an IDE binding remain M4/M5 work.
+
 ### Update-feed manifests - local staging only
 
 To prepare the platform-scoped `latest.json` files for the own update feed without publishing, create a release manifest containing the product fields and one entry per artifact:
