@@ -149,10 +149,10 @@ import { openLanceDbVectorStore } from 'src/stable/index-engine/lancedb-vector-s
 import { ProjectIndex } from 'src/stable/index-engine/index-engine.mjs';
 
 const store = await openLanceDbVectorStore({
-  driver: lancedb,
-  uri: '.vibe/index/lance',
-  dimensions: 256,
-  provider: 'local-hash-v1',
+   driver: lancedb,
+   uri: '.vibe/index/lance',
+   dimensions: 256,
+   provider: 'local-hash-v1',
 });
 const index = new ProjectIndex(projectRoot, { vectorStore: store });
 await index.refresh();
