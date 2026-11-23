@@ -1,6 +1,6 @@
 # Vibecodium Roadmap
 
-> Doc class: living · Owner: vibe-overseer · Last reviewed: 2026-11-22
+> Doc class: living · Owner: vibe-overseer · Last reviewed: 2026-11-23
 
 Milestones are dependency-ordered. Each milestone's acceptance tests are written before its implementation and must pass (exit 0) before the milestone is marked done. Must-have IDs refer to `PRODUCT_SPEC.md`. The detailed per-milestone acceptance commands from the research plan (§7) are the starting point; the milestone owner refines them into `tests/vibe/` when the milestone starts.
 

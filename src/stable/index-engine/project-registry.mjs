@@ -1,5 +1,5 @@
 import { watch as watchFs } from 'node:fs';
-import { realpath, stat } from 'node:fs/promises';
+import { lstat, readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { ProjectIndex } from './index-engine.mjs';
@@ -57,7 +57,6 @@ function isRelevantWatchPath(filename, record) {
   if (segments.some((segment) => WATCH_IGNORED_DIRECTORIES.has(segment))) return false;
   const indexSegments = record.indexDir.split(String.fromCharCode(47)).filter(Boolean).map((segment) => segment.toLowerCase());
   if (indexSegments.length <= segments.length && indexSegments.every((segment, index) => segments[index] === segment)) {
-    if (indexSegments.length === segments.length) return false;
     const generated = segments.slice(indexSegments.length);
     if (generated.length === 1) {
       const indexFile = record.indexFile.toLowerCase();
@@ -157,7 +156,8 @@ export class ProjectRegistry {
       rootKey: projectRootKey,
       index,
       timer: null,
-      watcher: null,
+      watchers: new Map(),
+      watchLimitHit: false,
       autoQueued: false,
       autoAgain: false,
       refreshQueue: Promise.resolve(),
@@ -168,7 +168,18 @@ export class ProjectRegistry {
     };
     this.projects.set(key, record);
     this.projectsByRoot.set(projectRootKey, key);
-    this.startWatcher(record);
+    try {
+      await this.startWatcher(record);
+      const catchUp = await this.enqueueRun(record);
+      if (catchUp?.error) throw catchUp.error;
+    } catch (error) {
+      if (record.timer) clearInterval(record.timer);
+      record.timer = null;
+      this.closeWatchers(record);
+      this.projects.delete(key);
+      this.projectsByRoot.delete(projectRootKey);
+      throw error;
+    }
     return this.describe(record);
   }
 
@@ -203,7 +214,9 @@ export class ProjectRegistry {
     return {
       id: record.id,
       root: record.root,
-      watching: record.timer !== null || record.watcher !== null,
+      watching: record.timer !== null || record.watchers.size > 0,
+      mode: record.timer !== null ? 'poll' : record.watchers.size > 0 ? 'watch' : 'none',
+      watchers: record.watchers.size,
       dirty: record.pending > 0,
       refreshing: record.pending > 0,
       refreshCount: record.refreshCount,
@@ -243,14 +256,7 @@ export class ProjectRegistry {
     for (const record of this.projects.values()) {
       if (record.timer) clearInterval(record.timer);
       record.timer = null;
-      if (record.watcher) {
-        try {
-          record.watcher.close();
-        } catch {
-          // The watcher may already be closed by the platform.
-        }
-      }
-      record.watcher = null;
+      this.closeWatchers(record);
       pending.push(record.refreshQueue);
     }
     await Promise.allSettled(pending);
@@ -270,33 +276,108 @@ export class ProjectRegistry {
     return { id: record.id, root: record.root };
   }
 
-  startWatcher(record) {
-    try {
-      record.watcher = watchFs(record.root, { recursive: true, persistent: false }, (_eventType, filename) => {
-        if (this.closed) return;
-        if (filename == null || filename.length === 0) {
-          this.fallbackToPolling(record);
-          return;
-        }
-        if (!isRelevantWatchPath(filename, record)) return;
-        this.scheduleRefresh(record);
-      });
-      if (typeof record.watcher.unref === 'function') record.watcher.unref();
-      record.watcher.on('error', () => this.fallbackToPolling(record));
+  async startWatcher(record) {
+    if (process.platform === 'win32') {
+      this.startPolling(record);
       return;
-    } catch {
-      record.watcher = null;
     }
-    this.startPolling(record);
+    await this.addWatcherTree(record, '');
+    if (record.watchers.size === 0) this.startPolling(record);
+  }
+
+  async addWatcherTree(record, relativeDir) {
+    if (this.closed || record.watchers.has(relativeDir)) return;
+    if (record.watchLimitHit) return;
+    if (record.watchers.size >= record.index.options.maxDirs) {
+      record.watchLimitHit = true;
+      this.fallbackToPolling(record);
+      return;
+    }
+    const directory = relativeDir ? path.join(record.root, relativeDir) : record.root;
+    let watcher;
+    try {
+      watcher = watchFs(directory, { persistent: false }, (eventType, filename) => {
+        this.handleWatchEvent(record, relativeDir, eventType, filename);
+      });
+      if (typeof watcher.unref === 'function') watcher.unref();
+      watcher.on('error', () => this.fallbackToPolling(record));
+      record.watchers.set(relativeDir, watcher);
+    } catch {
+      this.fallbackToPolling(record);
+      return;
+    }
+
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      this.fallbackToPolling(record);
+      return;
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      if (WATCH_IGNORED_DIRECTORIES.has(entry.name.toLowerCase())) continue;
+      const child = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+      await this.addWatcherTree(record, child);
+    }
+  }
+
+  handleWatchEvent(record, relativeDir, eventType, filename) {
+    if (this.closed) return;
+    if (filename == null || filename.length === 0) {
+      this.fallbackToPolling(record);
+      return;
+    }
+    const relative = relativeDir ? `${relativeDir}/${String(filename)}` : String(filename);
+    if (eventType === 'rename') void this.reconcileWatchPath(record, relative);
+    if (!isRelevantWatchPath(relative, record)) return;
+    this.scheduleRefresh(record);
+  }
+
+  async reconcileWatchPath(record, relative) {
+    if (this.closed) return;
+    const absolute = path.join(record.root, relative);
+    const info = await lstat(absolute).catch(() => null);
+    if (!info || !info.isDirectory() || info.isSymbolicLink()) {
+      this.removeWatchersUnder(record, relative);
+      return;
+    }
+    const segments = relative.split(String.fromCharCode(47));
+    if (segments.some((segment) => WATCH_IGNORED_DIRECTORIES.has(segment.toLowerCase()))) {
+      this.removeWatchersUnder(record, relative);
+      return;
+    }
+    await this.addWatcherTree(record, relative);
+  }
+
+  removeWatchersUnder(record, relative) {
+    const prefix = `${relative}/`;
+    for (const [watched, watcher] of record.watchers) {
+      if (watched !== relative && !watched.startsWith(prefix)) continue;
+      try {
+        watcher.close();
+      } catch {
+        // The watcher may already be closed by the platform.
+      }
+      record.watchers.delete(watched);
+    }
+  }
+
+  closeWatchers(record) {
+    for (const watcher of record.watchers.values()) {
+      try {
+        watcher.close();
+      } catch {
+        // The watcher may already be closed by the platform.
+      }
+    }
+    record.watchers.clear();
   }
 
   fallbackToPolling(record) {
-    try {
-      record.watcher?.close();
-    } catch {
-      // The watcher may already be closed by the platform.
-    }
-    record.watcher = null;
+    record.watchLimitHit = true;
+    this.closeWatchers(record);
     this.startPolling(record);
   }
 

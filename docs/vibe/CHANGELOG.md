@@ -1,6 +1,6 @@
 # Changelog
 
-> Doc class: living - Owner: release-manager - Last reviewed: 2026-11-22
+> Doc class: living - Owner: release-manager - Last reviewed: 2026-11-23
 
 All notable user-visible changes to Vibecodium. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow the VSCodium scheme `<vscode-version>.<build>` plus a Vibecodium revision once releases start.
 
@@ -8,7 +8,7 @@ All notable user-visible changes to Vibecodium. Format: [Keep a Changelog](https
 
 ### Added
 
-- The standalone index engine now has a multi-project registry: up to 32 validated project roots are indexed together, each gets a background file watcher, with a bounded polling fallback when the watcher is unavailable, fails, or reports an event without a usable filename, registration pins the resolved root and its device/inode identity and revalidates it after initial indexing, every refresh enforces that identity around reads and re-hashes the candidate against the root before committing it, registry-owned indexes stay in memory and reject reindex calls, a failed refresh restores the previous snapshot, generated index-file events are excluded while source files in a custom index directory remain watched outside standard ignored directories, queues are bounded, unchanged files are reused, and concurrent edits to three fixture repositories stay isolated and current.
+- The standalone index engine now has a multi-project registry: up to 32 validated project roots are indexed together, each gets a bounded per-directory watcher tree on Unix and reconciliation polling on Windows, registration installs watchers before a catch-up refresh, ignored trees are excluded before watches are installed, unreadable directories fall back to polling and atomically replaced files stay covered, registration pins the resolved root and its device/inode identity and revalidates it after initial indexing, every refresh enforces that identity around reads and re-hashes the candidate against the root before committing it, registry-owned indexes stay in memory and reject reindex calls, a failed refresh restores the previous snapshot, generated index-file events are excluded while source files in a custom index directory remain watched outside standard ignored directories, queues are bounded, unchanged files are reused, and concurrent edits to three fixture repositories stay isolated and current.
 - Project foundation: locked governing docs, documentation suite, guardian sub-agents, governance and docs checks, Windows build preflight.
 - The standalone Vibe Context Engine now builds leaf and condensed summary DAGs over lossless session records, protects a fresh tail, and exposes bounded `grep`, `describe`, and `expand` recall tools as module APIs (not yet surfaced in the IDE).
 - The standalone Vibe Context Engine now persists scoped project and user memory with a pending-review queue, revision-bound decisions, approved-only recall, source-trust tagging, case-safe project isolation, and capacity recovery through log compaction (review panel UI not yet surfaced in the IDE).

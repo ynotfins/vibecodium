@@ -120,6 +120,7 @@ test('registry-owned indexes stay in memory and keep their root pin', async (t) 
 
   await assert.rejects(access(path.join(roots.alpha, '.vibe', 'index', 'index.json')));
   const index = registry.get('alpha');
+  assert.equal(registry.index('alpha'), index.current);
   assert.equal(index.persist, false);
   await assert.rejects(index.reindexFile('src/util/strings.ts'), /unavailable for pinned indexes/);
 });
@@ -150,6 +151,43 @@ test('one project failure does not stop the others', async (t) => {
   assert.ok(registry.symbols('beta').some((symbol) => symbol.name === marker));
 });
 
+test('refreshAll refreshes every project in parallel', async (t) => {
+  const roots = await makeProjects(t);
+  const registry = new ProjectRegistry({ watchIntervalMs: 60000 });
+  t.after(() => registry.close());
+  for (const id of PROJECT_IDS) {
+    await registry.register(roots[id], { id });
+  }
+
+  const original = ProjectIndex.prototype.refresh;
+  let active = 0;
+  let maxActive = 0;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  ProjectIndex.prototype.refresh = async function (...args) {
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    await gate;
+    try {
+      return await original.apply(this, args);
+    } finally {
+      active -= 1;
+    }
+  };
+  t.after(() => { ProjectIndex.prototype.refresh = original; });
+
+  const before = Object.fromEntries(PROJECT_IDS.map((id) => [id, registry.stats(id).refreshCount]));
+  const all = registry.refreshAll();
+  await waitFor(() => maxActive === PROJECT_IDS.length, 'refreshAll did not start every project');
+  release();
+  await all;
+
+  for (const id of PROJECT_IDS) {
+    assert.equal(registry.stats(id).refreshCount, before[id] + 1);
+    assert.ok(registry.symbols(id).some((symbol) => symbol.name === 'slugify'));
+  }
+});
+
 test('registration is serialized and close releases the registry', async (t) => {
   const roots = await makeProjects(t);
   const registry = new ProjectRegistry({ watchIntervalMs: 50 });
@@ -170,18 +208,22 @@ test('registration is serialized and close releases the registry', async (t) => 
   assert.throws(() => registry.get('beta'), ProjectRegistryError);
 });
 
-function recursiveWatchSupported() {
+function nativeWatchSupported() {
   try {
-    watch(FIXTURE, { recursive: true, persistent: false }).close();
+    watch(FIXTURE, { persistent: false }).close();
     return true;
   } catch {
     return false;
   }
 }
 
-test('the recursive watcher is primary, not the polling fallback', async (t) => {
-  if (!recursiveWatchSupported()) {
-    t.skip('recursive fs.watch is unavailable on this platform');
+test('native per-directory watchers keep projects current without polling', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows uses the reconciliation polling strategy');
+    return;
+  }
+  if (!nativeWatchSupported()) {
+    t.skip('fs.watch is unavailable on this platform');
     return;
   }
   const roots = await makeProjects(t);
@@ -195,9 +237,10 @@ test('the recursive watcher is primary, not the polling fallback', async (t) => 
 
   await waitFor(
     () => registry.symbols('alpha').some((symbol) => symbol.name === 'watcherPrimaryProbe'),
-    'a 60s polling interval cannot explain this update; fs.watch was not primary',
+    'a 60s polling interval cannot explain this update; parity watchers were not active',
     5000,
   );
+  assert.equal(registry.stats('alpha').mode, 'watch');
 });
 
 test('a watcher error falls back to polling and keeps indexing', async (t) => {
@@ -207,10 +250,14 @@ test('a watcher error falls back to polling and keeps indexing', async (t) => {
 
   await registry.register(roots.alpha, { id: 'alpha' });
   const record = registry.projects.get('alpha');
-  assert.ok(record.watcher, 'expected a recursive watcher before the simulated error');
-  record.watcher.emit('error', new Error('simulated watcher failure'));
+  if (process.platform === 'win32') {
+    registry.handleWatchEvent(record, '', 'change', Buffer.alloc(0));
+  } else {
+    record.watchers.get('').emit('error', new Error('simulated watcher failure'));
+  }
   await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.equal(record.watcher, null);
+  assert.equal(record.watchers.size, 0);
+  assert.equal(record.watchLimitHit, true, 'fallback must disable further watcher installation');
   assert.notEqual(record.timer, null);
   assert.equal(registry.stats('alpha').watching, true);
 
@@ -221,6 +268,37 @@ test('a watcher error falls back to polling and keeps indexing', async (t) => {
     () => registry.searchText('alpha', 'pollingFallbackProbe').length > 0,
     'polling did not resume after the watcher error',
   );
+});
+
+test('a watcher creation failure falls back to polling', async (t) => {
+  const roots = await makeProjects(t);
+  const registry = new ProjectRegistry({ watchIntervalMs: 50 });
+  t.after(() => registry.close());
+  await registry.register(roots.alpha, { id: 'alpha' });
+  const record = registry.projects.get('alpha');
+
+  await registry.addWatcherTree(record, 'missing-watch-directory');
+
+  assert.equal(record.watchLimitHit, true, 'watcher creation failure did not fall back to polling');
+  assert.equal(record.watchers.size, 0);
+  assert.notEqual(record.timer, null);
+  assert.equal(registry.stats('alpha').mode, 'poll');
+});
+
+test('a directory listing failure falls back to polling', async (t) => {
+  const roots = await makeProjects(t);
+  const registry = new ProjectRegistry({ watchIntervalMs: 50 });
+  t.after(() => registry.close());
+  await writeFile(path.join(roots.alpha, 'not-a-directory.txt'), 'not a directory\n');
+  await registry.register(roots.alpha, { id: 'alpha' });
+  const record = registry.projects.get('alpha');
+
+  await registry.addWatcherTree(record, 'not-a-directory.txt');
+
+  assert.equal(record.watchLimitHit, true, 'listing failure did not fall back to polling');
+  assert.equal(record.watchers.size, 0);
+  assert.notEqual(record.timer, null);
+  assert.equal(registry.stats('alpha').mode, 'poll');
 });
 
 test('refresh awaits queued work and never overlaps index refreshes', async (t) => {
@@ -312,7 +390,11 @@ test('explicit refresh awaits only its own queued run', async (t) => {
 });
 
 test('a directory moved into a project is indexed', async (t) => {
-  if (!recursiveWatchSupported()) {
+  if (process.platform === 'win32') {
+    t.skip('Windows uses the reconciliation polling strategy');
+    return;
+  }
+  if (!nativeWatchSupported()) {
     t.skip('recursive fs.watch is unavailable on this platform');
     return;
   }
@@ -496,19 +578,13 @@ test('snapshot verification rejects content that did not come from the root', as
 });
 
 test('a watcher event without a usable filename falls back to polling', async (t) => {
-  if (!recursiveWatchSupported()) {
-    t.skip('recursive fs.watch is unavailable on this platform');
-    return;
-  }
   const roots = await makeProjects(t);
   const registry = new ProjectRegistry({ watchIntervalMs: 50 });
   t.after(() => registry.close());
   await registry.register(roots.alpha, { id: 'alpha' });
 
   const record = registry.projects.get('alpha');
-  assert.ok(record.watcher, 'expected a recursive watcher');
-  record.watcher.emit('change', 'change', Buffer.alloc(0));
-  assert.equal(record.watcher, null);
+  registry.handleWatchEvent(record, '', 'change', Buffer.alloc(0));
   assert.ok(record.timer, 'polling did not start after a filename-less event');
 
   const marker = 'filenameLessFallbackProbe';
@@ -524,7 +600,7 @@ test('a watcher event without a usable filename falls back to polling', async (t
 test('a custom index directory watches source files without feeding itself', async (t) => {
   const roots = await makeProjects(t);
   const registry = new ProjectRegistry({
-    watchIntervalMs: 60000,
+    watchIntervalMs: process.platform === 'win32' ? 50 : 60000,
     projectOptions: { indexDir: 'src/custom-index' },
   });
   t.after(() => registry.close());
@@ -542,16 +618,146 @@ test('a custom index directory watches source files without feeding itself', asy
       registry.symbols('alpha').some((symbol) => symbol.name === 'customIndexSourceProbe'),
     'source inside the custom index directory was not watched',
   );
-  await registry.waitForIdle();
-  const settled = registry.stats('alpha').refreshCount;
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  assert.ok(registry.stats('alpha').refreshCount - settled <= 1, 'index writes triggered a refresh loop');
+});
 
+test('generated files in a custom index directory are ignored', async (t) => {
+  const roots = await makeProjects(t);
+  const registry = new ProjectRegistry({
+    watchIntervalMs: 60000,
+    projectOptions: { indexDir: 'src/custom-index' },
+  });
+  t.after(() => registry.close());
   const indexRoot = path.join(roots.alpha, 'src', 'custom-index');
+  await mkdir(indexRoot, { recursive: true });
+  await registry.register(roots.alpha, { id: 'alpha' });
+  const record = registry.projects.get('alpha');
+  const before = registry.stats('alpha').refreshCount;
+
   await writeFile(path.join(indexRoot, 'index.json'), '{}\n');
   await writeFile(path.join(indexRoot, 'index.json.123.abcdef.tmp'), '{}\n');
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  assert.equal(registry.stats('alpha').refreshCount, settled, 'generated index files fed the watcher');
+  registry.handleWatchEvent(record, 'src/custom-index', 'change', 'index.json');
+  registry.handleWatchEvent(record, 'src/custom-index', 'change', 'index.json.123.abcdef.tmp');
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(registry.stats('alpha').refreshCount, before, 'generated index files fed the watcher');
+});
+
+test('moving a custom index directory out of the project removes its files', async (t) => {
+  const roots = await makeProjects(t);
+  const registry = new ProjectRegistry({
+    watchIntervalMs: process.platform === 'win32' ? 50 : 60000,
+    projectOptions: { indexDir: 'src/custom-index' },
+  });
+  t.after(() => registry.close());
+  const indexRoot = path.join(roots.alpha, 'src', 'custom-index');
+  const moved = path.join(path.dirname(roots.alpha), 'custom-index-moved');
+  t.after(() => rm(moved, { recursive: true, force: true }));
+  await mkdir(indexRoot, { recursive: true });
+  await writeFile(
+    path.join(indexRoot, 'feature.ts'),
+    'export function customIndexMoveProbe(): string { return "moved"; }\n',
+  );
+  await registry.register(roots.alpha, { id: 'alpha' });
+  const record = registry.projects.get('alpha');
+  assert.ok(registry.symbols('alpha').some((symbol) => symbol.name === 'customIndexMoveProbe'));
+
+  await rename(indexRoot, moved);
+  await waitFor(
+    () => !registry.symbols('alpha').some((symbol) => symbol.name === 'customIndexMoveProbe'),
+    'moving the custom index directory did not refresh the project',
+  );
+  await waitFor(
+    () => !record.watchers.has('src/custom-index'),
+    'the moved directory watcher was not removed',
+  );
+});
+
+test('files saved during registration are indexed by the catch-up pass', async (t) => {
+  const roots = await makeProjects(t);
+  const registry = new ProjectRegistry({ watchIntervalMs: 60000 });
+  t.after(() => registry.close());
+  const original = ProjectIndex.prototype.refresh;
+  const order = [];
+  const originalStart = registry.startWatcher.bind(registry);
+  registry.startWatcher = async (record) => {
+    order.push('startWatcher');
+    return originalStart(record);
+  };
+  const originalEnqueue = registry.enqueueRun.bind(registry);
+  registry.enqueueRun = (record) => {
+    order.push('enqueueRun');
+    return originalEnqueue(record);
+  };
+  let calls = 0;
+  ProjectIndex.prototype.refresh = async function (...args) {
+    const result = await original.apply(this, args);
+    calls += 1;
+    if (calls === 1) {
+      await writeFile(
+        path.join(this.root, 'src', 'during.ts'),
+        'export function duringRegistrationProbe(): string { return "registered"; }\n',
+      );
+    }
+    return result;
+  };
+  t.after(() => { ProjectIndex.prototype.refresh = original; });
+
+  await registry.register(roots.alpha, { id: 'alpha' });
+  assert.ok(registry.symbols('alpha').some((symbol) => symbol.name === 'duringRegistrationProbe'));
+  assert.deepEqual(order, ['startWatcher', 'enqueueRun'], 'watchers must be installed before the catch-up refresh');
+});
+
+test('a source file atomically replaced is still watched', async (t) => {
+  const roots = await makeProjects(t);
+  const registry = new ProjectRegistry({ watchIntervalMs: 50 });
+  t.after(() => registry.close());
+  await registry.register(roots.alpha, { id: 'alpha' });
+
+  const target = path.join(roots.alpha, 'src', 'util', 'strings.ts');
+  const temporary = path.join(roots.alpha, 'src', 'util', 'strings.ts.tmp');
+  await writeFile(temporary, 'export function atomicReplaceProbe(): string { return "first"; }\n');
+  await rename(temporary, target);
+  await waitFor(
+    () => registry.symbols('alpha').some((symbol) => symbol.name === 'atomicReplaceProbe'),
+    'the atomically replaced file did not index',
+  );
+  await writeFile(target, 'export function atomicReplaceAfterProbe(): string { return "second"; }\n');
+  await waitFor(
+    () => registry.symbols('alpha').some((symbol) => symbol.name === 'atomicReplaceAfterProbe'),
+    'edits to the replacement file were not watched',
+  );
+  assert.equal(registry.stats('alpha').mode, process.platform === 'win32' ? 'poll' : 'watch');
+  if (process.platform !== 'win32') assert.ok(registry.projects.get('alpha').watchers.has('src/util'));
+});
+
+test('ignored trees do not get watches', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows uses polling, so there are no directory watches');
+    return;
+  }
+  const roots = await makeProjects(t);
+  const ignored = path.join(roots.alpha, 'node_modules', 'pkg', 'deep');
+  await mkdir(ignored, { recursive: true });
+  await writeFile(path.join(ignored, 'index.ts'), 'export const ignoredTree = 1;\n');
+  const registry = new ProjectRegistry({ watchIntervalMs: 60000 });
+  t.after(() => registry.close());
+  await registry.register(roots.alpha, { id: 'alpha' });
+  assert.equal(registry.stats('alpha').watchers, 5);
+});
+
+test('valid Linux filenames do not block indexing other files', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('colons and backslashes are not valid Windows filenames');
+    return;
+  }
+  const roots = await makeProjects(t);
+  await writeFile(path.join(roots.alpha, 'src', 'fixture:expected.ts'), 'export const colonProbe = 1;\n');
+  await writeFile(path.join(roots.alpha, 'src', 'back\\slash.ts'), 'export const slashProbe = 1;\n');
+  const index = new ProjectIndex(roots.alpha, { indexDir: '.vibe/index' });
+  const refreshed = await index.refresh();
+  assert.ok(refreshed.stats.skipped.unsupported >= 2);
+  assert.ok(index.symbols().some((symbol) => symbol.name === 'slugify'));
+  assert.ok(!index.symbols().some((symbol) => symbol.name === 'colonProbe'));
+  assert.ok(!index.symbols().some((symbol) => symbol.name === 'slashProbe'));
 });
 
 test('ignored watch directories are case-insensitive', async (t) => {
@@ -688,4 +894,86 @@ test('a pinned index enforces its stored identity over a caller-supplied pin', a
 
   assert.ok(index.symbols().some((symbol) => symbol.name === 'slugify'));
   assert.ok(!index.symbols().some((symbol) => symbol.name === 'callerOverrideProbe'));
+});
+
+test('Windows uses reconciliation polling instead of directory watchers', async (t) => {
+  if (process.platform !== 'win32') {
+    t.skip('this test asserts the Windows polling strategy');
+    return;
+  }
+  const roots = await makeProjects(t);
+  const registry = new ProjectRegistry({ watchIntervalMs: 50 });
+  t.after(() => registry.close());
+  await registry.register(roots.alpha, { id: 'alpha' });
+
+  const stats = registry.stats('alpha');
+  assert.equal(stats.mode, 'poll');
+  assert.equal(stats.watchers, 0);
+  assert.equal(stats.watching, true);
+
+  const target = path.join(roots.alpha, 'src', 'util', 'strings.ts');
+  const original = await readFile(target, 'utf8');
+  await writeFile(target, `${original}\nexport function windowsPollingProbe(): string {\n  return 'poll';\n}\n`);
+  await waitFor(
+    () => registry.symbols('alpha').some((symbol) => symbol.name === 'windowsPollingProbe'),
+    'Windows polling did not index an edit',
+  );
+});
+
+test('the per-directory watcher tree falls back to polling at its directory bound', async (t) => {
+  const roots = await makeProjects(t);
+  const registry = new ProjectRegistry({ watchIntervalMs: 60000, projectOptions: { maxDirs: 8 } });
+  t.after(() => registry.close());
+  await registry.register(roots.alpha, { id: 'alpha' });
+  const record = registry.projects.get('alpha');
+
+  for (let index = 0; index < 10; index += 1) {
+    const relative = `src/extra-${index}`;
+    await mkdir(path.join(roots.alpha, ...relative.split('/')), { recursive: true });
+    await registry.addWatcherTree(record, relative);
+  }
+
+  assert.equal(record.watchLimitHit, true);
+  assert.equal(record.watchers.size, 0);
+  assert.notEqual(record.timer, null);
+  assert.equal(registry.stats('alpha').mode, 'poll');
+});
+
+test('registration cleanup clears polling after a catch-up failure', async (t) => {
+  const roots = await makeProjects(t);
+  const registry = new ProjectRegistry({ watchIntervalMs: 60000 });
+  t.after(() => registry.close());
+  const originalRefresh = ProjectIndex.prototype.refresh;
+  let calls = 0;
+  ProjectIndex.prototype.refresh = async function (...args) {
+    calls += 1;
+    if (calls === 2) throw new Error('catch-up failed');
+    return originalRefresh.apply(this, args);
+  };
+  t.after(() => { ProjectIndex.prototype.refresh = originalRefresh; });
+
+  const cleared = new Set();
+  const realClearInterval = globalThis.clearInterval;
+  globalThis.clearInterval = (handle, ...args) => {
+    cleared.add(handle);
+    return realClearInterval(handle, ...args);
+  };
+  t.after(() => { globalThis.clearInterval = realClearInterval; });
+
+  let captured;
+  let pollingHandle;
+  const start = registry.startWatcher.bind(registry);
+  registry.startWatcher = async (record) => {
+    captured = record;
+    await start(record);
+    if (!record.timer) registry.startPolling(record);
+    pollingHandle = record.timer;
+  };
+
+  await assert.rejects(registry.register(roots.alpha, { id: 'alpha' }), /catch-up failed/);
+  assert.deepEqual(registry.list(), []);
+  assert.equal(captured.timer, null);
+  assert.equal(captured.watchers.size, 0);
+  assert.ok(pollingHandle, 'registration did not start a polling timer');
+  assert.ok(cleared.has(pollingHandle), 'the polling timer was not cleared when registration failed');
 });

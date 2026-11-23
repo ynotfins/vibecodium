@@ -624,6 +624,15 @@ async function listFiles(root, options) {
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
       const rel = dir ? `${dir}/${entry.name}` : entry.name;
+      try {
+        if (normalizeRelative(rel) !== rel) {
+          skipped.unsupported += 1;
+          continue;
+        }
+      } catch {
+        skipped.unsupported += 1;
+        continue;
+      }
       if (entry.isSymbolicLink()) {
         skipped.symlinks += 1;
         continue;
