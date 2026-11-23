@@ -419,6 +419,65 @@ test('a directory moved into a project is indexed', async (t) => {
   );
 });
 
+test('a file created while a moved subtree attaches is indexed after reconciliation', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows uses the reconciliation polling strategy');
+    return;
+  }
+  if (!nativeWatchSupported()) {
+    t.skip('fs.watch is unavailable on this platform');
+    return;
+  }
+  const roots = await makeProjects(t);
+  const incomingRoot = await mkdtemp(path.join(os.tmpdir(), 'vibe-incoming-'));
+  t.after(() => rm(incomingRoot, { recursive: true, force: true }));
+  await mkdir(path.join(incomingRoot, 'deep'), { recursive: true });
+  await writeFile(
+    path.join(incomingRoot, 'seed.ts'),
+    'export function movedSeedProbe(): string { return "seed"; }\n',
+  );
+
+  const registry = new ProjectRegistry({ watchIntervalMs: 60000 });
+  t.after(() => registry.close());
+  await registry.register(roots.alpha, { id: 'alpha' });
+
+  // Wait for the refresh queued by the rename to finish scanning, then create a
+  // file in a subdirectory whose watch has not attached yet. Nothing can observe
+  // that write except a refresh scheduled after reconciliation completes.
+  let refreshDone;
+  const refreshSeen = new Promise((resolve) => { refreshDone = resolve; });
+  const originalRefresh = ProjectIndex.prototype.refresh;
+  ProjectIndex.prototype.refresh = async function (...args) {
+    const result = await originalRefresh.apply(this, args);
+    refreshDone();
+    return result;
+  };
+  t.after(() => { ProjectIndex.prototype.refresh = originalRefresh; });
+
+  const originalAdd = registry.addWatcherTree.bind(registry);
+  let injected = false;
+  registry.addWatcherTree = async (record, relativeDir) => {
+    if (!injected && relativeDir === 'src/incoming') {
+      injected = true;
+      await refreshSeen;
+      await writeFile(
+        path.join(record.root, 'src', 'incoming', 'deep', 'late.ts'),
+        'export function lateSubtreeProbe(): string { return "late"; }\n',
+      );
+    }
+    return originalAdd(record, relativeDir);
+  };
+
+  await rename(incomingRoot, path.join(roots.alpha, 'src', 'incoming'));
+
+  await waitFor(
+    () => registry.symbols('alpha').some((symbol) => symbol.name === 'lateSubtreeProbe'),
+    'a file created during watch attachment was not indexed after reconciliation',
+    3000,
+  );
+  assert.ok(injected, 'the test did not intercept the moved subtree attachment');
+});
+
 test('refresh fails closed if a registered root is swapped', async (t) => {
   const roots = await makeProjects(t);
   const outside = await mkdtemp(path.join(os.tmpdir(), 'vibe-outside-'));

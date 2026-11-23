@@ -349,6 +349,10 @@ export class ProjectRegistry {
       return;
     }
     await this.addWatcherTree(record, relative);
+    // A refresh triggered by the same rename can finish before these nested
+    // watches attach, so files created in the gap would stay unindexed until
+    // the next unrelated event. Refresh once more now that watches are ready.
+    this.scheduleRefresh(record);
   }
 
   removeWatchersUnder(record, relative) {
