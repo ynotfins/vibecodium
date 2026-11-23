@@ -86,7 +86,7 @@ node --test tests/vibe/agentcore-adapter.test.mjs
 
 ### Code index: project symbols and text
 
-`src/stable/index-engine/index-engine.mjs` is the standalone per-project index. It extracts TypeScript and JavaScript declarations (functions, classes, interfaces, types, enums, namespaces, variables, class methods, getters and setters) with a deterministic built-in parser; tree-sitter and LSP providers remain M4 work. The same pass builds a case-insensitive identifier index, excluding comment and string-literal contents. Declarations inside comments and strings are not indexed, and a UTF-8 BOM does not hide the first declaration.
+`src/stable/index-engine/index-engine.mjs` is the standalone per-project index. It extracts TypeScript and JavaScript declarations (functions, classes, interfaces, types, enums, namespaces, variables, class methods, getters and setters) with a deterministic built-in parser; the tree-sitter WASM provider (below) can replace that extractor, and LSP adapters remain M4 work. The same pass builds a case-insensitive identifier index, excluding comment and string-literal contents. Declarations inside comments and strings are not indexed, and a UTF-8 BOM does not hide the first declaration.
 
 The index is written atomically to `.vibe/index/index.json` by default, with a configurable relative `indexDir` and simple JSON `indexFile`. A refresh reuses entries whose SHA-256 hash is unchanged; `reindexFile(relativePath)` reads and hashes one file and rewrites the index. File and directory symlinks are not followed. Every source read is opened with no-follow where the platform supports it, then revalidated against its directory entry so a swapped path fails closed. Every index-directory segment is checked before creation, and the write is revalidated before and after the atomic rename. File, directory, file-size, symbol, token and index sizes are capped, and the persisted index contains only per-file entries and metadata, never a derived symbol array. A corrupt, oversized or inconsistent index is rejected on load and rebuilt by the next refresh. Paths are project-relative POSIX paths; absolute paths, drive prefixes, traversal segments, alternate-data-stream colons and control characters are rejected. indexDir and indexFile also reject Windows reserved device names. Comment, string and regex-literal bodies are excluded from the identifier index.
 
@@ -119,6 +119,37 @@ node --test tests/vibe/structural-query.test.mjs
 ```
 
 Call extraction is a single linear scan over masked code, so a long identifier or parenthesis run cannot make it quadratic. The index loader rejects symbol, container, call and receiver names that are not plain identifiers, symbol kinds outside the known set, and file keys containing control, format, line/paragraph-separator or markup characters, so a forged snapshot cannot inject control characters or markup into an answer. The tests cover a 300-caller answer bounded by count and by bytes, the byte cap and exact byte count, counts recomputed after trimming, ambiguity as candidates, cycles, shortest path, depth limits, unresolved calls, method shorthand and comments/strings/regex exclusion, top-level attribution, path atomicity, a persisted reload, a malformed snapshot, a linearity bound, generic call capture, forged names, forged file keys and symbol kinds rejected before an answer. Accepted lows: resolution is name-based without type information, so a same-named method on another class can be linked; the recorded receiver is informational only; generic call expressions such as `foo<T>(x)` are captured as `foo` and their type arguments are not recorded; a symbol's end line is not stored, so enclosing-symbol attribution uses call brace depth plus the nearest callable in scope; and the graph is per project, so the cross-project edge layer (C3) remains M5 work.
+
+### Code index: tree-sitter provider
+
+`src/stable/index-engine/symbol-providers.mjs` adds an injectable symbol-provider layer and a tree-sitter (WASM) provider. `createTreeSitterSymbolProvider()` parses JavaScript, TypeScript and TSX with the pinned grammars vendored under `src/stable/index-engine/vendor/tree-sitter/`; `createRegexSymbolProvider()` wraps the existing deterministic extractor behind the same interface. `ProjectIndex` accepts a `symbolProvider` option, validates every symbol it returns (known fields and kinds, identifier names, positive line and column, optional identifier container), de-duplicates and sorts the result, and re-extracts unchanged files when a custom provider is configured, because the provider is not recorded in the persisted index. `fileEntry` is asynchronous, and `validateSymbolProvider` is exported for callers.
+
+Provider interface:
+
+```js
+const provider = {
+  id: 'tree-sitter',                                       // short non-empty string
+  async extractSymbols(source, { filePath, maxSymbols })   // -> [{ name, kind, line, column, container? }]
+};
+```
+
+The tree-sitter provider is declaration-level only: it indexes functions, classes, interfaces, types, enums, namespaces, variables, methods, getters, setters and constructors, and it skips declarations inside function and arrow bodies, so function-local variables stay out of the index. `line` and `column` point at the symbol name (1-based), not the declaration keyword, which keeps positions consistent with the regex extractor. Non-ASCII identifiers are excluded to match the regex extractor. `.js`, `.jsx`, `.mjs` and `.cjs` use the JavaScript grammar; `.ts`, `.mts` and `.cts` use TypeScript; `.tsx` uses the TSX grammar. `grammarForFile()` returns `null` for an unsupported extension. Source is capped at 1,000,000 bytes and the parser stops after 2,000,000 AST nodes. The runtime and grammars load lazily and are cached; `locateFile` accepts only the expected `web-tree-sitter.wasm` basename and resolves it inside the vendor directory, and every parser and tree is released in a `finally` block.
+
+Vendored files are copied verbatim from the npm tarballs and are not edited by hand:
+
+| Package | Version | License | Files |
+|---|---|---|---|
+| `web-tree-sitter` | 0.27.2 | MIT | `web-tree-sitter.js`, `web-tree-sitter.wasm` |
+| `tree-sitter-javascript` | 0.25.0 | MIT | `tree-sitter-javascript.wasm` |
+| `tree-sitter-typescript` | 0.23.2 | MIT | `tree-sitter-typescript.wasm`, `tree-sitter-tsx.wasm` |
+
+`SHA256SUMS` lists the checksum of every vendored file, and the test verifies it on every run. To refresh: download the exact npm tarball, confirm its SHA-512 against `dist.integrity`, copy the listed `.js`/`.wasm` files verbatim, update the license files and `README.md`, regenerate `SHA256SUMS`, and update the radar row and ADR. Provenance and npm integrity strings live in the vendor `README.md`.
+
+```bash
+node --test tests/vibe/symbol-providers.test.mjs
+```
+
+The test verifies the vendored checksums and licenses, grammar selection, the regex provider behind the interface, TypeScript/JavaScript/TSX declaration extraction, function-local exclusion, syntax-error recovery, determinism and the symbol cap, clear errors for a missing runtime or grammar, concurrent loads, a `ProjectIndex` run that indexes all 24 known fixture symbols, and rejection of malformed providers and malformed provider output. The index still uses the built-in regex extractor by default; the IDE binding that selects the tree-sitter provider is later M4/M6 work.
 
 ### Update-feed manifests - local staging only
 

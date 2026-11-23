@@ -1,6 +1,6 @@
 # Vibecodium Technology Radar
 
-> Doc class: living · Owner: tech-scout · Last reviewed: 2026-11-22
+> Doc class: living · Owner: tech-scout · Last reviewed: 2026-11-23
 
 Maintained by the `tech-scout` sub-agent. Every component the product ships or the build depends on has one row. A row is reviewed by its "Next review" date, at every milestone start, and whenever its component changes. The docs check warns on overdue rows; a new dependency without a row fails the drift check.
 
@@ -18,7 +18,7 @@ Rings: `adopt` (in use, keep), `trial` (in use, under evaluation), `assess` (wat
 | Optional upstream router | OmniRoute | 3.8.53 (workstation) | active daily (2026-11-20) | 2026-11-20 | Bifrost routing rules | trial | 2026-11-27 |
 | Context engine reference | lossless-claw (pattern only, MIT) | — | active (2026-11-19) | 2026-11-20 | agentcore-context-engine 0.2.5 (owner's, adapter only) | assess | 2026-12-04 |
 | Vector store | LanceDB | not yet used | v0.41.0 (carried) | 2026-11-08 carried | sqlite-vec (pre-1.0) | adopt | 2026-11-27 |
-| Code parsing | tree-sitter (WASM) + ast-grep | not yet used | carried | 2026-11-08 carried | SCIP indexers | adopt | 2026-11-27 |
+| Code parsing | tree-sitter (WASM) + ast-grep | web-tree-sitter 0.27.2; tree-sitter-javascript 0.25.0; tree-sitter-typescript 0.23.2 (vendored, MIT) | same (2026-11-07, 2025-09-01, 2024-11-11) | 2026-11-23 | ast-grep, oxc, SCIP indexers | adopt | 2026-11-30 |
 | Code graph reference | code-review-graph (MIT) | not used | multi-repo registry + daemon (docs, 2026-11-20) | 2026-11-20 | Understand-Anything, Serena | assess | 2026-11-27 |
 | Semantic / visual graph | Understand-Anything (MIT) | installed on workstation | carried | 2026-11-08 carried | CodeGraphContext, code-graph-rag | adopt | 2026-11-27 |
 | Local model runtime | llama.cpp `llama-server` | not yet bundled | carried | 2026-11-08 carried | Ollama, LocalAI | adopt | 2026-11-27 |

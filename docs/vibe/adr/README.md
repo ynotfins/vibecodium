@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-22
+> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-23
 
 One file per decision: `NNNN-<slug>.md`. Status is one of `proposed`, `accepted`, `superseded by NNNN`. Proposed alternatives live on `vibe/alt/<slug>` branches.
 
@@ -14,3 +14,4 @@ One file per decision: `NNNN-<slug>.md`. Status is one of `proposed`, `accepted`
 | [0006](0006-autonomous-goal-runner.md) | Autonomous goal runner for building the product | superseded by 0007 |
 | [0007](0007-build-on-our-own-models-with-opencode.md) | Build on our own models with OpenCode | superseded by 0008 |
 | [0008](0008-codex-byok-primary-opencode-fallback.md) | Codex BYOK on OmniRoute primary; OpenCode fallback | accepted |
+| [0009](0009-tree-sitter-wasm-symbol-provider.md) | tree-sitter WASM symbol provider | accepted |

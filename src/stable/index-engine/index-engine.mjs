@@ -42,6 +42,19 @@ function fail(message) {
   throw new IndexEngineError(message);
 }
 
+export function validateSymbolProvider(provider) {
+  if (!provider || typeof provider !== 'object' || Array.isArray(provider)) {
+    fail('symbolProvider must be an object');
+  }
+  if (typeof provider.id !== 'string' || provider.id.length === 0 || provider.id.length > 64) {
+    fail('symbolProvider id must be a short non-empty string');
+  }
+  if (typeof provider.extractSymbols !== 'function') {
+    fail('symbolProvider must expose extractSymbols');
+  }
+  return provider;
+}
+
 function isIndexableFile(filePath) {
   return CODE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }
@@ -512,9 +525,55 @@ function hashBuffer(buffer) {
   return createHash('sha256').update(buffer).digest('hex');
 }
 
-function fileEntry(buffer, options) {
+function validateProviderSymbols(symbols, maxSymbols) {
+  if (!Array.isArray(symbols)) fail('symbolProvider returned a non-array');
+  if (symbols.length > maxSymbols) fail('symbolProvider returned too many symbols');
+  const seen = new Set();
+  const validated = [];
+  for (const symbol of symbols) {
+    if (!symbol || typeof symbol !== 'object' || Array.isArray(symbol)) {
+      fail('symbolProvider returned an invalid symbol');
+    }
+    if (Object.keys(symbol).some((key) => !['name', 'kind', 'line', 'column', 'container'].includes(key))) {
+      fail('symbolProvider returned an unknown symbol field');
+    }
+    if (typeof symbol.name !== 'string' || !IDENTIFIER_NAME.test(symbol.name)) {
+      fail('symbolProvider returned an invalid symbol name');
+    }
+    if (!SYMBOL_KINDS.has(symbol.kind)) fail('symbolProvider returned an unknown symbol kind');
+    if (!Number.isInteger(symbol.line) || symbol.line < 1 || symbol.line > 10_000_000) {
+      fail('symbolProvider returned an invalid symbol line');
+    }
+    if (!Number.isInteger(symbol.column) || symbol.column < 1 || symbol.column > 1_000_000) {
+      fail('symbolProvider returned an invalid symbol column');
+    }
+    if (symbol.container !== undefined &&
+        (typeof symbol.container !== 'string' || !IDENTIFIER_NAME.test(symbol.container))) {
+      fail('symbolProvider returned an invalid symbol container');
+    }
+    const key = `${symbol.line}:${symbol.column}:${symbol.name}:${symbol.kind}:${symbol.container ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    validated.push({
+      name: symbol.name,
+      kind: symbol.kind,
+      line: symbol.line,
+      column: symbol.column,
+      ...(symbol.container === undefined ? {} : { container: symbol.container }),
+    });
+  }
+  return validated.sort((a, b) =>
+    a.line - b.line || a.column - b.column || a.name.localeCompare(b.name));
+}
+
+async function fileEntry(buffer, options) {
   const source = buffer.toString('utf8').replace(/^\uFEFF/, '');
-  const symbols = extractSymbols(source, { maxSymbols: options.maxSymbolsPerFile });
+  const symbols = options.symbolProvider
+    ? validateProviderSymbols(await options.symbolProvider.extractSymbols(source, {
+      filePath: options.filePath,
+      maxSymbols: options.maxSymbolsPerFile,
+    }), options.maxSymbolsPerFile)
+    : extractSymbols(source, { maxSymbols: options.maxSymbolsPerFile });
   const calls = extractCalls(source, {
     maxCalls: options.maxCallsPerFile,
     maxSymbols: options.maxSymbolsPerFile,
@@ -801,6 +860,7 @@ export class ProjectIndex {
       maxTokensPerFile: validateInteger('maxTokensPerFile', options.maxTokensPerFile ?? MAX_TOKENS_PER_FILE, 1, MAX_TOKENS_PER_FILE),
       maxCallsPerFile: validateInteger('maxCallsPerFile', options.maxCallsPerFile ?? MAX_CALLS_PER_FILE, 1, MAX_CALLS_PER_FILE),
     };
+    this.symbolProvider = options.symbolProvider === undefined ? null : validateSymbolProvider(options.symbolProvider);
     this.current = null;
   }
 
@@ -880,11 +940,14 @@ export class ProjectIndex {
       const hash = hashBuffer(buffer);
       const previous = previousFiles[rel];
       let entry;
-      if (previous && previous.hash === hash && Array.isArray(previous.symbols) && Array.isArray(previous.calls) && previous.tokens) {
+      // A custom provider is not recorded in a persisted index, so unchanged entries must be
+      // re-extracted to keep the snapshot consistent with the configured provider.
+      if (!this.symbolProvider && previous && previous.hash === hash &&
+          Array.isArray(previous.symbols) && Array.isArray(previous.calls) && previous.tokens) {
         entry = previous;
         reused += 1;
       } else {
-        entry = fileEntry(buffer, this.options);
+        entry = await fileEntry(buffer, { ...this.options, filePath: rel, symbolProvider: this.symbolProvider });
         changed += 1;
       }
       totalSymbols += entry.symbols.length;
@@ -947,7 +1010,7 @@ export class ProjectIndex {
     const rootReal = await realpath(this.root).catch(() => null);
     if (!rootReal) fail('project root does not exist');
     const buffer = await readFileWithin(rootReal, rel, this.options.maxFileBytes);
-    const entry = fileEntry(buffer, this.options);
+    const entry = await fileEntry(buffer, { ...this.options, filePath: rel, symbolProvider: this.symbolProvider });
     const previous = this.current.files[rel];
     if (previous && previous.hash === entry.hash) {
       return { index: this.current, changed: false };
