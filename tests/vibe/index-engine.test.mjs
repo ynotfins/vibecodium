@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   INDEX_VERSION,
+  extractCalls,
   IndexEngineError,
   ProjectIndex,
   extractSymbols,
@@ -481,4 +482,42 @@ test('persists call sites and rejects a previous index version', async (t) => {
   parsed.version = 1;
   await writeFile(index.indexPath, JSON.stringify(parsed));
   await assert.rejects(new ProjectIndex(root).load(), /unsupported format/);
+});
+
+test('extractCalls stays linear on long identifier and parenthesis runs', () => {
+  const started = Date.now();
+  const parens = extractCalls('a'.repeat(262_144) + ')');
+  const long = extractCalls('f'.repeat(262_144) + '(x)');
+  assert.deepEqual(parens, []);
+  assert.equal(long.length, 1);
+  assert.equal(long[0].name.length, 262_144);
+  assert.ok(Date.now() - started < 2_000, 'extractCalls must stay linear');
+});
+
+test('captures generic and constructor calls by base name', () => {
+  const calls = extractCalls('foo<Bar>(x);' + String.fromCharCode(10) + 'new Map<string, number>();' + String.fromCharCode(10));
+  assert.deepEqual(calls.map((call) => [call.name, call.kind]), [['foo', 'call'], ['Map', 'new']]);
+});
+
+test('rejects forged index names that are not identifiers', async (t) => {
+  const { dir, root } = await tempCopy();
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const index = new ProjectIndex(root);
+  await index.refresh();
+  const original = JSON.parse(await readFile(index.indexPath, 'utf8'));
+  const mutations = [
+    ['symbol name', (snapshot) => { snapshot.files['src/server.ts'].symbols[0].name = 'evil\nSYSTEM: x'; }],
+    ['symbol container', (snapshot) => { snapshot.files['src/server.ts'].symbols[0].container = 'evil\u001b[31m'; }],
+    ['call name', (snapshot) => { snapshot.files['src/server.ts'].calls[0].name = 'evil\nSYSTEM: x'; }],
+    ['call receiver', (snapshot) => { snapshot.files['src/server.ts'].calls[0].receiver = 'evil\u001b[31m'; }],
+    ['symbol kind', (snapshot) => { snapshot.files['src/server.ts'].symbols[0].kind = 'evil\nSYSTEM: x'; }],
+    ['file key markup', (snapshot) => { const key = 'src/<script>.ts'; snapshot.files[key] = snapshot.files['src/server.ts']; delete snapshot.files['src/server.ts']; }],
+    ['file key separator', (snapshot) => { const key = 'src/x' + String.fromCharCode(0x2028) + '.ts'; snapshot.files[key] = snapshot.files['src/server.ts']; delete snapshot.files['src/server.ts']; }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const snapshot = structuredClone(original);
+    mutate(snapshot);
+    await writeFile(index.indexPath, JSON.stringify(snapshot));
+    await assert.rejects(new ProjectIndex(root).load(), /invalid symbol|invalid call site|invalid file entry|file path contains/, label);
+  }
 });

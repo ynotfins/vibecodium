@@ -17,8 +17,11 @@ export const MAX_INDEX_FILES = 10_000;
 export const MAX_INDEX_SYMBOLS = 500_000;
 export const MAX_INDEX_CALLS = 200_000;
 
+const SYMBOL_KINDS = new Set(['class', 'constructor', 'enum', 'function', 'getter', 'interface', 'method', 'namespace', 'setter', 'type', 'variable']);
 const CALLABLE_KINDS = new Set(['function', 'method', 'constructor', 'getter', 'setter']);
+const UNSAFE_FILE_CHARS = /[\\:\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>]/u;
 const ANSWER_ARRAYS = ['results', 'candidates'];
+const IDENTIFIER_NAME = /^#?[A-Za-z_$][\w$]*$/;
 
 export class StructuralQueryError extends Error {
   constructor(message) {
@@ -61,6 +64,19 @@ function publicNode(node) {
     column: node.column,
     ...(node.container ? { container: node.container } : {}),
   };
+}
+
+function validateFileKey(file) {
+  if (typeof file !== 'string' || file.length === 0 || file.length > MAX_FILE_LENGTH) {
+    fail('index has an invalid file entry');
+  }
+  if (file.startsWith('/') || /^[A-Za-z]:/.test(file) || UNSAFE_FILE_CHARS.test(file)) {
+    fail('index has an invalid file entry');
+  }
+  const segments = file.split('/');
+  if (segments.some((segment) => segment === '' || segment === '.' || segment === '..')) {
+    fail('index has an invalid file entry');
+  }
 }
 
 function publicSymbol(ref) {
@@ -107,6 +123,7 @@ export class StructuralQuery {
     this.stats.files = files.length;
     let symbolTotal = 0;
     for (const [file, entry] of files) {
+      validateFileKey(file);
       if (!isPlainObject(entry) || !Array.isArray(entry.symbols)) fail('index has an invalid file entry');
       for (const symbol of entry.symbols) {
         this.#validateSymbol(symbol);
@@ -163,25 +180,26 @@ export class StructuralQuery {
 
   #validateSymbol(symbol) {
     if (!isPlainObject(symbol) || typeof symbol.name !== 'string' || symbol.name.length === 0 ||
-        symbol.name.length > MAX_NAME_LENGTH || typeof symbol.kind !== 'string' ||
-        symbol.kind.length === 0 || symbol.kind.length > 64 ||
+        symbol.name.length > MAX_NAME_LENGTH || !IDENTIFIER_NAME.test(symbol.name) ||
+        !SYMBOL_KINDS.has(symbol.kind) ||
         !Number.isInteger(symbol.line) || symbol.line < 1 ||
         !Number.isInteger(symbol.column) || symbol.column < 1 ||
         (symbol.container !== undefined && (typeof symbol.container !== 'string' ||
-          symbol.container.length > MAX_NAME_LENGTH))) {
+          symbol.container.length > MAX_NAME_LENGTH || !IDENTIFIER_NAME.test(symbol.container)))) {
       fail('index has an invalid symbol');
     }
   }
 
   #validateCall(call) {
     if (!isPlainObject(call) || typeof call.name !== 'string' || call.name.length === 0 ||
-        call.name.length > MAX_NAME_LENGTH || (call.kind !== 'call' && call.kind !== 'new') ||
+        call.name.length > MAX_NAME_LENGTH || !IDENTIFIER_NAME.test(call.name) ||
+        (call.kind !== 'call' && call.kind !== 'new') ||
         !Number.isInteger(call.line) || call.line < 1 ||
         !Number.isInteger(call.column) || call.column < 1 ||
         !Number.isInteger(call.endLine) || call.endLine < call.line ||
         !Number.isInteger(call.depth) || call.depth < 0 ||
         (call.receiver !== undefined && (typeof call.receiver !== 'string' ||
-          call.receiver.length > MAX_NAME_LENGTH))) {
+          call.receiver.length > MAX_NAME_LENGTH || !IDENTIFIER_NAME.test(call.receiver)))) {
       fail('index has an invalid call site');
     }
   }
@@ -211,13 +229,13 @@ export class StructuralQuery {
   }
 
   #callerFor(file, symbols, call, cursor) {
+    // Symbols do not store an end line, so attribution uses call depth plus the nearest
+    // preceding callable. The stack is never popped; the backwards scan below stays bounded
+    // by the number of symbols in the file.
     if (call.depth === 0) return this.#moduleNode(file);
     while (cursor.index < symbols.length && symbols[cursor.index].line <= call.line) {
       cursor.stack.push(symbols[cursor.index]);
       cursor.index += 1;
-    }
-    while (cursor.stack.length > 0 && cursor.stack[cursor.stack.length - 1].endLine < call.line) {
-      cursor.stack.pop();
     }
     let caller = null;
     for (let i = cursor.stack.length - 1; i >= 0; i -= 1) {

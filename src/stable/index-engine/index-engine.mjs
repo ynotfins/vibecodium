@@ -54,7 +54,7 @@ function normalizeRelative(filePath) {
   if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized) || normalized.startsWith('//')) {
     fail('file path must be relative to the project root');
   }
-  if (/[:\x00-\x1f]/.test(normalized)) fail('file path contains an unsupported character');
+  if (/[:\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>]/u.test(normalized)) fail('file path contains an unsupported character');
   const segments = normalized.split('/');
   if (segments.length === 0 || segments.some((segment) => segment === '' || segment === '.' || segment === '..')) {
     fail('file path must stay within the project root');
@@ -568,20 +568,24 @@ function validateLoadedIndex(value) {
     }
     for (const symbol of entry.symbols) {
       if (!symbol || typeof symbol.name !== 'string' || symbol.name.length < 1 || symbol.name.length > 512 ||
+          !IDENTIFIER_NAME.test(symbol.name) ||
           !SYMBOL_KINDS.has(symbol.kind) || !Number.isInteger(symbol.line) || symbol.line < 1 ||
           !Number.isInteger(symbol.column) || symbol.column < 1 ||
-          (symbol.container !== undefined && (typeof symbol.container !== 'string' || symbol.container.length > 512))) {
+          (symbol.container !== undefined && (typeof symbol.container !== 'string' || symbol.container.length > 512 ||
+              !IDENTIFIER_NAME.test(symbol.container)))) {
         fail('index file has an invalid symbol');
       }
     }
     for (const call of entry.calls) {
       if (!call || typeof call.name !== 'string' || call.name.length < 1 || call.name.length > 512 ||
+          !IDENTIFIER_NAME.test(call.name) ||
           (call.kind !== 'call' && call.kind !== 'new') ||
           !Number.isInteger(call.line) || call.line < 1 ||
           !Number.isInteger(call.column) || call.column < 1 ||
           !Number.isInteger(call.endLine) || call.endLine < call.line || call.endLine > 10_000_000 ||
           !Number.isInteger(call.depth) || call.depth < 0 || call.depth > 1_000_000 ||
-          (call.receiver !== undefined && (typeof call.receiver !== 'string' || call.receiver.length > 512))) {
+          (call.receiver !== undefined && (typeof call.receiver !== 'string' || call.receiver.length > 512 ||
+              !IDENTIFIER_NAME.test(call.receiver)))) {
         fail('index file has an invalid call site');
       }
     }
@@ -993,8 +997,7 @@ export class ProjectIndex {
     return hits.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file)).slice(0, limit);
   }
 }
-
-const CALL_WORD = /(#?[A-Za-z_$][\w$]*)(?:<[A-Za-z0-9_$.,\[\]<>]{0,200}>)?\s*\(/g;
+const IDENTIFIER_NAME = /^#?[A-Za-z_$][\w$]*$/;
 
 function wordBefore(masked, index) {
   let i = index - 1;
@@ -1013,7 +1016,7 @@ function receiverBefore(masked, index) {
   let start = end - 1;
   while (start >= 0 && /[\w$#]/.test(masked[start])) start -= 1;
   const name = masked.slice(start + 1, end);
-  return /^#?[A-Za-z_$][\w$]*$/.test(name) ? name : undefined;
+  return IDENTIFIER_NAME.test(name) ? name : undefined;
 }
 
 function nextNonSpace(masked, index) {
@@ -1034,7 +1037,41 @@ function closeParenAfter(masked, open, limit) {
   return -1;
 }
 
+function readIdentifierBefore(masked, end) {
+  let i = end - 1;
+  while (i >= 0 && /[\w$]/.test(masked[i])) i -= 1;
+  if (i >= 0 && masked[i] === '#' && end - i > 1) i -= 1;
+  if (i + 1 >= end) return null;
+  const name = masked.slice(i + 1, end);
+  return IDENTIFIER_NAME.test(name) ? { name, start: i + 1 } : null;
+}
+
+function identifierBeforeParen(masked, open) {
+  let i = open - 1;
+  while (i >= 0 && /\s/.test(masked[i])) i -= 1;
+  if (i < 0) return null;
+  if (masked[i] === '>') {
+    let depth = 0;
+    let scan = i;
+    const limit = Math.max(0, i - 200);
+    for (; scan >= limit; scan -= 1) {
+      const c = masked[scan];
+      if (c === '>') depth += 1;
+      else if (c === '<') {
+        depth -= 1;
+        if (depth === 0) break;
+      } else if (!/[A-Za-z0-9_$.,\[\]\s]/.test(c)) return null;
+    }
+    if (depth !== 0) return null;
+    i = scan - 1;
+    while (i >= 0 && /\s/.test(masked[i])) i -= 1;
+  }
+  return readIdentifierBefore(masked, i + 1);
+}
+
 // Extracts call sites from code only. Declarations and object-literal method shorthand are not calls.
+// The scan visits each character at most once plus each identifier once, so a long identifier run
+// cannot make it quadratic.
 export function extractCalls(source, options = {}) {
   if (typeof source !== 'string') fail('source must be a string');
   source = source.replace(/^\uFEFF/, '');
@@ -1047,27 +1084,31 @@ export function extractCalls(source, options = {}) {
   const lineStarts = lineStartsOf(masked);
   const calls = [];
   const seen = new Set();
-  let match;
-  let scan = 0;
   let depth = 0;
-  CALL_WORD.lastIndex = 0;
-  while ((match = CALL_WORD.exec(masked)) !== null && calls.length < maxCalls) {
-    for (; scan < match.index; scan += 1) {
-      if (masked[scan] === '{') depth += 1;
-      else if (masked[scan] === '}') depth = Math.max(0, depth - 1);
+  for (let i = 0; i < masked.length && calls.length < maxCalls; i += 1) {
+    const char = masked[i];
+    if (char === '{') {
+      depth += 1;
+      continue;
     }
-    const name = match[1];
+    if (char === '}') {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (char !== '(') continue;
+    const found = identifierBeforeParen(masked, i);
+    if (!found) continue;
+    const { name, start } = found;
     const bare = name.replace(/^#/, '');
     if (CONTROL_WORDS.has(bare)) continue;
-    const line = lineOfOffset(lineStarts, match.index) + 1;
-    const column = match.index - lineStarts[line - 1] + 1;
+    const line = lineOfOffset(lineStarts, start) + 1;
+    const column = start - lineStarts[line - 1] + 1;
     if (declarations.has(`${line}:${column}:${name}`)) continue;
-    const open = match.index + match[0].length - 1;
-    const close = closeParenAfter(masked, open, 4_000);
+    const close = closeParenAfter(masked, i, 4_000);
     if (close >= 0 && nextNonSpace(masked, close + 1) === '{') continue;
     const endLine = close >= 0 ? lineOfOffset(lineStarts, close) + 1 : line;
-    const receiver = receiverBefore(masked, match.index);
-    const kind = wordBefore(masked, match.index) === 'new' ? 'new' : 'call';
+    const receiver = receiverBefore(masked, start);
+    const kind = wordBefore(masked, start) === 'new' ? 'new' : 'call';
     const key = `${line}:${column}:${name}:${kind}:${receiver ?? ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
