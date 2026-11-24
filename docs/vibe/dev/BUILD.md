@@ -1,6 +1,6 @@
 # Building Vibecodium on Windows
 
-> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-23
+> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-24
 
 Vibecodium builds with VSCodium's scripts. Run everything in **Git Bash** from the repository root.
 
@@ -39,6 +39,20 @@ The source vectors are `icons/<quality>/vibe_*.svg`. The checked-in overlay icon
 ```bash
 node --test tests/vibe/icon-assets.test.mjs
 ```
+
+### Documentation MCP server
+
+The standalone docs-mcp server indexes explicitly configured Markdown documentation roots and serves them to an agent over MCP 2025-06-18 stdio. It is dependency-free, does not fetch from the network, resolves each configured root once without following symlinked entries beneath it, skips hidden and dependency directories, and reads only `.md`, `.markdown` and `.mdx` files. The CLI is invoked as `node src/stable/docs-mcp/server.mjs --root <source-id>=<absolute-markdown-directory>` with one or more `--root` arguments.
+
+The tools are `docs_list` (configured sources and counts), `docs_search` (deterministic bounded snippets with scores) and `docs_read` (one page with exact returned-byte and truncation metadata). Search caps at 300 query characters, 20 results and 800 snippet characters. Reads cap at 32,000 characters. The index caps at 32 sources, 10,000 documents, 1,000,000 bytes per document and 64,000,000 bytes total. Paths stay project-relative, and all results carry `sourceTrust: untrusted-documentation-content`.
+
+The focused test launches the real stdio process, completes the initialize handshake, lists the tools, calls search and read, and checks parse-error isolation and the line-size cap:
+
+```bash
+node --test tests/vibe/docs-mcp.test.mjs tests/vibe/docs-mcp-cap.test.mjs tests/vibe/docs-mcp-hardening.test.mjs
+```
+
+The upstream `@arabold/docs-mcp-server` web scraper is not bundled in this slice. An adapter belongs with the M2 sidecar and Bifrost MCP work, and must preserve these isolation and output bounds; see ADR-0009.
 
 ### Context engine: summary DAG
 

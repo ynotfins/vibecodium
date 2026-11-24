@@ -11,6 +11,21 @@ Current milestone: M0 and M5 (in progress)
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
 
+### 2026-11-24 - M5 docs-mcp local documentation
+
+- Task: deliver the M5 docs-mcp deliverable as a standalone, local-first MCP server for agent documentation lookup. It indexes explicitly configured Markdown documentation roots, never the network, and exposes bounded list, search and read tools over MCP stdio. This slice delivers the local-Markdown documentation surface only; an upstream HTML/PDF/web-scraping adapter remains outstanding and belongs with the M2 sidecar/gateway work.
+- Must-have IDs: none directly; this is the remaining named M5 roadmap deliverable (local documentation grounding).
+- Files allowed: `src/stable/docs-mcp/**`, `tests/vibe/docs-mcp*.test.mjs`, `tests/vibe/fixtures/docs-mcp/**`, `docs/vibe/STATUS.md`, `docs/vibe/ROADMAP.md`, `docs/vibe/CHANGELOG.md`, `docs/vibe/README.md`, `docs/vibe/TECH_RADAR.md`, `docs/vibe/adr/0009-docs-mcp-local-first.md`, `docs/vibe/adr/README.md`, `docs/vibe/dev/BUILD.md`, `docs/vibe/user/README.md`.
+- Files forbidden: upstream source, hook patches, new dependencies or vendored binaries, network fetching or scraping, IDE integration, graph/context/index/memory behavior, build scripts, CI workflows, release infrastructure, locked docs.
+- Acceptance commands: `node --test tests/vibe/docs-mcp.test.mjs tests/vibe/docs-mcp-cap.test.mjs tests/vibe/docs-mcp-hardening.test.mjs`, `node vibe/tools/verify.mjs`, `node vibe/tools/docs-check.mjs --strict`.
+- Acceptance test: index two fixture Markdown roots; prove deterministic bounded search with source-trust labels and no absolute paths; prove bounded read with exact byte/truncation reporting and neutralisation of C0/C1, format/bidi and variation-selector controls; reject bad roots, path escapes, oversized inputs and unknown ids; launch the real MCP stdio server, complete the initialize/initialized handshake, list the three tools and call search and read, including `docs_list` with omitted `arguments`; prove protocol errors are isolated and no line can exceed the response cap.
+- Out of scope: web scraping, PDF/HTML parsing, embeddings or vector search, remote documentation registries, Bifrost wiring, the built-in extension UI, model-generated summaries, and IDE binding.
+- Delivered: `src/stable/docs-mcp/{docs-index,mcp-server,server}.mjs`; MCP 2025-06-18 stdio tools `docs_list`, `docs_search` and `docs_read` over explicitly configured Markdown roots; bounded corpus/document/bytes/query/results/snippets/reads and request/response caps; project-relative paths, source-trust labels and C0/C1/format/bidi/tag/variation-selector neutralisation; ADR-0009 plus living-doc updates.
+- Tests: focused 14/14; `node vibe/tools/verify.mjs` PASS (4/4; 317 tests, 310 pass, 7 Windows skips); `node vibe/tools/docs-check.mjs --strict` PASS; `git diff --check` clean.
+- Guardians: QA PASS (mutation-sensitive cap regression); drift PASS; security PASS (default sub-agent fallback after the security-reviewer role model stalled; medium Unicode-neutralisation, traversal-bound, TOCTOU-narrowing and heading-parser findings fixed; residual local-write TOCTOU accepted); docs PASS; governance N/A (no locked path); tech PASS (npm 3.5.0, MIT, 2026-11-22); release N/A (no milestone exit).
+- Next step: run the separate M5 milestone-exit task; an upstream HTML/PDF/web-scraping adapter remains optional later M2 work.
+- Branch: `vibe/m5/docs-mcp` -> PR into `vibe/main`.
+
 ### 2026-11-24 - M5 Understand-Anything semantic/visual projection
 
 - Goal / must-haves: deliver the M5 Understand-Anything integration as a read-only semantic and visual projection of the validated cross-project graph, plus the license and integration decision record. The graph engine stays the only owner of cross-project edges. Must-have IDs: C3, C4.
