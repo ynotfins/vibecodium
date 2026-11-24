@@ -1,0 +1,33 @@
+{
+  "name": "vibecodium-ai",
+  "displayName": "Vibecodium AI",
+  "description": "Vibecodium AI workbench surfaces: cross-project graph, context and memory.",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "publisher": "vibecodium",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "main": "./src/extension.cjs",
+  "activationEvents": [
+    "onCommand:vibecodium.graph.open",
+    "onCommand:vibecodium.graph.setData"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "vibecodium.graph.open",
+        "title": "Open Graph Panel",
+        "category": "Vibecodium"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "vibecodium.graph.open"
+        }
+      ]
+    }
+  }
+}
