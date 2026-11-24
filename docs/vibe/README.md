@@ -23,6 +23,7 @@ Vibecodium is a standalone, Windows-first AI IDE built on VSCodium. This folder 
 | [TECH_RADAR.md](TECH_RADAR.md) | Every component, its version, the latest release and alternatives |
 | [research/2026-11-23-ui-graph-index-research.md](research/2026-11-23-ui-graph-index-research.md) | UI mechanics, one cross-project graph authority, and the M4 index stack |
 | [spikes/understand-anything.md](spikes/understand-anything.md) | Understand-Anything license and integration decision, plus the projection mapping |
+| [design/m1-ai-surfaces.md](design/m1-ai-surfaces.md) | M1 A2 native AI surfaces without Copilot: product transform, extension defaults, tests and boundaries |
 | [adr/0009-docs-mcp-local-first.md](adr/0009-docs-mcp-local-first.md) | Local-first docs MCP decision and the later upstream adapter boundary |
 | [CHANGELOG.md](CHANGELOG.md) | User-visible changes per release |
 | [SECURITY.md](SECURITY.md) | Security model and how to report issues |

@@ -40,6 +40,25 @@ The source vectors are `icons/<quality>/vibe_*.svg`. The checked-in overlay icon
 node --test tests/vibe/icon-assets.test.mjs
 ```
 
+### AI surfaces without Copilot
+
+`prepare_vscode.sh` applies `vibe/tools/apply-ai-surfaces.mjs` to the merged `vscode/product.json` after the Vibecodium product overlay and before the source patches. The transform is dependency-free and idempotent: it replaces the Copilot `defaultChatAgent` with the built-in `vibecodium.vibecodium-ai` descriptor, removes `GitHub.copilot*` from trusted-auth, built-in auto-update and API-proposal lists where present, and uses the reserved `https://vibecodium.invalid` host for runtime endpoints.
+
+After `prepare_vscode.sh` has created `vscode/product.json`, run the transform check and its unit test directly (the unit test covers the update-then-check round trip):
+
+```bash
+node vibe/tools/apply-ai-surfaces.mjs --product vscode/product.json --check
+node --test tests/vibe/ai-surfaces.test.mjs tests/vibe/ai-surfaces-branding.test.mjs tests/vibe/ai-surfaces-copilot-classification.test.mjs
+```
+
+The IDE acceptance needs a real extension host. On a workstation where the built `Vibecodium.exe` cannot start because its folder ACL lacks an `ALL APPLICATION PACKAGES` entry, point `VIBECODIUM_APP_PATH` at an installed VS Code:
+
+```bash
+VIBECODIUM_APP_PATH="/c/Program Files/Microsoft VS Code/Code.exe" node --test tests/vibe/ai-surfaces-ide.test.mjs
+```
+
+The runner checks the three chat settings, the absence of user-installed `GitHub.copilot*` extensions (a stock host's built-in is reported even when active and tolerated as host wiring), the chat, inline-chat, Agents, session and checkpoint commands, and that opening chat creates no GitHub authentication session. It accepts either `workbench.action.sessions.newChat` (1.143) or `workbench.action.newChatWindow` (1.135). A rebuilt-app smoke remains M12.
+
 ### Documentation MCP server
 
 The standalone docs-mcp server indexes explicitly configured Markdown documentation roots and serves them to an agent over MCP 2025-06-18 stdio. It is dependency-free, does not fetch from the network, resolves each configured root once without following symlinked entries beneath it, skips hidden and dependency directories, and reads only `.md`, `.markdown` and `.mdx` files. The CLI is invoked as `node src/stable/docs-mcp/server.mjs --root <source-id>=<absolute-markdown-directory>` with one or more `--root` arguments.

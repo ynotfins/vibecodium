@@ -17,6 +17,21 @@
     "onCommand:vibecodium.memory.setStore"
   ],
   "contributes": {
+    "configuration": {
+      "title": "Vibecodium AI",
+      "properties": {
+        "chat.welcomePage.signIn.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show a GitHub sign-in button on the Chat welcome page. Vibecodium keeps this off so a fresh profile never asks for GitHub Copilot."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "chat.disableAIFeatures": false,
+      "chat.titleBar.signIn.enabled": false,
+      "chat.welcomePage.signIn.enabled": false
+    },
     "commands": [
       {
         "command": "vibecodium.graph.open",
