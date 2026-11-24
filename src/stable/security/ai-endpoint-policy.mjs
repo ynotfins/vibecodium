@@ -518,11 +518,11 @@ function isForbiddenMetadataHost(host) {
   for (let depth = 0; depth < 8; depth += 1) {
     if (isForbiddenMetadataCore(bare)) return true;
     if (bare.endsWith('.local')) {
-      bare = bare.slice(0, -'.local'.length);
+      bare = normalizeHostname(bare.slice(0, -'.local'.length));
       continue;
     }
     if (bare.endsWith('.localhost')) {
-      bare = bare.slice(0, -'.localhost'.length);
+      bare = normalizeHostname(bare.slice(0, -'.localhost'.length));
       continue;
     }
     return false;
