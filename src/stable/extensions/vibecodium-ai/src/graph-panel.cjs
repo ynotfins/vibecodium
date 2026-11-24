@@ -16,6 +16,7 @@ const SAFE_TYPE = /^[a-z][a-z0-9-]{0,63}$/;
 const PROJECT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SAFE_NONCE = /^[A-Za-z0-9_-]{16,128}$/;
 const SOURCE_TRUST = 'untrusted-repository-content';
+const UNSAFE_TEXT = /[\p{Cc}\p{Cf}]/u;
 
 class GraphPanelModelError extends Error {
   constructor(message) {
@@ -34,6 +35,7 @@ function isPlainObject(value) {
 
 function text(value, maximum, label) {
   if (typeof value !== 'string' || value.length === 0 || value.length > maximum) fail(label + ' is invalid');
+  if (UNSAFE_TEXT.test(value)) fail(label + ' contains unsafe characters');
   return value;
 }
 
@@ -126,12 +128,14 @@ function projectRootMap(roots) {
   const map = new Map();
   if (roots === undefined || roots === null) return map;
   if (roots instanceof Map) {
+    if (roots.size > MAX_PROJECTS) fail('project roots exceed the project cap');
     for (const [id, root] of roots) {
       map.set(text(id, 64, 'project root id'), path.resolve(text(root, 4_096, 'project root')));
     }
     return map;
   }
   if (!isPlainObject(roots)) fail('project roots must be an object');
+  if (Object.keys(roots).length > MAX_PROJECTS) fail('project roots exceed the project cap');
   for (const [id, root] of Object.entries(roots)) {
     map.set(text(id, 64, 'project root id'), path.resolve(text(root, 4_096, 'project root')));
   }
@@ -561,11 +565,19 @@ function createGraphPanelController(input = {}) {
     return model ? model.view() : null;
   }
 
+  function html() {
+    return panel ? panel.webview.html : null;
+  }
+
+  async function activate(nodeId) {
+    return handle({ type: 'nodeClick', nodeId });
+  }
+
   function dispose() {
     if (panel) panel.dispose();
   }
 
-  return { open, setGraph, view, dispose, handleMessage: handle };
+  return { open, setGraph, view, html, activate, dispose, handleMessage: handle };
 }
 
 module.exports = {

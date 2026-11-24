@@ -325,6 +325,13 @@ test('invalid graphs and unsafe source paths fail closed', async (t) => {
   assert.throws(() => createGraphPanelModel({ projects: [{ id: 'api' }], nodes: [{ id: 'x', type: 'project', project: 'missing' }], edges: [] }), GraphPanelModelError);
   assert.throws(() => createGraphPanelModel({ projects: [{ id: 'api' }], nodes: [], edges: [{ id: 'e', from: 'a', to: 'b' }] }), GraphPanelModelError);
   assert.throws(() => createGraphPanelModel({ projects: Array.from({ length: 33 }, (_, index) => ({ id: 'p' + index })), nodes: [], edges: [] }), GraphPanelModelError);
+  assert.throws(() => createGraphPanelModel({
+    projects: [{ id: 'api' }],
+    nodes: [{ id: 'symbol:api:bidi', type: 'symbol', project: 'api', name: 'safe\u202Eevil', file: 'src/a.ts', line: 1, column: 1 }],
+    edges: [],
+  }), GraphPanelModelError);
+  const tooManyRoots = Object.fromEntries(Array.from({ length: 33 }, (_, index) => ['p' + index, os.tmpdir()]));
+  assert.throws(() => createGraphPanelModel({ projects: [{ id: 'api' }], nodes: [], edges: [] }, { projectRoots: tooManyRoots }), GraphPanelModelError);
   assert.throws(() => renderGraphPanelHtml({ level: 'workspace', nodes: [], edges: [], counts: { total: 0, shown: 0 }, crumbs: [], truncated: false }, { nonce: 'bad" onload="x' }), GraphPanelModelError);
 
   const escapeModel = createGraphPanelModel({

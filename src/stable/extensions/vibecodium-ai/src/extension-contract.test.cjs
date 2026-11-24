@@ -101,3 +101,21 @@ test('the memory review opens after a store is supplied', async () => {
   await loaded.commands['vibecodium.memory.open']();
   assert.equal(loaded.opened(), 1);
 });
+
+test('the extension exposes panel state and activates a node through the shared click path', async () => {
+  const loaded = loadWithFakeVscode();
+  const context = { subscriptions: [], extensionUri: { fsPath: 'x' } };
+  const api = loaded.activate(context);
+  api.setGraph({
+    projects: [{ id: 'api' }],
+    nodes: [{ id: 'project:api', type: 'project', project: 'api' }],
+    edges: [],
+  });
+  api.open();
+  assert.equal(api.getView().level, 'workspace');
+  assert.match(api.getPanelHtml(), /data-node-id="project:api"/);
+  const result = await api.activateNode('project:api');
+  assert.equal(result.kind, 'zoom');
+  assert.equal(api.getView().level, 'project');
+  assert.doesNotThrow(() => api.dispose());
+});

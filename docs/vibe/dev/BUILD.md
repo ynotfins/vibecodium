@@ -153,7 +153,12 @@ node --test tests/vibe/graph-panel-extension.test.mjs
 node --test src/stable/extensions/vibecodium-ai/src/extension-contract.test.cjs
 ```
 
-The actual extension build inside VS Code, a bundled in-IDE screenshot and the M6 IDE binding are separate integration work; nothing here starts an Electron build or adds a dependency.
+The same fixture graph is also proven in a real extension host, not just a fake `vscode` API. `tests/vibe/graph-panel-ide.test.mjs` spawns an IDE with a throwaway profile and the in-extension runner `src/stable/extensions/vibecodium-ai/src/graph-panel-ide-runner.test.cjs`, renders the panel, drills to the symbol and asserts that the active editor is `web/src/client.ts` at line 1, column 23 (where `loadUser` starts) through the same `nodeClick` handler a webview click uses. Set `VIBECODIUM_APP_PATH` to an IDE executable to run it:
+```powershell
+$env:VIBECODIUM_APP_PATH='C:\Program Files\Microsoft VS Code\Code.exe'
+node --test tests/vibe/graph-panel-ide.test.mjs
+```
+The test passes `--no-sandbox` (required on this machine so the sandboxed renderer can read the check-out on `D:`), in-memory secret storage, `--disable-extensions` (the extension under development still loads) and temp `--user-data-dir`/`--extensions-dir` folders; these are test-only and do not change product runtime defaults. The built `Vibecodium.exe` from `windows-build` cannot start on this host: the folder ACL has an AppContainer package SID but no `ALL APPLICATION PACKAGES` entry (`install_dir_access.cc:52`), and the `icacls` grant the message suggests is denied. The acceptance therefore uses the installed VS Code extension host; a rebuilt-app screenshot and the M6 live workspace/index binding remain later integration work.
 
 ### Memory review panel core
 
