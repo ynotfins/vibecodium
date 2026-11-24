@@ -13,13 +13,13 @@
 ## Scope and method
 
 - Pinned upstream: `microsoft/vscode` tag `1.143.1` (commit `e646868227c3e3a9e3f24277c8c7220be42c0be7`),
-  the version named by `upstream/stable.json`.
+   the version named by `upstream/stable.json`.
 - Directories scanned read-only: `src/vs/platform/agentHost`, `src/vs/sessions`,
-  `src/vs/platform/mcp`, `src/vs/platform/telemetry` and `src/vs/workbench/contrib/chat`
-  (3,342 TypeScript files; test and fixture files excluded from findings).
+   `src/vs/platform/mcp`, `src/vs/platform/telemetry` and `src/vs/workbench/contrib/chat`
+   (3,342 TypeScript files; test and fixture files excluded from findings).
 - Every absolute `http(s)` URL was extracted with its source file, then each Microsoft, GitHub
-  Copilot, telemetry, update-feed and provider host was read in context to separate runtime
-  requests from documentation/help links.
+   Copilot, telemetry, update-feed and provider host was read in context to separate runtime
+   requests from documentation/help links.
 - No upstream source, credential, query string or secret value is copied into this repository.
 
 ## Findings
@@ -72,44 +72,44 @@ as `unknown` until a later audit adds it.
 by default; only these explicitly opt in:
 
 - `allowCopilotApi`, `allowCopilotTelemetry`, `allowMicrosoftTelemetry`,
-  `allowMicrosoftModelCatalog`, `allowVisualStudioUpdate`, `allowGitHubApi`,
-  `allowGitHubContent`, `allowExternalProviders`, `allowDocumentation`, `allowUnknownHosts`.
+   `allowMicrosoftModelCatalog`, `allowVisualStudioUpdate`, `allowGitHubApi`,
+   `allowGitHubContent`, `allowExternalProviders`, `allowDocumentation`, `allowUnknownHosts`.
 - `allowHosts` and `allowEndpoints` add exact, case-normalized host or host+path-prefix exceptions;
-  a suffix such as `githubcopilot.com` does not match `api.githubcopilot.com`. IPv6 entries keep their
-  brackets (for example `[fd00::1]`). Both are port-agnostic:
-  an exact host allow also permits non-default ports, so a caller that needs port scoping must
-  check the decision's `port` itself.
+   a suffix such as `githubcopilot.com` does not match `api.githubcopilot.com`. IPv6 entries keep their
+   brackets (for example `[fd00::1]`). Both are port-agnostic:
+   an exact host allow also permits non-default ports, so a caller that needs port scoping must
+   check the decision's `port` itself.
 - Credential-bearing URLs, non-HTTP schemes, control/bidi/zero-width characters (raw or
-  percent-encoded in the path), oversize URLs, punycode hosts and invalid option types fail closed
-  with a stable code, and repeated percent-encoding is decoded up to three times to catch
-  double-encoded separators and dot segments. IPv4/IPv6 link-local ranges and the enumerated cloud-metadata
-  hostnames and addresses are hard-denied as `forbidden-endpoint`, before any switch or allow list is consulted.
-  The metadata check also covers IPv4-embedded IPv6 wrappers (IPv4-compatible, IPv4-translated,
-  the well-known and local-use NAT64 prefixes and 6to4) and IPv4 shorthand forms the URL parser
-  accepts; an mDNS `.local`/`.localhost` suffix is stripped before the metadata check;
-  IPv6 unique-local addresses are not auto-allowed and are never enabled by
-  `allowUnknownHosts`; they need an exact host or host+path allow, except the known metadata addresses.
+   percent-encoded in the path), oversize URLs, punycode hosts and invalid option types fail closed
+   with a stable code, and repeated percent-encoding is decoded up to three times to catch
+   double-encoded separators and dot segments. IPv4/IPv6 link-local ranges and the enumerated cloud-metadata
+   hostnames and addresses are hard-denied as `forbidden-endpoint`, before any switch or allow list is consulted.
+   The metadata check also covers IPv4-embedded IPv6 wrappers (IPv4-compatible, IPv4-translated,
+   the well-known and local-use NAT64 prefixes and 6to4) and IPv4 shorthand forms the URL parser
+   accepts; an mDNS `.local`/`.localhost` suffix is stripped before the metadata check;
+   IPv6 unique-local addresses are not auto-allowed and are never enabled by
+   `allowUnknownHosts`; they need an exact host or host+path allow, except the known metadata addresses.
 - `redactAIEndpoint` strips userinfo, query and fragment for logs; credential URLs render as
-  `<invalid-endpoint>`. Errors never echo the raw URL or a secret; the `endpoint` field is a redacted host/path. Paths are kept (capped at 512
-  characters) because routing needs them; callers must never put a secret in a path, and M2
-  logging must keep request bodies out of policy messages.
+   `<invalid-endpoint>`. Errors never echo the raw URL or a secret; the `endpoint` field is a redacted host/path. Paths are kept (capped at 512
+   characters) because routing needs them; callers must never put a secret in a path, and M2
+   logging must keep request bodies out of policy messages.
 - `describeAIEndpointPolicy` gives the UI and the M2 gateway a stable, secret-free summary.
 
 ## Honest boundaries
 
 - This slice audits and decides; it does not yet intercept live traffic. Wiring the decision core
-  into the Bifrost gateway (M2) and the agent host (M6) is required before the audit can be claimed
-  as a runtime stub. Until then, upstream CAPI, 1DS and Copilot telemetry code is present but
-  unreachable unless a user configures Copilot, which Vibecodium removes by default.
+   into the Bifrost gateway (M2) and the agent host (M6) is required before the audit can be claimed
+   as a runtime stub. Until then, upstream CAPI, 1DS and Copilot telemetry code is present but
+   unreachable unless a user configures Copilot, which Vibecodium removes by default.
 - The product's own update feed, Open VSX and provider endpoints are out of scope here; they are
-  M0/M2 work.
+   M0/M2 work.
 - The metadata hard-deny covers the IPv4 metadata addresses embedded in the well-known NAT64
-  prefix (`64:ff9b::/96`) and the whole local-use NAT64 prefix (`64:ff9b:1::/48`, whose variable
-  embedding length cannot be checked reliably without a translator). Other well-known NAT64
-  addresses stay ordinary `unknown` hosts: denied by default and reachable only through an explicit
-  caller opt-in (`allowUnknownHosts`, or an exact host or host+path allow). The local-use `/48` cannot be enabled at all.
+   prefix (`64:ff9b::/96`) and the whole local-use NAT64 prefix (`64:ff9b:1::/48`, whose variable
+   embedding length cannot be checked reliably without a translator). Other well-known NAT64
+   addresses stay ordinary `unknown` hosts: denied by default and reachable only through an explicit
+   caller opt-in (`allowUnknownHosts`, or an exact host or host+path allow). The local-use `/48` cannot be enabled at all.
 - The audit covers tagged upstream `1.143.1`. The weekly upstream-compile job (M11) and M6
-  re-audits must re-run this inventory when upstream adds an AI endpoint.
+   re-audits must re-run this inventory when upstream adds an AI endpoint.
 
 ## Verify
 
