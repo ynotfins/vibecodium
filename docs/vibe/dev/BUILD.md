@@ -42,7 +42,7 @@ node --test tests/vibe/icon-assets.test.mjs
 
 ### AI surfaces without Copilot
 
-`prepare_vscode.sh` applies `vibe/tools/apply-ai-surfaces.mjs` to the merged `vscode/product.json` after the Vibecodium product overlay and before the source patches. The transform is dependency-free and idempotent: it replaces the Copilot `defaultChatAgent` with the built-in `vibecodium.vibecodium-ai` descriptor, removes `GitHub.copilot*` from trusted-auth, built-in auto-update and API-proposal lists where present, and uses the reserved `https://vibecodium.invalid` host for runtime endpoints.
+`prepare_vscode.sh` applies `vibe/tools/apply-ai-surfaces.mjs` to the merged `vscode/product.json` after the Vibecodium product overlay and before the source patches. The transform is dependency-free and idempotent: it replaces the Copilot `defaultChatAgent` with the built-in `vibecodium.vibecodium-ai` descriptor, removes every Copilot-branded entry from the owned sections (default chat agent, trusted auth, built-in/auto-update, recommendation including language, tool and chat-session tips, session, API-proposal, gallery-property, forced-version, auth-inheritance, remote-default-extensions and configuration-policy lists), leaving only the gallery telemetry SKU names and the workspace-trust copy alone, and uses the reserved `https://vibecodium.invalid` host for runtime endpoints.
 
 After `prepare_vscode.sh` has created `vscode/product.json`, run the transform check and its unit test directly (the unit test covers the update-then-check round trip):
 
@@ -57,7 +57,7 @@ The IDE acceptance needs a real extension host. On a workstation where the built
 VIBECODIUM_APP_PATH="/c/Program Files/Microsoft VS Code/Code.exe" node --test tests/vibe/ai-surfaces-ide.test.mjs
 ```
 
-The runner checks the three chat settings, the absence of user-installed `GitHub.copilot*` extensions (a stock host's built-in is reported even when active and tolerated as host wiring), the chat, inline-chat, Agents, session and checkpoint commands, and that opening chat creates no GitHub authentication session. It accepts either `workbench.action.sessions.newChat` (1.143) or `workbench.action.newChatWindow` (1.135). A rebuilt-app smoke remains M12.
+The runner checks the three chat settings, that the throwaway profile has no user-installed Copilot-branded extension (the test disables the stock host's built-ins by exact id, the runner prints `AI_SURFACES_USER_COPILOT_IDS=`, `AI_SURFACES_COPILOT_IDS=` and `AI_SURFACES_EXT_COUNT=` as evidence, and a planted `GitHub.copilot-probe` is reported as `AI_SURFACES_PROBE_DETECTED=` so the user-installed check is positive-controlled; the test asserts on a JSON report (`VIBECODIUM_AI_SURFACES_REPORT`) rather than the interleaved stdout lines; a stock host may still list or load its bundled Copilot Chat; the throwaway extensions directory starts empty, so this proves the classifier wiring plus the planted probe, not the owner's normal profile); the Vibecodium build removes the bundled `extensions/copilot` folder via `patches/52-ext-copilot-remove-it.json`, the chat, inline-chat, Agents, session and checkpoint commands, and that opening chat creates no GitHub authentication session. It accepts either `workbench.action.sessions.newChat` (1.143) or `workbench.action.newChatWindow` (1.135). A rebuilt-app smoke remains M12.
 
 ### Documentation MCP server
 

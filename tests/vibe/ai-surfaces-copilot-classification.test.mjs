@@ -21,7 +21,7 @@ test('a user-installed Copilot extension is reported', () => {
   assert.deepEqual(result.activeUserInstalled, []);
 });
 
-test('a host bundled Copilot extension is tolerated whether inactive or active', () => {
+test('a host bundled Copilot extension is classified separately whether inactive or active', () => {
   const result = classifyCopilotExtensions([
     { id: 'GitHub.copilot-chat', extensionPath: HOST_COPILOT, isActive: false },
   ], USER_DIR);
@@ -31,7 +31,30 @@ test('a host bundled Copilot extension is tolerated whether inactive or active',
   assert.deepEqual(result.activeUserInstalled, []);
 });
 
-test('an active host built-in Copilot extension is tolerated and reported', () => {
+test('a Copilot extension from another publisher is reported too', () => {
+  const result = classifyCopilotExtensions([
+    {
+      id: 'ms-vscode.vscode-copilot-vision',
+      extensionPath: path.join(USER_DIR, 'ms-vscode.vscode-copilot-vision'),
+      isActive: false,
+    },
+    {
+      id: 'ms-azuretools.vscode-azure-github-copilot',
+      extensionPath: path.join(USER_DIR, 'ms-azuretools.vscode-azure-github-copilot'),
+      isActive: false,
+    },
+  ], USER_DIR);
+  assert.deepEqual(result.copilot.map((entry) => entry.id), [
+    'ms-vscode.vscode-copilot-vision',
+    'ms-azuretools.vscode-azure-github-copilot',
+  ]);
+  assert.deepEqual(result.userInstalled.map((entry) => entry.id), [
+    'ms-vscode.vscode-copilot-vision',
+    'ms-azuretools.vscode-azure-github-copilot',
+  ]);
+});
+
+test('an active host-bundled Copilot extension is classified and reported', () => {
   const result = classifyCopilotExtensions([
     { id: 'GitHub.copilot', extensionPath: HOST_COPILOT, isActive: true },
   ], USER_DIR);

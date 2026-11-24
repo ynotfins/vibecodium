@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const vscode = require('vscode');
 const { classifyCopilotExtensions } = require('./copilot-extensions.cjs');
 
@@ -30,15 +32,59 @@ exports.run = async function run() {
   assert.equal(chat.get('titleBar.signIn.enabled'), false, 'chat.titleBar.signIn.enabled must be false');
   assert.equal(chat.get('welcomePage.signIn.enabled'), false, 'chat.welcomePage.signIn.enabled must be false');
 
-  // A stock VS Code host may bundle a built-in GitHub Copilot extension and may
-  // activate it. What matters for this product is that the clean profile has no
-  // user-installed Copilot extension. VIBECODIUM_USER_EXTENSIONS_DIR points at
-  // the throwaway profile's extensions folder.
-  const { copilot, userInstalled, active } = classifyCopilotExtensions(vscode.extensions.all, process.env.VIBECODIUM_USER_EXTENSIONS_DIR);
-  assert.deepEqual(userInstalled.map((candidate) => candidate.id), [], `unexpected user-installed GitHub Copilot extensions: ${userInstalled.map((candidate) => candidate.id).join(', ')}`);
-  if (copilot.length) {
-    console.log(`AI_SURFACES_HOST_COPILOT=${copilot.map((candidate) => candidate.id).join(',')}`);
-    console.log(`AI_SURFACES_HOST_COPILOT_ACTIVE=${active.map((candidate) => candidate.id).join(',')}`);
+  // A throwaway profile must not load any user-installed GitHub Copilot
+  // extension. The stock host may still ship and even activate its own bundled
+  // Copilot Chat; that is host wiring, not a profile install. The classifier
+  // checks both the full list and the throwaway profile's extensions folder.
+  const userExtensionsDir = process.env.VIBECODIUM_USER_EXTENSIONS_DIR;
+  const { copilot, userInstalled, active } = classifyCopilotExtensions(vscode.extensions.all, userExtensionsDir);
+  assert.deepEqual(
+    userInstalled.map((candidate) => candidate.id),
+    [],
+    `unexpected user-installed Copilot-branded extensions: ${userInstalled.map((candidate) => candidate.id).join(', ')}`,
+  );
+
+  // Plant a Copilot extension and confirm the classifier detects it as
+  // user-installed. A dead filter or a misclassified profile folder fails the
+  // same assertion, instead of passing because the host list happened to be
+  // empty.
+  const synthetic = {
+    id: 'GitHub.copilot-probe',
+    extensionPath: path.join(userExtensionsDir || '', 'GitHub.copilot-probe'),
+    isActive: false,
+  };
+  const probe = classifyCopilotExtensions([...vscode.extensions.all, synthetic], userExtensionsDir);
+  const hostBundled = copilot.filter((candidate) => !userInstalled.includes(candidate));
+  assert.deepEqual(
+    {
+      userInstalled: userInstalled.map((candidate) => candidate.id).sort(),
+      probeDetected: probe.copilot.some((candidate) => candidate.id === synthetic.id),
+      probeUserInstalled: probe.userInstalled.map((candidate) => candidate.id).sort(),
+    },
+    {
+      userInstalled: [],
+      probeDetected: true,
+      probeUserInstalled: [synthetic.id],
+    },
+    `a throwaway Vibecodium profile must load no user-installed Copilot-branded extension, and the classifier must detect a planted one; host-bundled (informational): ${hostBundled.map((candidate) => `${candidate.id} (active=${active.includes(candidate)})`).join(', ')}`,
+  );
+  console.log(`AI_SURFACES_COPILOT_IDS=${copilot.map((candidate) => candidate.id).join(',')}`);
+  console.log(`AI_SURFACES_USER_COPILOT_IDS=${userInstalled.map((candidate) => candidate.id).join(',')}`);
+  console.log(`AI_SURFACES_PROBE_DETECTED=${probe.copilot.map((candidate) => candidate.id).join(',')}`);
+  console.log(`AI_SURFACES_EXT_COUNT=${vscode.extensions.all.length}`);
+  // The host interleaves stdout chunks, so the acceptance harness reads this
+  // artifact instead of scraping console lines.
+  const reportPath = process.env.VIBECODIUM_AI_SURFACES_REPORT;
+  if (reportPath) {
+    fs.writeFileSync(reportPath, JSON.stringify({
+      copilotIds: copilot.map((candidate) => candidate.id).sort(),
+      userInstalledIds: userInstalled.map((candidate) => candidate.id).sort(),
+      probeIds: probe.copilot.map((candidate) => candidate.id).sort(),
+      probeDetected: probe.copilot.some((candidate) => candidate.id === synthetic.id),
+      probeUserInstalled: probe.userInstalled.some((candidate) => candidate.id === synthetic.id),
+      hostBundledIds: hostBundled.map((candidate) => candidate.id).sort(),
+      extensionCount: vscode.extensions.all.length,
+    }), 'utf8');
   }
 
   const commands = await vscode.commands.getCommands(true);

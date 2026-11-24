@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
-import { access, mkdtemp, stat } from 'node:fs/promises';
+import { access, mkdtemp, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -57,7 +57,7 @@ function runExtensionHost(args, timeoutMs, extraEnv = {}) {
   });
 }
 
-test('the native AI surfaces open in a clean extension host without a user-installed GitHub Copilot extension', {
+test('the native AI surfaces open in a clean extension host with no user-installed Copilot extension', {
   skip: appPath ? false : 'set VIBECODIUM_APP_PATH to a built Vibecodium.exe',
   timeout: 120_000,
 }, async () => {
@@ -65,12 +65,14 @@ test('the native AI surfaces open in a clean extension host without a user-insta
   const appInfo = await stat(appPath);
   assert.ok(appInfo.isFile(), 'VIBECODIUM_APP_PATH must point at an executable file');
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'vibecodium-ai-host-'));
+  const reportPath = path.join(temporary, 'ai-surfaces-report.json');
   try {
     const result = await runExtensionHost([
       '--no-sandbox',
       '--disable-gpu-sandbox',
       '--disable-updates',
       '--disable-telemetry',
+      '--disable-crash-reporter',
       '--disable-experiments',
       '--disable-workspace-trust',
       '--disable-extensions',
@@ -86,13 +88,22 @@ test('the native AI surfaces open in a clean extension host without a user-insta
       `--user-data-dir=${path.join(temporary, 'data')}`,
       `--extensions-dir=${path.join(temporary, 'extensions')}`,
       '--disable-gpu',
-    ], 90_000, { VIBECODIUM_USER_EXTENSIONS_DIR: path.join(temporary, 'extensions') });
+    ], 90_000, {
+      VIBECODIUM_USER_EXTENSIONS_DIR: path.join(temporary, 'extensions'),
+      VIBECODIUM_AI_SURFACES_REPORT: reportPath,
+    });
     assert.equal(
       result.code,
       0,
       `extension host exited ${result.code} (${result.signal || 'no signal'})\n${tail(result.stdout)}\n${tail(result.stderr)}`,
     );
     assert.match(result.stdout, /AI_SURFACES_IDE_OK/, `extension host did not run the AI surfaces test\n${tail(result.stdout)}\n${tail(result.stderr)}`);
+    const report = JSON.parse(await readFile(reportPath, 'utf8'));
+    assert.deepEqual(report.userInstalledIds, [], `the throwaway profile must report no user-installed Copilot extension; saw ${report.userInstalledIds.join(', ')}`);
+    assert.equal(report.probeDetected, true, 'the positive control must prove the classifier detects a planted Copilot extension');
+    assert.equal(report.probeUserInstalled, true, 'the planted probe must be classified as user-installed');
+    assert.ok(report.probeIds.includes('GitHub.copilot-probe'), 'the probe report must include the planted id');
+    assert.equal(typeof report.extensionCount, 'number', 'the runner must report how many extensions the clean profile loaded');
   } finally {
     const temporaryRoot = path.resolve(os.tmpdir());
     const resolved = path.resolve(temporary);
