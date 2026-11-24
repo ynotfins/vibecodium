@@ -2,25 +2,48 @@
 
 const vscode = require('vscode');
 const { createGraphPanelController } = require('./graph-panel.cjs');
+const { createMemoryReviewController } = require('./memory-review.cjs');
 
 function activate(context) {
-  let current = null;
-  const controller = createGraphPanelController({
+  let currentGraph = null;
+  let currentStore = null;
+
+  const graph = createGraphPanelController({
     vscode,
     extensionUri: context.extensionUri,
-    graphProvider: () => current,
+    graphProvider: () => currentGraph,
   });
-  context.subscriptions.push(vscode.commands.registerCommand('vibecodium.graph.open', () => controller.open()));
+  const memory = createMemoryReviewController({
+    vscode,
+    extensionUri: context.extensionUri,
+    storeProvider: () => currentStore,
+  });
+
+  context.subscriptions.push(vscode.commands.registerCommand('vibecodium.graph.open', () => graph.open()));
   context.subscriptions.push(vscode.commands.registerCommand('vibecodium.graph.setData', (data) => {
-    current = data;
-    controller.setGraph(data);
+    currentGraph = data;
+    graph.setGraph(data);
   }));
+  function applyStore(store) {
+    if (!store || typeof store !== 'object') {
+      vscode.window.showWarningMessage('Vibe Memory: the supplied store is not valid.');
+      return undefined;
+    }
+    currentStore = store;
+    return memory.reload();
+  }
+
+  context.subscriptions.push(vscode.commands.registerCommand('vibecodium.memory.open', () => memory.open()));
+  context.subscriptions.push(vscode.commands.registerCommand('vibecodium.memory.setStore', applyStore));
+
   return {
-    open: () => controller.open(),
+    open: () => graph.open(),
     setGraph: (data) => {
-      current = data;
-      controller.setGraph(data);
+      currentGraph = data;
+      graph.setGraph(data);
     },
+    openMemory: () => memory.open(),
+    setStore: applyStore,
   };
 }
 

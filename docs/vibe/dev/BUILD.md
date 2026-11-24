@@ -54,7 +54,7 @@ node --test tests/vibe/context-engine.test.mjs
 
 The standalone memory store persists facts across sessions in two scopes. User memory is global at `<root>/user/memory.jsonl`; project memory is isolated at `<root>/projects/<sha256-of-projectId>/memory.jsonl`, so identifiers that differ only by case cannot collide on Windows. The store accepts JSON-safe values, serializes writes per scope within a store instance, and normally appends `put`, `review`, and `delete` events. Repeating a key writes a new `put` with the same id and the next `revision`.
 
-New and revised facts start as `pending`. `recall` returns approved facts only unless `includePending` is requested, in which case pending facts are included alongside approved facts; every returned entry carries `sourceTrust: untrusted-memory-content`. `review` defaults to the pending queue and can filter by `approved`, `rejected`, or `all`. `approve`, `reject`, and `forget` require the id and exact revision just reviewed; a stale revision is rejected rather than applying a decision to a newer value. A new key is rejected once 10,000 facts are live, while revisions of existing facts remain allowed. The review panel UI is not wired yet.
+New and revised facts start as `pending`. `recall` returns approved facts only unless `includePending` is requested, in which case pending facts are included alongside approved facts; every returned entry carries `sourceTrust: untrusted-memory-content`. `review` defaults to the pending queue and can filter by `approved`, `rejected`, or `all`. `approve`, `reject`, and `forget` require the id and exact revision just reviewed; a stale revision is rejected rather than applying a decision to a newer value. A new key is rejected once 10,000 facts are live, while revisions of existing facts remain allowed. The review panel core is in the built-in `vibecodium-ai` extension (see "Memory review panel core" below); the full in-IDE binding remains M6 integration work.
 
 The store enforces hard caps: 20,000,000 bytes per log, 256,000 bytes per event, 10,000 live entries, 32 levels of value nesting, 200 characters for keys and queries, 16,000 characters for string values, and at most 500 items per review or recall page (default 100). If the next event cannot fit, the store atomically compacts the log to one `put` per live fact, preserving ids, revisions, status, values, and timestamps, then appends the new event. Event history before such a compaction is intentionally discarded; live state and review and deletion semantics are preserved.
 
@@ -154,6 +154,20 @@ node --test src/stable/extensions/vibecodium-ai/src/extension-contract.test.cjs
 ```
 
 The actual extension build inside VS Code, a bundled in-IDE screenshot and the M6 IDE binding are separate integration work; nothing here starts an Electron build or adds a dependency.
+
+### Memory review panel core
+
+`src/stable/extensions/vibecodium-ai/src/memory-review.cjs` is the D3 review surface. It consumes a `MemoryStore.review()` page through `createMemoryReviewController` and registers `vibecodium.memory.open` and `vibecodium.memory.setStore` in the built-in extension. `MemoryReviewModel` validates the page field-by-field: known fields only, safe ids, the page scope on every item, pending/approved/rejected status, a positive revision, `untrusted-memory-content` as the only accepted trust marker, JSON-safe values with a bounded node count and depth, and a page that does not exceed its own total or the 500-item cap. The model exposes only a 2,000-character value preview plus kind, origin, timestamps and session id.
+
+The renderer uses a per-document CSP nonce and escapes every key, value preview and metadata string. Approve, reject and forget buttons carry the id and revision of the item that was rendered; the controller re-checks that revision against the current page before calling the store, so a fact revised in another session is refused as `stale-view` rather than decided at the wrong revision. The store's own revision check remains the final authority and its failure is reported as `revision-changed`. After an action the controller reloads the queue, so the panel never shows a decided fact as pending. Scope and status filters and paging are validated before they reach the store.
+
+```bash
+node --test tests/vibe/memory-review.test.mjs
+node --test tests/vibe/memory-review-extension.test.mjs
+node --test src/stable/extensions/vibecodium-ai/src/extension-contract.test.cjs
+```
+
+The tests use a fake `vscode` API and a real `MemoryStore` over a temporary root. They prove the pending queue, paging and filters, the approve-then-recall-in-a-new-session acceptance path, stale-revision refusal, forget, hostile text escaping, malformed pages, unsafe nonces and the extension manifest. The actual extension build inside VS Code and the M6 IDE binding are separate integration work; nothing here starts an Electron build or adds a dependency.
 
 ### Code index: local embeddings and hybrid retrieval
 

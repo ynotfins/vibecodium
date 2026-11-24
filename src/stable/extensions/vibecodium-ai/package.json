@@ -12,7 +12,9 @@
   "main": "./src/extension.cjs",
   "activationEvents": [
     "onCommand:vibecodium.graph.open",
-    "onCommand:vibecodium.graph.setData"
+    "onCommand:vibecodium.graph.setData",
+    "onCommand:vibecodium.memory.open",
+    "onCommand:vibecodium.memory.setStore"
   ],
   "contributes": {
     "commands": [
@@ -20,12 +22,20 @@
         "command": "vibecodium.graph.open",
         "title": "Open Graph Panel",
         "category": "Vibecodium"
+      },
+      {
+        "command": "vibecodium.memory.open",
+        "title": "Open Memory Review",
+        "category": "Vibecodium"
       }
     ],
     "menus": {
       "commandPalette": [
         {
           "command": "vibecodium.graph.open"
+        },
+        {
+          "command": "vibecodium.memory.open"
         }
       ]
     }
