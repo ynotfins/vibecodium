@@ -170,9 +170,10 @@ The renderer uses a per-document CSP nonce and escapes every key, value preview 
 node --test tests/vibe/memory-review.test.mjs
 node --test tests/vibe/memory-review-extension.test.mjs
 node --test src/stable/extensions/vibecodium-ai/src/extension-contract.test.cjs
+$env:VIBECODIUM_APP_PATH="$env:ProgramFiles\Microsoft VS Code\Code.exe"; node --test tests/vibe/memory-review-ide.test.mjs
 ```
 
-The tests use a fake `vscode` API and a real `MemoryStore` over a temporary root. They prove the pending queue, paging and filters, the approve-then-recall-in-a-new-session acceptance path, stale-revision refusal, forget, hostile text escaping, malformed pages, unsafe nonces and the extension manifest. The actual extension build inside VS Code and the M6 IDE binding are separate integration work; nothing here starts an Electron build or adds a dependency.
+The unit tests use a fake `vscode` API and a real `MemoryStore` over a temporary root. They prove the pending queue, paging and filters, the approve-then-recall-in-a-new-session acceptance path, stale-revision refusal, forget, hostile text escaping, malformed pages, unsafe nonces and the extension manifest. The acceptance test at `tests/vibe/memory-review-ide.test.mjs` starts a real extension host (the installed VS Code, because the built `Vibecodium.exe` cannot start under this host ACL), loads `vibecodium.vibecodium-ai`, connects a real `MemoryStore`, opens the panel, approves a pending fact at the rendered revision through the shared message handler, and recalls it from a new `MemoryStore` instance in a second session. Full in-IDE binding stays M6; nothing here starts an Electron build or adds a dependency.
 
 ### Code index: local embeddings and hybrid retrieval
 

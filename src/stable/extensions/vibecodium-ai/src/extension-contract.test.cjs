@@ -119,3 +119,21 @@ test('the extension exposes panel state and activates a node through the shared 
   assert.equal(api.getView().level, 'project');
   assert.doesNotThrow(() => api.dispose());
 });
+
+test('the extension exposes memory panel state and handles a review message through the shared path', async () => {
+  const loaded = loadWithFakeVscode();
+  const context = { subscriptions: [], extensionUri: { fsPath: 'x' } };
+  const api = loaded.activate(context);
+  await api.setStore(emptyStore);
+  const opened = await api.openMemory();
+  assert.equal(opened.opened, true);
+  const view = api.getMemoryView();
+  assert.equal(view.scope, 'project');
+  assert.equal(view.status, 'pending');
+  assert.match(api.getMemoryPanelHtml(), /Vibe Memory/);
+  const missing = await api.handleMemoryMessage({ type: 'action', action: 'approve', id: 'missing', revision: 1 });
+  assert.equal(missing.handled, true);
+  assert.equal(missing.ok, false);
+  assert.equal(missing.code, 'not-found');
+  assert.doesNotThrow(() => api.disposeMemory());
+});
