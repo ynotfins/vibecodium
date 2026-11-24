@@ -1139,6 +1139,10 @@ diff --git a/src/vs/workbench/contrib/chat/browser/chatSetup/chatSetupProviders.
 index 899c849d..6dd509f9 100644
 --- a/src/vs/workbench/contrib/chat/browser/chatSetup/chatSetupProviders.ts
 +++ b/src/vs/workbench/contrib/chat/browser/chatSetup/chatSetupProviders.ts
+@@ -110,2 +110,2 @@
+-			return SetupAgent.doRegisterAgent(instantiationService, chatAgentService, id, `${defaultChat.provider.default.name} Copilot` /* Do NOT change, this hides the username altogether in Chat */, true, description, location, mode, context, controller);
++			return SetupAgent.doRegisterAgent(instantiationService, chatAgentService, id, defaultChat.provider.default.name /* Do NOT change, this hides the username altogether in Chat */, true, description, location, mode, context, controller);
+ 		});
 @@ -120,3 +120,3 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
  			// Register VSCode agent
 -			const { disposable: vscodeDisposable } = SetupAgent.doRegisterAgent(instantiationService, chatAgentService, 'setup.vscode', 'vscode', false, localize2('vscodeAgentDescription', "Ask questions about VS Code").value, ChatAgentLocation.Chat, ChatModeKind.Agent, context, controller);
@@ -1151,6 +1155,10 @@ index 899c849d..6dd509f9 100644
 +				modelDescription: 'Scaffold a new workspace in !!APP_NAME!!',
 +				userDescription: localize('setupToolsDescription', "Scaffold a new workspace in !!APP_NAME!!"),
  				canBeReferencedInPrompt: true,
+@@ -178,2 +178,2 @@
+-	private static readonly SETUP_NEEDED_MESSAGE = new MarkdownString(localize('settingUpCopilotNeeded', "You need to set up GitHub Copilot and be signed in to use Chat."));
++	private static readonly SETUP_NEEDED_MESSAGE = new MarkdownString(localize('settingUpCopilotNeeded', "You need to set up a model provider to use Chat."));
+ 	private static readonly TRUST_NEEDED_MESSAGE = new MarkdownString(localize('trustNeeded', "You need to trust this workspace to use Chat."));
 diff --git a/src/vs/workbench/contrib/chat/common/promptSyntax/languageProviders/promptValidator.ts b/src/vs/workbench/contrib/chat/common/promptSyntax/languageProviders/promptValidator.ts
 index a80feca3..b90ac72a 100644
 --- a/src/vs/workbench/contrib/chat/common/promptSyntax/languageProviders/promptValidator.ts
