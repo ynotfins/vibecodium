@@ -5,7 +5,7 @@
 Goal state: active
 Owner priorities (2026-11-20): alongside M0/M1, begin the standalone engine packages (Vibe Context Engine, multi-project indexer/graph) - they are testable without the IDE build. Build-dependent work continues now that the MSVC Spectre component is installed. Milestone numbering is unchanged.
 
-Current milestone: M1 (in progress, A2 delivered, endpoint audit delivered); M0 build evidence remains owner-parked
+Current milestone: M1 (in progress, A2 delivered); M0 build evidence remains owner-parked
 
 ## Task log
 
