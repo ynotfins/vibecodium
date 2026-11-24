@@ -1,6 +1,6 @@
 # Vibecodium Status
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-23
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-24
 
 Goal state: active
 Owner priorities (2026-11-20): alongside M0/M1, begin the standalone engine packages (Vibe Context Engine, multi-project indexer/graph) - they are testable without the IDE build. Build-dependent work continues now that the MSVC Spectre component is installed. Milestone numbering is unchanged.
@@ -10,6 +10,20 @@ Current milestone: M0 and M5 (in progress)
 ## Task log
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
+
+### 2026-11-24 - M5 Understand-Anything semantic/visual projection
+
+- Goal / must-haves: deliver the M5 Understand-Anything integration as a read-only semantic and visual projection of the validated cross-project graph, plus the license and integration decision record. The graph engine stays the only owner of cross-project edges. Must-have IDs: C3, C4.
+- Files allowed: `src/stable/index-engine/understand-projection.mjs`, `tests/vibe/understand-projection.test.mjs`, `docs/vibe/spikes/understand-anything.md`, `docs/vibe/README.md`, `docs/vibe/CHANGELOG.md`, `docs/vibe/ROADMAP.md`, `docs/vibe/STATUS.md`, `docs/vibe/TECH_RADAR.md`, `docs/vibe/dev/BUILD.md`.
+- Files forbidden: upstream source, hook patches, new dependencies or vendored binaries, index-engine store or index format changes, graph authority changes, graph panel, memory or context store behaviour, build scripts, CI workflows, release infrastructure, locked docs.
+- Acceptance commands: `node --test tests/vibe/understand-projection.test.mjs`, `node vibe/tools/verify.mjs`.
+- Acceptance test: project the two-project API and web fixture graph into an Understand-Anything `knowledge-graph.json`; assert the project -> module `contains` edge, symbol `filePath`, the route-to-caller edge, all ten graph edge types, deterministic output with a fixed `analyzedAt`, no source text, environment values or request URLs, `sourceTrust` on the graph, every node and every edge, and that the result passes the documented Understand-Anything inline-validator rules.
+- Out of scope: running the Understand-Anything agent, its dashboard, LLM summaries, docs-mcp, the M6 live workspace binding, and any new dependency.
+- Delivered: added `src/stable/index-engine/understand-projection.mjs`. `projectToUnderstandGraph()` re-expresses an already validated `CrossProjectGraph` snapshot as an Understand-Anything `knowledge-graph.json` 1.0.0 document (nodes, edges, layers and tour), and `validateUnderstandGraph()` implements the documented inline checks. The mapping covers all ten graph edge types, keeps the project -> module `contains` edge, symbol `filePath` and route-to-caller `calls` edge, and copies identifiers, names, project-relative paths, route patterns, environment-variable names, ports, table names, MCP tool names and container image names only; it emits no source text, environment values or request URLs. Output is deterministic with a fixed `analyzedAt`, and `sourceTrust: 'untrusted-repository-content'` is forced on the graph and on every node and edge. The graph engine remains the only edge authority; no upstream file was vendored and no dependency was added. Added `tests/vibe/understand-projection.test.mjs` (two-project API/web fixture, determinism, leakage boundary, validator rejection and hostile-label cases) and `docs/vibe/spikes/understand-anything.md` (MIT license, observed v2.9.8, node/edge mapping and review trigger). The living docs were reconciled in `docs/vibe/README.md`, `CHANGELOG.md`, `ROADMAP.md` and `TECH_RADAR.md`.
+- Tests: `node --test tests/vibe/understand-projection.test.mjs` PASS (5/5); `node vibe/tools/verify.mjs` PASS (4/4 steps, 303 tests: 296 pass, 7 Windows skips, 0 fail); `node vibe/tools/docs-check.mjs --strict` PASS (0 errors, 0 warnings); `node vibe/tools/governance.mjs status` 13/13 locks ok; `git diff --check` clean.
+- Guardians: qa-verifier PASS (fresh independent QA: targeted acceptance 5/5 and full verify 303 tests, 296 pass, 7 Windows skips, 0 fail); drift-sentinel PASS; security-reviewer PASS; governance-verifier PASS (not applicable; 13/13 locks); tech-scout PASS (not applicable); release-manager PASS (not applicable); docs-keeper PASS.
+- Branch/PR: `vibe/m5/understand-projection` -> PR #43 into `vibe/main`.
+- Next: finish M5 by implementing docs-mcp, then run the M5 milestone exit and the release-manager check. M6 live workspace/index binding, the Understand-Anything agent and dashboard, LLM summaries, and a rebuilt-app screenshot remain later or out of scope for this slice. M0 remains in progress and M1 follows it.
 
 ### 2026-11-23 - M5 D3 memory review panel in-IDE acceptance
 

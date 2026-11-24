@@ -1,6 +1,6 @@
 # Vibecodium Technology Radar
 
-> Doc class: living · Owner: tech-scout · Last reviewed: 2026-11-23
+> Doc class: living · Owner: tech-scout · Last reviewed: 2026-11-24
 
 Maintained by the `tech-scout` sub-agent. Every component the product ships or the build depends on has one row. A row is reviewed by its "Next review" date, at every milestone start, and whenever its component changes. The docs check warns on overdue rows; a new dependency without a row fails the drift check.
 
@@ -24,7 +24,7 @@ Rings: `adopt` (in use, keep), `trial` (in use, under evaluation), `assess` (wat
 | Semantic index interchange | SCIP (Apache-2.0) | not yet used | protocol and indexer ecosystem active on 2026-11-23 | 2026-11-23 | Language-specific LSP exports | assess | 2026-12-07 |
 | Cross-project edge authority | Vibecodium Graph Engine + SQLite typed edge tables | not yet used | Architecture decision current | 2026-11-23 | Tentra, Depwire, Understand Anything, and codebase-analyzer as evidence feeds | adopt | 2026-12-07 |
 | Code graph reference | code-review-graph (MIT) | not used | multi-repo registry + daemon (docs, 2026-11-20) | 2026-11-20 | Understand-Anything, Serena | assess | 2026-11-27 |
-| Semantic / visual graph | Understand-Anything (MIT) | installed on workstation | v2.9.8 (2026-11-15) | 2026-11-23 | CodeGraphContext, code-graph-rag; SCIP as symbol/reference feed | adopt | 2026-12-07 |
+| Semantic / visual graph | Understand-Anything (MIT) | `knowledge-graph.json` 1.0.0 projection in `src/stable/index-engine/understand-projection.mjs` (upstream agent not vendored) | v2.9.8 (2026-11-15) | 2026-11-24 | CodeGraphContext, code-graph-rag; SCIP as symbol/reference feed | adopt | 2026-12-07 |
 | Vector-core challenger | USearch (Apache-2.0) | not used | v2.26.6 (2026-10-25) | 2026-11-23 | LanceDB embedded vector index | assess | 2026-12-07 |
 | Local model runtime | llama.cpp `llama-server` | not yet bundled | carried | 2026-11-08 carried | Ollama, LocalAI | adopt | 2026-11-27 |
 | Sandbox | anthropics/sandbox-runtime | not yet used | carried | 2026-11-08 carried | devcontainers, microsandbox | adopt | 2026-11-27 |
