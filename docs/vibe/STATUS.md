@@ -24,8 +24,8 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 - Tests: `node --test tests/vibe/ai-endpoint-policy.test.mjs` PASS (26/26); `node vibe/tools/verify.mjs --strict` PASS (4/4 steps, 363 tests: 355 pass, 8 Windows skips, 0 fail); `node vibe/tools/docs-check.mjs --strict` PASS (0 errors, 0 warnings); `git diff --check` clean; `node vibe/tools/governance.mjs status` 13/13 locks ok. The summary-pollution regression failed before the fallback fix and passed after it.
 - Guardians: qa-verifier PASS (26/26 focused; verify --strict 363 tests, 355 pass, 8 Windows skips, 0 fail; docs 0/0). drift-sentinel PASS after one medium finding: `describeAIEndpointPolicy()` fell back to `{}` and could reflect an inherited switch from an invalid bag; the null-prototype fallback and regression fixed it, and the final tree has no high drift. security-reviewer PASS on the final narrowed option-handling review; two earlier full-context attempts and the default fallback stalled at the provider and were shut down without a verdict. docs-keeper PASS (docs-check --strict 0/0; no living-doc correction needed; no locked doc touched). governance-verifier PASS as not applicable (13/13 locks; no locked path or governance record changed; no secret in the diff). tech-scout PASS as not applicable (Node built-ins only; no dependency, binary or radar change). release-manager PASS as not applicable (not a milestone exit or release build; no artifact, version or publication change).
 - Next step: M2 wires `evaluateAIEndpointRequest` into the Bifrost fetch boundary and M6 into the agent host.
-- Branch/PR: `vibe/m1/endpoint-options-hardening` -> follow-up PR into `vibe/main`.
-- Status: in progress.
+- Branch/PR: `vibe/m1/endpoint-options-hardening` -> PR #48 into `vibe/main`.
+- Status: done.
 
 ### 2026-11-24 - M1 endpoint audit landing on the A2 trunk
 
