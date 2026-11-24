@@ -93,6 +93,12 @@ test('the built-in extension activates and registers graph and memory commands',
   assert.equal(loaded.panels.length, 1);
   assert.match(loaded.panels[0].webview.html, /editor\.tabs/);
   assert.match(loaded.panels[0].webview.html, /data-action="approve"/);
+  assert.equal(typeof api.getMemoryView, 'function');
+  assert.equal(typeof api.getMemoryPanelHtml, 'function');
+  assert.equal(typeof api.handleMemoryMessage, 'function');
+  assert.equal(typeof api.disposeMemory, 'function');
+  assert.equal(api.getMemoryView().total, 1);
+  assert.match(api.getMemoryPanelHtml(), /editor\.tabs/);
 
   const page = await store.review({ scope: 'project' });
   const item = page.items[0];

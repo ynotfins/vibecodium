@@ -632,11 +632,15 @@ function createMemoryReviewController(input = {}) {
     return model ? model.view() : null;
   }
 
+  function html() {
+    return panel ? panel.webview.html : null;
+  }
+
   function dispose() {
     if (panel) panel.dispose();
   }
 
-  return { open, reload, handleMessage: handle, view, dispose };
+  return { open, reload, handleMessage: handle, view, html, dispose };
 }
 
 module.exports = {

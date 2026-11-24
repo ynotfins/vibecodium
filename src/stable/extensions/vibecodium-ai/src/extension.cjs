@@ -48,6 +48,10 @@ function activate(context) {
     dispose: () => graph.dispose(),
     openMemory: () => memory.open(),
     setStore: applyStore,
+    getMemoryView: () => memory.view(),
+    getMemoryPanelHtml: () => memory.html(),
+    handleMemoryMessage: (message) => memory.handleMessage(message),
+    disposeMemory: () => memory.dispose(),
   };
 }
 
