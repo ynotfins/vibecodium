@@ -75,3 +75,20 @@ test('the extension manifest exposes the graph command and entry point', () => {
   assert.ok(manifest.activationEvents.includes('onCommand:vibecodium.graph.open'));
   assert.ok(manifest.activationEvents.includes('onCommand:vibecodium.graph.setData'));
 });
+
+test('the extension exposes rendered panel state and the shared node activation path', async () => {
+  const loaded = loadExtension();
+  const context = { subscriptions: [], extensionUri: { fsPath: 'extension' } };
+  const api = loaded.api.activate(context);
+  api.setGraph({
+    projects: [{ id: 'api' }],
+    nodes: [{ id: 'project:api', type: 'project', project: 'api' }],
+    edges: [],
+  });
+  api.open();
+  assert.equal(api.getView().level, 'workspace');
+  assert.match(api.getPanelHtml(), /data-node-id="project:api"/);
+  const result = await api.activateNode('project:api');
+  assert.equal(result.kind, 'zoom');
+  assert.equal(api.getView().level, 'project');
+});

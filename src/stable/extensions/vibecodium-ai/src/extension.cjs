@@ -42,6 +42,10 @@ function activate(context) {
       currentGraph = data;
       graph.setGraph(data);
     },
+    getView: () => graph.view(),
+    getPanelHtml: () => graph.html(),
+    activateNode: (nodeId) => graph.activate(nodeId),
+    dispose: () => graph.dispose(),
     openMemory: () => memory.open(),
     setStore: applyStore,
   };

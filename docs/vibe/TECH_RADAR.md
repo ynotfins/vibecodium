@@ -12,7 +12,7 @@ Rings: `adopt` (in use, keep), `trial` (in use, under evaluation), `assess` (wat
 |---|---|---|---|---|---|---|---|
 | Editor base | VSCodium build scripts (fork `ynotfins/vibecodium`) | 1.143.17232 (`upstream/stable.json` 1.143.1) | 1.143.17232 | 2026-11-20 | VS Code upstream directly; Theia (EPL-2.0) | adopt | 2026-11-27 |
 | Upstream editor | microsoft/vscode | 1.143.1 | 1.147.0 | 2026-11-20 | 1.147.0 is two days old; defer adoption until at least 2026-11-25 | adopt | 2026-11-25 |
-| Build Node.js | Node per `.nvmrc` | 24.18.0 | 24.18.0 | 2026-11-20 | — | adopt | 2026-11-27 |
+| Build Node.js | Node per `.nvmrc` | 24.18.0 | 24.22.3 (published 2026-11-10) | 2026-11-23 | Node 26.13.1 LTS (Lithium, 2026-11-10) - major bump, not adopted | adopt | 2026-11-27 |
 | Agent harness | OpenCode via ACP | 1.19.5 (workstation CLI) | 1.19.5 (carried) | 2026-11-08 carried | Goose (Apache-2.0), Cline (Apache-2.0), Kilo Code runtime | adopt | 2026-11-27 |
 | Gateway / router / MCP gateway | Bifrost | not yet bundled | transports v2.6.0 (2026-11-19) | 2026-11-20 | OmniRoute (MIT), LiteLLM, Portkey (stale) | adopt | 2026-11-27 |
 | Optional upstream router | OmniRoute | 3.8.53 (workstation) | active daily (2026-11-20) | 2026-11-20 | Bifrost routing rules | trial | 2026-11-27 |
