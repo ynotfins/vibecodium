@@ -5,7 +5,7 @@
 Goal state: active
 Owner priorities (2026-11-20): alongside M0/M1, begin the standalone engine packages (Vibe Context Engine, multi-project indexer/graph) - they are testable without the IDE build. Build-dependent work continues now that the MSVC Spectre component is installed. Milestone numbering is unchanged.
 
-Current milestone: M1 (in progress, A2 delivered); M0 build evidence remains owner-parked
+Current milestone: M1 (in progress, A2 delivered, endpoint audit delivered); M0 build evidence remains owner-parked
 
 ## Task log
 
@@ -44,6 +44,22 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 - Status: done.
 - Next step: model and provider wiring plus Bifrost (M2); the Microsoft-endpoint audit/stubs and the weekly upstream-compat compile job remain open in M1; the rebuilt-app smoke remains M12. The goal stays active and M1 is not complete.
 - Branch: `vibe/m1/ai-surfaces` -> PR into `vibe/main`.
+
+### 2026-11-24 - M1 Microsoft endpoint audit and deny-by-default AI policy core
+
+- Goal / must-haves: deliver the M1 Microsoft-endpoint audit as a read-only inventory of the Microsoft, GitHub Copilot, telemetry, model-catalog and update hosts reachable from the pinned upstream AI services, plus a dependency-free deny-by-default decision core that later Bifrost (M2) and agent-host (M6) callers can enforce. Advances A2; no Copilot traffic is enabled by this slice.
+- Must-have IDs: A2 (endpoint-audit prerequisite).
+- Files allowed: `src/stable/security/ai-endpoint-policy.mjs`, `tests/vibe/ai-endpoint-policy.test.mjs`, `docs/vibe/design/m1-endpoint-audit.md`, `docs/vibe/README.md`, `docs/vibe/CHANGELOG.md`, `docs/vibe/ROADMAP.md`, `docs/vibe/STATUS.md`, `docs/vibe/SECURITY.md`.
+- Files forbidden: upstream source and patches, IDE or extension code, new dependencies or vendored binaries, build scripts, CI workflows, release infrastructure, locked docs.
+- Acceptance commands: `node --test tests/vibe/ai-endpoint-policy.test.mjs`, `node vibe/tools/verify.mjs`, `node vibe/tools/docs-check.mjs --strict`.
+- Acceptance test: the inventory names each confirmed host and validates field by field; classification maps CAPI, Copilot telemetry, 1DS, Azure ML, the upstream update feed, GitHub API/content, external providers and documentation; loopback and private-LAN model servers are allowed by default; every remote family is denied until its exact switch, host or host+path allow is set; credential URLs, non-HTTP schemes, control/bidi characters and invalid options fail closed; redaction and errors never echo a secret.
+- Out of scope: live traffic interception or patches that stub the upstream fetch calls (M2/Bifrost and M6 wiring), enabling the native AI surfaces, the weekly upstream-compile CI job (blocked by the parked `workflow` token scope), A2 acceptance on a running branded build (the built app cannot start under this host ACL), provider presets, and any reuse of Copilot endpoints.
+- Delivered: `src/stable/security/ai-endpoint-policy.mjs` v1.1.2: a dependency-free, 32-entry audit inventory and a deny-by-default decision core. Local loopback, private-LAN, mDNS and on-device model servers are allowed by default; every remote family (GitHub Copilot CAPI, Copilot and Microsoft telemetry, Azure ML model catalog, the upstream update feed, GitHub API/content, external providers and documentation) is denied until a caller opts in by category, exact host or host+path. Enumerated metadata hostnames/addresses and the IPv4/IPv6 link-local ranges are hard-denied before any switch; `.local`/`.localhost` aliases are re-checked against the same set; the whole local-use NAT64 `/48` and metadata addresses embedded in the well-known NAT64 `/96` are hard-denied; credential URLs, non-HTTP schemes, control/bidi characters, punycode and invalid options fail closed; redaction and errors never echo a secret. `docs/vibe/design/m1-endpoint-audit.md` records the audit and its honest boundaries (no live interception until M2/M6; the inventory is the 32 confirmed hosts, not an exhaustiveness proof).
+- Tests: `node --test tests/vibe/ai-endpoint-policy.test.mjs` PASS (19/19, including the `.local` metadata-alias regression); `node vibe/tools/verify.mjs` PASS (4/4 steps; 336 tests: 329 pass, 7 Windows skips, 0 fail); `node vibe/tools/docs-check.mjs --strict` PASS (0 errors, 0 warnings).
+- Guardians: qa-verifier PASS on the final code; drift-sentinel PASS after two doc-claim corrections; security-reviewer PASS after it caught and we fixed the `.local` hard-deny bypass (the review began as FAIL); docs-keeper PASS (docs-check 0/0, SECURITY last-reviewed date refreshed); governance-verifier N/A (no locked path; 13/13 locks OK); tech-scout N/A (no dependency change); release-manager N/A (not a milestone exit).
+- Next step: M2 wires `evaluateAIEndpointRequest` into the Bifrost fetch boundary and M6 into the agent host; re-run this audit when upstream adds an AI endpoint or the weekly upstream-compile job (M11) resumes.
+- Branch: `vibe/m1/endpoint-audit` -> PR into `vibe/main`.
+- Status: done.
 
 ### 2026-11-24 - M5 milestone exit
 
@@ -568,20 +584,3 @@ Newest first. One entry per task slice, written by `vibe-overseer` after the aft
 | Upstream base | Stay on VSCodium's cadence or move ahead to newer VS Code | Stay on VSCodium's cadence |
 | Loop-wide: GitHub `workflow` token scope and Git HTTPS transport | The loop's GitHub token lacks `workflow` scope, so any branch that edits `.github/workflows/*` is rejected on push ("refusing to allow a Personal Access Token to create or update workflow ... without `workflow` scope"). The completed M0 Windows CI parity slice is committed locally on `vibe/m0/ci-parity` but cannot be pushed as a PR; direct Git HTTPS also fails with Schannel `SEC_E_NO_CREDENTIALS` (the GitHub API and Node fetch work). | Owner supplies a repository-scoped token with Workflows read/write (or adds `workflow` to the classic PAT) and fixes the Git credential/TLS transport; no workflow change is merged until then. |
 | Insider publish repository | The upstream insider publish workflows target `${repository}-insiders` (`ynotfins/vibecodium-insiders`), which does not exist; creating it is a public-repository business decision | Local `-i` builds target the same branded name, but nothing is published; wire or create it in M12 |
-
-### 2026-11-24 - M1 Microsoft endpoint audit and deny-by-default AI policy core
-
-- Goal / must-haves: deliver the M1 Microsoft-endpoint audit as a read-only inventory of the Microsoft, GitHub Copilot, telemetry, model-catalog and update hosts reachable from the pinned upstream AI services, plus a dependency-free deny-by-default decision core that later Bifrost (M2) and agent-host (M6) callers can enforce. Advances A2; no Copilot traffic is enabled by this slice.
-- Must-have IDs: A2 (endpoint-audit prerequisite).
-- Files allowed: `src/stable/security/ai-endpoint-policy.mjs`, `tests/vibe/ai-endpoint-policy.test.mjs`, `docs/vibe/design/m1-endpoint-audit.md`, `docs/vibe/README.md`, `docs/vibe/CHANGELOG.md`, `docs/vibe/ROADMAP.md`, `docs/vibe/STATUS.md`, `docs/vibe/SECURITY.md`.
-- Files forbidden: upstream source and patches, IDE or extension code, new dependencies or vendored binaries, build scripts, CI workflows, release infrastructure, locked docs.
-- Acceptance commands: `node --test tests/vibe/ai-endpoint-policy.test.mjs`, `node vibe/tools/verify.mjs`, `node vibe/tools/docs-check.mjs --strict`.
-- Acceptance test: the inventory names each confirmed host and validates field by field; classification maps CAPI, Copilot telemetry, 1DS, Azure ML, the upstream update feed, GitHub API/content, external providers and documentation; loopback and private-LAN model servers are allowed by default; every remote family is denied until its exact switch, host or host+path allow is set; credential URLs, non-HTTP schemes, control/bidi characters and invalid options fail closed; redaction and errors never echo a secret.
-- Out of scope: live traffic interception or patches that stub the upstream fetch calls (M2/Bifrost and M6 wiring), enabling the native AI surfaces, the weekly upstream-compile CI job (blocked by the parked `workflow` token scope), A2 acceptance on a running branded build (the built app cannot start under this host ACL), provider presets, and any reuse of Copilot endpoints.
-- Delivered: `src/stable/security/ai-endpoint-policy.mjs` v1.1.2: a dependency-free, 32-entry audit inventory and a deny-by-default decision core. Local loopback, private-LAN, mDNS and on-device model servers are allowed by default; every remote family (GitHub Copilot CAPI, Copilot and Microsoft telemetry, Azure ML model catalog, the upstream update feed, GitHub API/content, external providers and documentation) is denied until a caller opts in by category, exact host or host+path. Enumerated metadata hostnames/addresses and the IPv4/IPv6 link-local ranges are hard-denied before any switch; `.local`/`.localhost` aliases are re-checked against the same set; the whole local-use NAT64 `/48` and metadata addresses embedded in the well-known NAT64 `/96` are hard-denied; credential URLs, non-HTTP schemes, control/bidi characters, punycode and invalid options fail closed; redaction and errors never echo a secret. `docs/vibe/design/m1-endpoint-audit.md` records the audit and its honest boundaries (no live interception until M2/M6; the inventory is the 32 confirmed hosts, not an exhaustiveness proof).
-- Tests: `node --test tests/vibe/ai-endpoint-policy.test.mjs` PASS (19/19, including the `.local` metadata-alias regression); `node vibe/tools/verify.mjs` PASS (4/4 steps; 336 tests: 329 pass, 7 Windows skips, 0 fail); `node vibe/tools/docs-check.mjs --strict` PASS (0 errors, 0 warnings).
-- Guardians: qa-verifier PASS on the final code; drift-sentinel PASS after two doc-claim corrections; security-reviewer PASS after it caught and we fixed the `.local` hard-deny bypass (the review began as FAIL); docs-keeper PASS (docs-check 0/0, SECURITY last-reviewed date refreshed); governance-verifier N/A (no locked path; 13/13 locks OK); tech-scout N/A (no dependency change); release-manager N/A (not a milestone exit).
-- Next step: M2 wires `evaluateAIEndpointRequest` into the Bifrost fetch boundary and M6 into the agent host; re-run this audit when upstream adds an AI endpoint or the weekly upstream-compile job (M11) resumes.
-- Branch: `vibe/m1/endpoint-audit` -> PR into `vibe/main`.
-- Status: done.
-
