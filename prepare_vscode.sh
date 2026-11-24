@@ -124,6 +124,11 @@ jsonTmp=$( jq -s '.[0] * .[1]' product.json ../product.json )
 echo "${jsonTmp}" > product.json && unset jsonTmp
 
 cat product.json
+
+# Enable the native AI surfaces without GitHub Copilot: replace the upstream
+# Copilot default chat agent, remove Copilot from trusted auth/proposal lists
+# and keep runtime endpoints away from GitHub. See docs/vibe/design/m1-ai-surfaces.md.
+node ../vibe/tools/apply-ai-surfaces.mjs --product product.json
 # }}}
 
 # include common functions
