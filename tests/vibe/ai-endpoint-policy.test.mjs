@@ -427,6 +427,124 @@ test('invalid option types fail closed with a stable code', () => {
   }
 });
 
+test('options with accessors are rejected without running them', () => {
+  let invoked = false;
+  const options = {};
+  Object.defineProperty(options, 'allowUnknownHosts', {
+    enumerable: true,
+    get() {
+      invoked = true;
+      return true;
+    },
+  });
+  const decision = evaluateAIEndpointRequest('https://example.test/v1', options);
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.code, 'invalid-options');
+  assert.equal(invoked, false);
+});
+
+test('option bags whose structure throws fail closed', () => {
+  const throwingPrototype = new Proxy({}, {
+    getPrototypeOf() {
+      throw new Error('prototype trap');
+    },
+  });
+  const throwingKeys = new Proxy({}, {
+    ownKeys() {
+      throw new Error('keys trap');
+    },
+  });
+  let descriptorReads = 0;
+  const throwingDescriptor = new Proxy({}, {
+    ownKeys() {
+      return ['allowUnknownHosts'];
+    },
+    getOwnPropertyDescriptor() {
+      descriptorReads += 1;
+      if (descriptorReads > 1) throw new Error('descriptor trap');
+      return { configurable: true, enumerable: true, value: true, writable: true };
+    },
+    get() {
+      return true;
+    },
+  });
+  const revocable = Proxy.revocable({}, {});
+  revocable.revoke();
+  for (const options of [throwingPrototype, throwingKeys, throwingDescriptor, revocable.proxy]) {
+    const decision = evaluateAIEndpointRequest('https://example.test/v1', options);
+    assert.equal(decision.allowed, false);
+    assert.equal(decision.code, 'invalid-options');
+  }
+});
+
+
+test('nested array option values fail closed without running accessors', () => {
+  let indexGetterRan = false;
+  const accessorArray = [];
+  accessorArray.length = 1;
+  Object.defineProperty(accessorArray, '0', {
+    enumerable: true,
+    get() {
+      indexGetterRan = true;
+      return 'example.test';
+    },
+  });
+  const revocable = Proxy.revocable([], {});
+  revocable.revoke();
+  const holey = [];
+  holey.length = 1;
+  const throwingLength = new Proxy([], {
+    getOwnPropertyDescriptor(target, key) {
+      if (key === 'length') throw new Error('length descriptor trap');
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    },
+  });
+  const throwingIndex = new Proxy(['example.test'], {
+    getOwnPropertyDescriptor(target, key) {
+      if (key === '0') throw new Error('index descriptor trap');
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    },
+  });
+  for (const value of [accessorArray, revocable.proxy, holey, throwingLength, throwingIndex]) {
+    const decision = evaluateAIEndpointRequest('https://example.test/v1', { allowHosts: value });
+    assert.equal(decision.allowed, false);
+    assert.equal(decision.code, 'invalid-options');
+  }
+  assert.equal(indexGetterRan, false);
+});
+
+test('array option values never run a custom iterator', () => {
+  let iteratorRan = false;
+  const values = ['example.test'];
+  values[Symbol.iterator] = () => {
+    iteratorRan = true;
+    throw new Error('iterator trap');
+  };
+  const decision = evaluateAIEndpointRequest('https://example.test/v1', { allowHosts: values });
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.code, 'host-allowed');
+  assert.equal(iteratorRan, false);
+});
+
+test('a null-prototype option bag is accepted', () => {
+  const options = Object.create(null);
+  options.allowUnknownHosts = true;
+  const decision = evaluateAIEndpointRequest('https://example.test/v1', options);
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.code, 'category-allowed');
+});
+
+test('Object.prototype pollution cannot flip a deny-by-default switch', () => {
+  Object.prototype.allowUnknownHosts = true;
+  try {
+    const decision = evaluateAIEndpointRequest('https://example.test/v1');
+    assert.equal(decision.allowed, false);
+    assert.equal(decision.code, 'denied-by-default');
+  } finally {
+    delete Object.prototype.allowUnknownHosts;
+  }
+});
+
 test('describeAIEndpointPolicy is serializable, secret-free and reports the defaults', () => {
   const summary = describeAIEndpointPolicy();
   assert.equal(summary.version, AI_ENDPOINT_POLICY_VERSION);
@@ -438,4 +556,16 @@ test('describeAIEndpointPolicy is serializable, secret-free and reports the defa
   const allowed = describeAIEndpointPolicy({ allowCopilotApi: true, allowHosts: ['example.com'] });
   assert.equal(allowed.options.allowCopilotApi, true);
   assert.deepEqual(allowed.options.allowHosts, ['example.com']);
+});
+
+test('describeAIEndpointPolicy never reports an inherited switch from an invalid bag', () => {
+  Object.prototype.allowCopilotApi = true;
+  try {
+    const summary = describeAIEndpointPolicy({ allowCopilotApi: 'yes' });
+    assert.equal(summary.options.allowCopilotApi, false);
+    assert.deepEqual(summary.options.allowHosts, []);
+    assert.deepEqual(summary.options.allowEndpoints, []);
+  } finally {
+    delete Object.prototype.allowCopilotApi;
+  }
 });

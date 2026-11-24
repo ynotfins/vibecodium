@@ -1,6 +1,6 @@
 # M1 Microsoft endpoint audit and deny-by-default AI policy
 
-> Doc class: living · Owner: security-reviewer · Last reviewed: 2026-11-24
+> Doc class: living - Owner: security-reviewer - Last reviewed: 2026-11-24
 >
 > Audit of the outbound endpoints reachable from the pinned upstream AI services in the scanned
 > directories, and the decision core that keeps Vibecodium traffic off Microsoft and GitHub Copilot endpoints unless a
@@ -8,7 +8,7 @@
 > [ai-endpoint-policy.mjs](../../../src/stable/security/ai-endpoint-policy.mjs); the acceptance
 > test is [ai-endpoint-policy.test.mjs](../../../tests/vibe/ai-endpoint-policy.test.mjs).
 >
-> Decision-core version: `1.1.2` (`AI_ENDPOINT_POLICY_VERSION`).
+> Decision-core version: `1.1.4` (`AI_ENDPOINT_POLICY_VERSION`).
 
 ## Scope and method
 
@@ -80,10 +80,17 @@ by default; only these explicitly opt in:
    an exact host allow also permits non-default ports, so a caller that needs port scoping must
    check the decision's `port` itself.
 - Credential-bearing URLs, non-HTTP schemes, control/bidi/zero-width characters (raw or
-   percent-encoded in the path), oversize URLs, punycode hosts and invalid option types fail closed
-   with a stable code, and repeated percent-encoding is decoded up to three times to catch
-   double-encoded separators and dot segments. IPv4/IPv6 link-local ranges and the enumerated cloud-metadata
-   hostnames and addresses are hard-denied as `forbidden-endpoint`, before any switch or allow list is consulted.
+   percent-encoded in the path), oversize URLs, punycode hosts, adversarial option bags and invalid
+   option types fail closed with a stable code. An option bag with an accessor is rejected without
+   invoking it. Proxy traps can run during structural inspection; any trap failure or revoked proxy
+   fails closed as `invalid-options`, and a null-prototype bag is accepted. Accepted values are
+   copied into a null-prototype map, so `Object.prototype` pollution cannot supply a switch value,
+   and `describeAIEndpointPolicy()` uses the same deny-safe fallback. String arrays are read through
+   own data descriptors only: accessor indices, holes, throwing descriptors and revoked arrays are
+   `invalid-options`, and a custom `Symbol.iterator` is never invoked. Repeated percent-encoding is
+   decoded up to three times to catch double-encoded separators and dot segments. IPv4/IPv6
+   link-local ranges and the enumerated cloud-metadata hostnames and addresses are hard-denied as
+   `forbidden-endpoint`, before any switch or allow list is consulted.
    The metadata check also covers IPv4-embedded IPv6 wrappers (IPv4-compatible, IPv4-translated,
    the well-known and local-use NAT64 prefixes and 6to4) and IPv4 shorthand forms the URL parser
    accepts; an mDNS `.local`/`.localhost` suffix is stripped before the metadata check;
@@ -108,7 +115,7 @@ by default; only these explicitly opt in:
    embedding length cannot be checked reliably without a translator). Other well-known NAT64
    addresses stay ordinary `unknown` hosts: denied by default and reachable only through an explicit
    caller opt-in (`allowUnknownHosts`, or an exact host or host+path allow). The local-use `/48` cannot be enabled at all.
-- The audit covers tagged upstream `1.143.1`. The weekly upstream-compile job (M11) and M6
+- The audit covers tagged upstream `1.143.1`. The weekly upstream-compile job (M1) and M6
    re-audits must re-run this inventory when upstream adds an AI endpoint.
 
 ## Verify
