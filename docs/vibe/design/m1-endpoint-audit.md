@@ -82,13 +82,15 @@ by default; only these explicitly opt in:
 - Credential-bearing URLs, non-HTTP schemes, control/bidi/zero-width characters (raw or
    percent-encoded in the path), oversize URLs, punycode hosts, adversarial option bags and invalid
    option types fail closed with a stable code. An option bag with an accessor is rejected without
-   invoking it, a throwing proxy trap or revoked proxy is rejected as `invalid-options`, and a
-   null-prototype bag is accepted. Accepted values are copied into a null-prototype map, so
-   `Object.prototype` pollution cannot supply a switch value, and `describeAIEndpointPolicy()` uses the same deny-safe fallback. String arrays are read through own
-   data descriptors only: accessor indices, holes, throwing descriptors and revoked arrays are
+   invoking it. Proxy traps can run during structural inspection; any trap failure or revoked proxy
+   fails closed as `invalid-options`, and a null-prototype bag is accepted. Accepted values are
+   copied into a null-prototype map, so `Object.prototype` pollution cannot supply a switch value,
+   and `describeAIEndpointPolicy()` uses the same deny-safe fallback. String arrays are read through
+   own data descriptors only: accessor indices, holes, throwing descriptors and revoked arrays are
    `invalid-options`, and a custom `Symbol.iterator` is never invoked. Repeated percent-encoding is
-   decoded up to three times to catch double-encoded separators and dot segments. IPv4/IPv6 link-local ranges and the enumerated cloud-metadata
-   hostnames and addresses are hard-denied as `forbidden-endpoint`, before any switch or allow list is consulted.
+   decoded up to three times to catch double-encoded separators and dot segments. IPv4/IPv6
+   link-local ranges and the enumerated cloud-metadata hostnames and addresses are hard-denied as
+   `forbidden-endpoint`, before any switch or allow list is consulted.
    The metadata check also covers IPv4-embedded IPv6 wrappers (IPv4-compatible, IPv4-translated,
    the well-known and local-use NAT64 prefixes and 6to4) and IPv4 shorthand forms the URL parser
    accepts; an mDNS `.local`/`.localhost` suffix is stripped before the metadata check;
