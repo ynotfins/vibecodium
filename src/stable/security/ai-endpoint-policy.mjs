@@ -12,7 +12,7 @@
 // Wiring into the Bifrost gateway and the agent host is M2/M6 work; this module is the shared
 // decision core for those callers and for tests.
 
-export const AI_ENDPOINT_POLICY_VERSION = '1.1.2';
+export const AI_ENDPOINT_POLICY_VERSION = '1.1.4';
 export const MAX_ENDPOINT_URL_CHARS = 1024;
 export const MAX_OPTION_STRING_CHARS = 253;
 export const MAX_REDACTED_PATH_CHARS = 512;
@@ -631,24 +631,77 @@ export function classifyAIEndpoint(url) {
 }
 
 function validateOptions(options) {
-  if (options === undefined) return { ok: true, value: {} };
-  if (options === null || typeof options !== 'object' || Array.isArray(options)) {
+  if (options === undefined) return { ok: true, value: Object.create(null) };
+  if (options === null || typeof options !== 'object') {
     return { ok: false };
   }
-  if (Object.getPrototypeOf(options) !== Object.prototype && Object.getPrototypeOf(options) !== null) {
+  let isArray;
+  try {
+    isArray = Array.isArray(options);
+  } catch {
     return { ok: false };
   }
-  const value = {};
-  for (const [key, raw] of Object.entries(options)) {
+  if (isArray) return { ok: false };
+  let prototype;
+  try {
+    prototype = Object.getPrototypeOf(options);
+  } catch {
+    return { ok: false };
+  }
+  if (prototype !== Object.prototype && prototype !== null) {
+    return { ok: false };
+  }
+  let keys;
+  try {
+    keys = Object.keys(options);
+  } catch {
+    return { ok: false };
+  }
+  // A plain option bag should not carry accessors: reading one would run caller code and can
+  // throw instead of failing closed. The null prototype also stops Object.prototype pollution
+  // from supplying a switch value.
+  const value = Object.create(null);
+  for (const key of keys) {
+    let descriptor;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(options, key);
+    } catch {
+      return { ok: false };
+    }
+    if (!descriptor || 'get' in descriptor || 'set' in descriptor) return { ok: false };
+    const raw = descriptor.value;
     if (!KNOWN_OPTIONS.includes(key)) return { ok: false };
     if (BOOLEAN_OPTION_SET.has(key)) {
       if (typeof raw !== 'boolean') return { ok: false };
       value[key] = raw;
       continue;
     }
-    if (!Array.isArray(raw) || raw.length > 64) return { ok: false };
+    let rawIsArray;
+    try {
+      rawIsArray = Array.isArray(raw);
+    } catch {
+      return { ok: false };
+    }
+    if (!rawIsArray) return { ok: false };
+    let rawLengthDescriptor;
+    try {
+      rawLengthDescriptor = Object.getOwnPropertyDescriptor(raw, 'length');
+    } catch {
+      return { ok: false };
+    }
+    if (!rawLengthDescriptor || 'get' in rawLengthDescriptor || 'set' in rawLengthDescriptor) return { ok: false };
+    const rawLength = rawLengthDescriptor.value;
+    if (typeof rawLength !== 'number' || !Number.isSafeInteger(rawLength) || rawLength < 0 || rawLength > 64) return { ok: false };
     const list = [];
-    for (const item of raw) {
+    for (let index = 0; index < rawLength; index += 1) {
+      let itemDescriptor;
+      try {
+        itemDescriptor = Object.getOwnPropertyDescriptor(raw, String(index));
+      } catch {
+        return { ok: false };
+      }
+      if (!itemDescriptor || 'get' in itemDescriptor || 'set' in itemDescriptor) return { ok: false };
+      const item = itemDescriptor.value;
       if (typeof item !== 'string' || item.length === 0 || item.length > MAX_OPTION_STRING_CHARS) return { ok: false };
       if (CONTROL_OR_BIDI.test(item)) return { ok: false };
       list.push(item);
@@ -767,7 +820,7 @@ export function assertAIEndpointAllowed(url, options = {}) {
 
 export function describeAIEndpointPolicy(options = {}) {
   const validated = validateOptions(options);
-  const value = validated.ok ? validated.value : {};
+  const value = validated.ok ? validated.value : Object.create(null);
   return Object.freeze({
     version: AI_ENDPOINT_POLICY_VERSION,
     defaultDeny: true,
