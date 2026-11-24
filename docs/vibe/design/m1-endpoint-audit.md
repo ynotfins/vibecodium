@@ -1,6 +1,6 @@
 # M1 Microsoft endpoint audit and deny-by-default AI policy
 
-> Doc class: living · Owner: security-reviewer · Last reviewed: 2026-11-24
+> Doc class: living - Owner: security-reviewer - Last reviewed: 2026-11-24
 >
 > Audit of the outbound endpoints reachable from the pinned upstream AI services in the scanned
 > directories, and the decision core that keeps Vibecodium traffic off Microsoft and GitHub Copilot endpoints unless a
