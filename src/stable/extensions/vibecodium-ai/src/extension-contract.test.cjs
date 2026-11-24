@@ -8,7 +8,7 @@ const test = require('node:test');
 function loadWithFakeVscode() {
   const modulePath = path.join(__dirname, 'extension.cjs');
   const originalLoad = Module._load;
-  const commands = new Map();
+  const commands = Object.create(null);
   let opened = 0;
   const vscode = {
     ViewColumn: { Active: 1 },
@@ -16,7 +16,7 @@ function loadWithFakeVscode() {
     Range: class { constructor(...args) { this.args = args; } },
     commands: {
       registerCommand(name, handler) {
-        commands.set(name, handler);
+        commands[name] = handler;
         return { dispose() {} };
       },
     },
@@ -56,16 +56,28 @@ function loadWithFakeVscode() {
   }
 }
 
-test('activate registers the graph panel commands without touching the workbench', () => {
+const emptyStore = {
+  async review({ scope, status, offset, limit }) {
+    return { scope, status, total: 0, offset, limit, hasMore: false, items: [] };
+  },
+  async approve() {},
+  async reject() {},
+  async forget() {},
+};
+
+test('activate registers the graph and memory panel commands without touching the workbench', () => {
   const loaded = loadWithFakeVscode();
   const context = { subscriptions: [], extensionUri: { fsPath: 'x' } };
   const api = loaded.activate(context);
-  assert.deepEqual([...loaded.commands.keys()].sort(), [
+  assert.deepEqual(Object.keys(loaded.commands).sort(), [
     'vibecodium.graph.open',
     'vibecodium.graph.setData',
+    'vibecodium.memory.open',
+    'vibecodium.memory.setStore',
   ]);
-  assert.equal(context.subscriptions.length, 2);
+  assert.equal(context.subscriptions.length, 4);
   assert.equal(typeof api.open, 'function');
+  assert.equal(typeof api.openMemory, 'function');
   api.setGraph({ projects: [{ id: 'api' }], nodes: [], edges: [] });
   assert.equal(loaded.opened(), 0);
 });
@@ -74,6 +86,18 @@ test('the open command reports a missing graph rather than throwing', () => {
   const loaded = loadWithFakeVscode();
   const context = { subscriptions: [], extensionUri: { fsPath: 'x' } };
   loaded.activate(context);
-  assert.doesNotThrow(() => loaded.commands.get('vibecodium.graph.open')());
+  assert.doesNotThrow(() => loaded.commands['vibecodium.graph.open']());
   assert.equal(loaded.opened(), 0);
+});
+
+test('the memory review opens after a store is supplied', async () => {
+  const loaded = loadWithFakeVscode();
+  const context = { subscriptions: [], extensionUri: { fsPath: 'x' } };
+  const api = loaded.activate(context);
+  assert.equal(api.setStore(null), undefined);
+  await loaded.commands['vibecodium.memory.open']();
+  assert.equal(loaded.opened(), 0);
+  await loaded.commands['vibecodium.memory.setStore'](emptyStore);
+  await loaded.commands['vibecodium.memory.open']();
+  assert.equal(loaded.opened(), 1);
 });
