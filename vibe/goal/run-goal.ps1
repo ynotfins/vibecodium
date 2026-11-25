@@ -37,7 +37,9 @@ param(
   # Use this provider from vibe/goal/models.json instead of health-checking (tests, manual runs).
   [string]$Provider = '',
   # Print the session command line, the chosen provider and the environment check, then exit.
-  [switch]$DryRun
+  [switch]$DryRun,
+  # Keep the temporary prompt so tests can inspect the assembled session prompt.
+  [switch]$KeepTemp
 )
 
 $ErrorActionPreference = 'Stop'
@@ -360,6 +362,13 @@ try {
     New-Item -ItemType Directory -Force -Path $tmp | Out-Null
     $promptFile = Join-Path $tmp 'continue.prompt.md'
     Copy-Item (Join-Path $Root 'vibe\goal\continue.prompt.md') $promptFile
+    # Optional lane scope: <clone>.lane-scope.md sits beside the clone (never inside it, so the clone
+    # stays clean and can fast-forward). It restricts the session to named milestones.
+    $laneScope = $Root + '.lane-scope.md'
+    if (Test-Path -LiteralPath $laneScope) {
+      Add-Content -Path $promptFile -Value "`n## LANE SCOPE`n" -Encoding utf8NoBOM
+      Get-Content -LiteralPath $laneScope | Add-Content -Path $promptFile -Encoding utf8NoBOM
+    }
 
     if ($harness -eq 'codex') {
       # Own home folder; auth.json must never exist here (a subscription cannot be used).
@@ -395,9 +404,10 @@ try {
     if ($DryRun) {
       $left = @(Get-ChildItem Env: | Where-Object { $_.Name -match $secretPattern -and $_.Name -notmatch '^GIT_CONFIG_' -and $_.Name -notin ($AllowedProviderKeys + 'GH_TOKEN') } | ForEach-Object Name)
       Write-Output "DRYRUN harness=$harness provider=$chosen guard=$guardDir"
+      Write-Output "DRYRUN prompt=$promptFile"
       Write-Output "DRYRUN args=$cmdArgs stdin=$stdinFile"
       Write-Output "DRYRUN secrets_removed=$($script:SecretValues.Count) secret_vars_left=$($left.Count) gh_token_source=$ghSource"
-      Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+      if (-not $KeepTemp) { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
       break
     }
     $startArgs = @{
@@ -431,7 +441,7 @@ try {
     Write-Log ("iteration end: exit={0} slice={1} state={2}" -f $p.ExitCode, $slice, (Get-GoalState))
     if ($slice -notin 'done', 'parked' -and $errTail) { Write-Log ("stderr tail:`n" + (Protect-Text $errTail)) }
     Set-Content -Path (Join-Path $LogDir "summary-$stamp.txt") -Value (Protect-Text (($result -split "`n" | Select-Object -Last 40) -join "`n"))
-    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    if (-not $KeepTemp) { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 
     if ($slice -in 'done', 'parked') { $failures = 0 } else { $failures++ }
     if ($failures -ge $MaxConsecutiveFailures) { Write-Log "$failures consecutive failed iterations; stopping until next scheduled start"; break }

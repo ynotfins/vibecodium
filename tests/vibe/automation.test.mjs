@@ -164,3 +164,27 @@ test('build preflight reports every tool and an overall verdict', { skip: !BASH 
   for (const tool of ['node', 'python', 'jq', 'git', 'cargo', '7z']) assert.match(r.stdout, new RegExp(`^(PASS|FAIL)\\s+${tool}\\s`, 'm'));
   assert.match(r.stdout, /^PREFLIGHT: (PASS|FAIL)$/m);
 });
+
+test('lane scope: the assembled prompt carries the scope from a sibling file', { skip: WIN_PWSH }, () => {
+  const run = (fx, logs, extra = []) => {
+    const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', path.join(fx, 'vibe/goal/run-goal.ps1'),
+      '-Root', fx, '-LogDir', logs, '-Codex', 'codex-not-started', '-OpenCode', 'opencode-not-started',
+      '-Provider', 'morph', '-DryRun', '-KeepTemp', ...extra], { encoding: 'utf8', env: { ...process.env, VIBECODIUM_GH_TOKEN: 't'.repeat(24) } });
+    const out = r.stdout + r.stderr;
+    const m = out.match(/DRYRUN prompt=(.+)/);
+    assert.ok(m, out);
+    return readFileSync(m[1].trim(), 'utf8');
+  };
+
+  const f = runnerFixture();
+  const scope = 'LANE SCOPE TEST: this lane owns milestone M3 only.';
+  writeFileSync(f.fx + '.lane-scope.md', scope + String.fromCharCode(10));
+  const prompt = run(f.fx, f.logs);
+  assert.match(prompt, /## LANE SCOPE/, 'the scope section must be appended to the session prompt');
+  assert.ok(prompt.includes(scope), 'the scope text must reach the session prompt');
+
+  const g = runnerFixture();
+  const plain = run(g.fx, g.logs);
+  assert.ok(!plain.includes('LANE SCOPE TEST:'), 'no scope file means no scope content is injected');
+});
+
