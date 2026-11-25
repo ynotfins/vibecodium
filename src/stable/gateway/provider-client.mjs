@@ -106,7 +106,8 @@ function validateContent(value, name, maximum) {
 }
 
 function validateApiKey(value) {
-  if (typeof value !== 'string' || value.length < 1 || value.length > MAX_API_KEY_CHARS || CONTROL_OR_BIDI.test(value)) {
+  if (typeof value !== 'string' || value.length < 1 || value.length > MAX_API_KEY_CHARS ||
+      CONTROL_OR_BIDI.test(value)) {
     fail('invalid-api-key', 'the provider API key is invalid');
   }
   return value;
@@ -116,20 +117,31 @@ function joinPath(baseUrl, pathname) {
   return baseUrl.replace(/\/+$/, '') + pathname;
 }
 
-// A caller who opts into external providers opts into the host they configured. The policy still
-// hard-denies metadata and other forbidden endpoints before any host allow is considered.
+// A caller who opts into external providers opts into the host they configured, but only when the
+// M1 policy classifies that endpoint as an external provider or an unknown third-party host. A
+// Copilot, telemetry, GitHub or metadata endpoint keeps its own category switch or hard deny.
 function resolveRequestPolicy(config) {
   const policy = config.policy;
   if (policy.allowExternalProviders !== true) return policy;
-  let host;
+  let url;
   try {
-    host = new URL(config.baseUrl).hostname;
+    url = new URL(config.baseUrl).href;
   } catch {
     return policy;
   }
+  const decision = evaluateAIEndpointRequest(url, policy);
+  if (decision.allowed) return policy;
+  if (decision.code === 'forbidden-endpoint') assertAIEndpointAllowed(url, policy);
+  if (decision.category !== 'external-provider' && decision.category !== 'unknown') {
+    assertAIEndpointAllowed(url, policy);
+  }
+  const host = decision.host;
+  if (typeof host !== 'string' || host.length === 0) return policy;
   const existing = Array.isArray(policy.allowHosts) ? policy.allowHosts : [];
   if (existing.includes(host)) return policy;
-  return Object.freeze({ ...policy, allowHosts: Object.freeze([...existing, host]) });
+  const scoped = Object.freeze({ ...policy, allowHosts: Object.freeze([...existing, host]) });
+  assertAIEndpointAllowed(url, scoped);
+  return scoped;
 }
 
 export function resolveProviderConfig(id, options = {}) {
@@ -306,12 +318,7 @@ async function readBoundedText(response, maximum) {
     if (length > maximum) fail('response-too-large', 'provider response exceeded the size limit');
   }
   if (!response.body || typeof response.body[Symbol.asyncIterator] !== 'function') {
-    if (typeof response.text !== 'function') fail('invalid-response', 'provider response has no body');
-    const text = await response.text();
-    if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > maximum) {
-      fail('response-too-large', 'provider response exceeded the size limit');
-    }
-    return text;
+    fail('invalid-response', 'provider response has no body');
   }
   const decoder = new TextDecoder();
   let text = '';
@@ -572,17 +579,31 @@ export function createProviderClient(id, options = {}) {
 
   async function request(pathname, body, { stream }) {
     const url = joinPath(config.baseUrl, pathname);
-        assertAIEndpointAllowed(url, requestPolicy);
+    assertAIEndpointAllowed(url, requestPolicy);
     const headers = {
       'content-type': 'application/json',
       accept: stream ? 'text/event-stream' : 'application/json',
     };
     if (config.auth === 'bearer' && apiKey !== undefined) headers.authorization = 'Bearer ' + apiKey;
     const controller = new AbortController();
+    let timedOut = false;
     const abort = () => controller.abort();
-    const timer = setTimeout(abort, config.timeoutMs);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      abort();
+    }, config.timeoutMs);
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      clearTimeout(timer);
+      options.signal?.removeEventListener?.('abort', abort);
+    };
     if (options.signal !== undefined) {
-      if (typeof options.signal.addEventListener !== 'function') fail('invalid-options', 'signal is invalid');
+      if (typeof options.signal.addEventListener !== 'function') {
+        release();
+        fail('invalid-options', 'signal is invalid');
+      }
       if (options.signal.aborted) controller.abort();
       else options.signal.addEventListener('abort', abort, { once: true });
     }
@@ -593,19 +614,23 @@ export function createProviderClient(id, options = {}) {
         headers,
         body: JSON.stringify(body),
         signal: controller.signal,
+        redirect: 'error',
       });
     } catch {
-      if (controller.signal.aborted) fail('timeout', 'the provider request timed out');
+      release();
+      if (timedOut) fail('timeout', 'the provider request timed out');
+      if (controller.signal.aborted) fail('aborted', 'the provider request was aborted');
       fail('network-error', 'the provider request failed');
-    } finally {
-      clearTimeout(timer);
-      options.signal?.removeEventListener?.('abort', abort);
     }
-    if (response === null || typeof response !== 'object') fail('invalid-response', 'provider response is invalid');
+    if (response === null || typeof response !== 'object') {
+      release();
+      fail('invalid-response', 'provider response is invalid');
+    }
     if (response.status !== undefined && response.ok === false) {
+      release();
       fail('http-status', 'the provider request failed with HTTP ' + response.status, { status: response.status });
     }
-    return response;
+    return { response, release, signal: controller.signal, timedOut: () => timedOut };
   }
 
   async function chat(input = {}) {
@@ -622,28 +647,36 @@ export function createProviderClient(id, options = {}) {
       ? chatRequest({ messages }, model, stream, tools)
       : responsesRequest({ messages }, model, stream, tools);
     const pathname = config.transport === 'openai-chat' ? '/chat/completions' : '/responses';
-    const response = await request(pathname, body, { stream });
-    if (!stream) {
-      const text = await readBoundedText(response, config.maxResponseBytes);
-      let payload;
-      try {
-        payload = JSON.parse(text);
-      } catch {
-        fail('invalid-response', 'provider response is not valid JSON');
+    const { response, release, signal, timedOut } = await request(pathname, body, { stream });
+    try {
+      if (!stream) {
+        const text = await readBoundedText(response, config.maxResponseBytes);
+        let payload;
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          fail('invalid-response', 'provider response is not valid JSON');
+        }
+        return config.transport === 'openai-chat' ? parseChatResponse(payload) : parseResponsesResponse(payload);
       }
-      return config.transport === 'openai-chat' ? parseChatResponse(payload) : parseResponsesResponse(payload);
+      const state = {
+        text: '',
+        toolCalls: new Map(),
+        usage: normalizeUsage(undefined),
+        finishReason: undefined,
+      };
+      for await (const event of streamEvents(response, config.maxResponseBytes)) {
+        if (config.transport === 'openai-chat') parseChatStream(event, state);
+        else parseResponsesStream(event, state);
+      }
+      return finalizeStream(state);
+    } catch (error) {
+      if (timedOut()) fail('timeout', 'the provider request timed out');
+      if (signal.aborted) fail('aborted', 'the provider request was aborted');
+      throw error;
+    } finally {
+      release();
     }
-    const state = {
-      text: '',
-      toolCalls: new Map(),
-      usage: normalizeUsage(undefined),
-      finishReason: undefined,
-    };
-    for await (const event of streamEvents(response, config.maxResponseBytes)) {
-      if (config.transport === 'openai-chat') parseChatStream(event, state);
-      else parseResponsesStream(event, state);
-    }
-    return finalizeStream(state);
   }
 
   async function embeddings(input = {}) {
@@ -659,15 +692,23 @@ export function createProviderClient(id, options = {}) {
     }
     for (const item of input.input) validateContent(item, 'embedding input', MAX_MESSAGE_CHARS);
     const model = validateProviderModel(input.model ?? config.model);
-    const response = await request('/embeddings', { model, input: input.input }, { stream: false });
-    const text = await readBoundedText(response, config.maxResponseBytes);
-    let payload;
+    const { response, release, signal, timedOut } = await request('/embeddings', { model, input: input.input }, { stream: false });
     try {
-      payload = JSON.parse(text);
-    } catch {
-      fail('invalid-response', 'provider response is not valid JSON');
+      const text = await readBoundedText(response, config.maxResponseBytes);
+      let payload;
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        fail('invalid-response', 'provider response is not valid JSON');
+      }
+      return normalizeEmbeddings(payload);
+    } catch (error) {
+      if (timedOut()) fail('timeout', 'the provider request timed out');
+      if (signal.aborted) fail('aborted', 'the provider request was aborted');
+      throw error;
+    } finally {
+      release();
     }
-    return normalizeEmbeddings(payload);
   }
 
   return Object.freeze({

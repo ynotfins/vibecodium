@@ -18,6 +18,22 @@ function urlFor(port, pathname) {
   return 'http://' + HOST + ':' + port + pathname;
 }
 
+function bodyFrom(text) {
+  return (async function* () {
+    yield Buffer.from(text, 'utf8');
+  })();
+}
+
+function jsonResponse(payload, status = 200) {
+  const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => null },
+    body: bodyFrom(text),
+  };
+}
+
 function sendJson(response, payload) {
   response.writeHead(200, { 'content-type': 'application/json' });
   response.end(JSON.stringify(payload));
@@ -199,24 +215,19 @@ test('the endpoint policy denies remote providers unless the caller opts in', as
   );
   assert.equal(called, false);
 
-  const response = {
-    ok: true,
-    status: 200,
-    headers: { get: () => null },
-    text: async () => JSON.stringify({ choices: [{ message: { content: 'allowed' } }], usage: {} }),
-  };
+  const allowed = () => jsonResponse({ choices: [{ message: { content: 'allowed' } }], usage: {} });
   const allowedByHost = createProviderClient('openrouter', {
     model: 'm',
     apiKey: 'sk-test',
     policy: { allowHosts: ['openrouter.ai'] },
-    fetch: async () => response,
+    fetch: async () => allowed(),
   });
   assert.equal((await allowedByHost.chat({ messages: MESSAGES })).text, 'allowed');
   const allowedByCategory = createProviderClient('openrouter', {
     model: 'm',
     apiKey: 'sk-test',
     policy: { allowExternalProviders: true },
-    fetch: async () => response,
+    fetch: async () => allowed(),
   });
   assert.equal((await allowedByCategory.chat({ messages: MESSAGES })).text, 'allowed');
 });
@@ -249,12 +260,7 @@ test('secrets never appear in a config, error, or serialized client', async () =
 });
 
 test('HTTP errors carry no response body', async () => {
-  const fetch = async () => ({
-    ok: false,
-    status: 401,
-    headers: { get: () => null },
-    text: async () => '{"error":"sk-live-secret"}',
-  });
+  const fetch = async () => jsonResponse('{"error":"sk-live-secret"}', 401);
   const client = createProviderClient('openrouter', {
     model: 'm', apiKey: 'sk-test', policy: { allowExternalProviders: true }, fetch,
   });
@@ -279,7 +285,7 @@ test('input and response validation fail closed', async () => {
     baseUrl: urlFor(1, '/v1'),
     model: 'm',
     env: {},
-    fetch: async () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => 'not json' }),
+    fetch: async () => jsonResponse('not json'),
   });
   await assert.rejects(invalidJson.chat({ messages: MESSAGES }), (error) => error.code === 'invalid-response');
 
@@ -288,7 +294,7 @@ test('input and response validation fail closed', async () => {
     model: 'm',
     env: {},
     maxResponseBytes: 1024,
-    fetch: async () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => 'x'.repeat(2048) }),
+    fetch: async () => jsonResponse('x'.repeat(2048)),
   });
   await assert.rejects(oversized.chat({ messages: MESSAGES }), (error) => error.code === 'response-too-large');
 
@@ -296,7 +302,7 @@ test('input and response validation fail closed', async () => {
     baseUrl: urlFor(1, '/v1'),
     model: 'm',
     env: {},
-    fetch: async () => ({ ok: true, status: 200, headers: { get: () => 'abc' }, text: async () => '{}' }),
+    fetch: async () => ({ ok: true, status: 200, headers: { get: () => 'abc' }, body: bodyFrom('{}') }),
   });
   await assert.rejects(badHeader.chat({ messages: MESSAGES }), (error) => error.code === 'invalid-response');
 
@@ -308,10 +314,18 @@ test('input and response validation fail closed', async () => {
       ok: true,
       status: 200,
       headers: { get: () => { throw new Error('bad header'); } },
-      text: async () => '{}',
+      body: bodyFrom('{}'),
     }),
   });
   await assert.rejects(throwingHeader.chat({ messages: MESSAGES }), (error) => error.code === 'invalid-response');
+
+  const textFallback = createProviderClient('llama-cpp', {
+    baseUrl: urlFor(1, '/v1'),
+    model: 'm',
+    env: {},
+    fetch: async () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => '{}' }),
+  });
+  await assert.rejects(textFallback.chat({ messages: MESSAGES }), (error) => error.code === 'invalid-response');
 });
 
 test('configuration resolves base URLs and models without exposing credentials', () => {
@@ -329,4 +343,115 @@ test('configuration resolves base URLs and models without exposing credentials',
   assert.throws(() => resolveProviderConfig('omniroute', { model: 'm', env: {} }), (error) => error.code === 'missing-base-url');
   assert.throws(() => resolveProviderConfig('llama-cpp', { model: 'm', timeoutMs: 1, env: {} }), (error) => error.code === 'invalid-options');
   assert.throws(() => resolveProviderConfig('llama-cpp', { model: 'm', policy: [] }), (error) => error.code === 'invalid-options');
+});
+
+test('the external-provider opt-in cannot reach Copilot, telemetry or GitHub hosts', () => {
+  for (const host of ['api.githubcopilot.com', 'copilot-telemetry.githubusercontent.com', 'api.github.com']) {
+    assert.throws(
+      () => createProviderClient('openai-compatible', {
+        baseUrl: 'https://' + host + '/v1',
+        model: 'm',
+        env: {},
+        policy: { allowExternalProviders: true },
+        fetch: async () => jsonResponse({}),
+      }),
+      (error) => error instanceof AIEndpointPolicyError &&
+        (error.code === 'denied-by-default' || error.code === 'forbidden-endpoint'),
+      host,
+    );
+  }
+});
+
+test('an unknown external host is allowed only through the scoped opt-in', async () => {
+  const seen = [];
+  const client = createProviderClient('openai-compatible', {
+    baseUrl: 'https://models.example.test/v1',
+    model: 'm',
+    env: {},
+    policy: { allowExternalProviders: true },
+    fetch: async (url, init) => {
+      seen.push({ url, init });
+      return jsonResponse({ choices: [{ message: { content: 'ok' } }], usage: {} });
+    },
+  });
+  assert.equal((await client.chat({ messages: MESSAGES })).text, 'ok');
+  assert.equal(seen[0].url, 'https://models.example.test/v1/chat/completions');
+
+  const unopted = createProviderClient('openai-compatible', {
+    baseUrl: 'https://models.example.test/v1',
+    model: 'm',
+    env: {},
+    fetch: async () => jsonResponse({}),
+  });
+  await assert.rejects(
+    unopted.chat({ messages: MESSAGES }),
+    (error) => error instanceof AIEndpointPolicyError && error.code === 'denied-by-default',
+  );
+});
+
+test('the client refuses redirects', async () => {
+  let seen;
+  const client = createProviderClient('openai-compatible', {
+    baseUrl: 'https://models.example.test/v1',
+    model: 'm',
+    env: {},
+    policy: { allowExternalProviders: true },
+    fetch: async (url, init) => {
+      seen = init;
+      return jsonResponse({ choices: [{ message: { content: 'ok' } }], usage: {} });
+    },
+  });
+  await client.chat({ messages: MESSAGES });
+  assert.equal(seen.redirect, 'error');
+});
+
+test('a stalled response body times out', { timeout: 5000 }, async () => {
+  const client = createProviderClient('llama-cpp', {
+    baseUrl: urlFor(1, '/v1'),
+    model: 'm',
+    env: {},
+    timeoutMs: 100,
+    fetch: async (url, init) => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      body: {
+        [Symbol.asyncIterator]() {
+          return {
+            next() {
+              return new Promise((resolve, reject) => {
+                if (init.signal.aborted) return reject(new Error('aborted'));
+                init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+              });
+            },
+          };
+        },
+      },
+    }),
+  });
+  await assert.rejects(
+    client.chat({ messages: MESSAGES }),
+    (error) => error instanceof ProviderClientError && error.code === 'timeout',
+  );
+});
+
+test('an oversized streamed body is rejected while reading', async () => {
+  const client = createProviderClient('llama-cpp', {
+    baseUrl: urlFor(1, '/v1'),
+    model: 'm',
+    env: {},
+    maxResponseBytes: 1024,
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      body: (async function* () {
+        yield Buffer.from('x'.repeat(2048), 'utf8');
+      })(),
+    }),
+  });
+  await assert.rejects(
+    client.chat({ messages: MESSAGES }),
+    (error) => error instanceof ProviderClientError && error.code === 'response-too-large',
+  );
 });

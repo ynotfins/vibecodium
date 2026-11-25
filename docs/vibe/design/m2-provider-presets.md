@@ -76,12 +76,16 @@ Both transports are implemented:
 - `openai-responses` posts to `/responses` and converts messages and function tools to the
    Responses input shape.
 
-Non-streaming replies return assembled text, normalized tool calls and normalized usage. Streaming
-replies parse SSE incrementally, assemble text deltas and tool-argument deltas by index, bound the
-number of events, the event size and the total bytes, and never buffer an unbounded response.
-Embeddings are refused when the transport does not expose them or the preset does not advertise
-the `embeddings` capability. HTTP errors expose only the
-status; the response body is never included in an error.
+Non-streaming replies return assembled text, normalized tool calls and normalized usage. A response
+body must be an async iterable; the client never falls back to `response.text()`, so the byte cap is
+enforced while the body is read and a stalled body cannot hold the client open. The request deadline
+stays armed until the body has been consumed, and redirects are refused (`redirect: 'error'`) so only
+the policy-checked URL is contacted. Streaming replies parse SSE incrementally, assemble text deltas
+and tool-argument deltas by index, and bound the number of events, the event size and the total bytes.
+Embeddings are refused when the transport does not expose them or the preset does not advertise the
+`embeddings` capability. HTTP errors expose only the status; the response body is never included in
+an error. A credential carrying control or bidi characters is rejected before it can become a header
+value.
 
 ## Endpoint policy
 
@@ -89,13 +93,15 @@ Every request calls the M1 `assertAIEndpointAllowed()` before `fetch`. Loopback 
 model servers are allowed by default. A remote preset is denied by default and can be enabled by
 an exact `allowHosts` entry, an `allowEndpoints` host+path entry, or by `allowExternalProviders`.
 
-`allowExternalProviders` is scoped by the client to the host the caller actually configured: the
-client adds that host to a per-client `allowHosts` list, so the switch cannot reach an arbitrary
-unknown host. Metadata and other hard-denied endpoints are still rejected before any host allow is
+`allowExternalProviders` is applied only when the M1 policy classifies the configured endpoint as
+`external-provider` or `unknown`; the client then adds that exact host to a per-client `allowHosts`
+list, so the switch cannot reach an arbitrary host. Copilot, Copilot-telemetry, GitHub, Microsoft
+telemetry, model-catalog and update hosts keep their own category switch, and metadata or other
+hard-denied endpoints stay denied before any host allow is
 consulted. The M1 inventory enumerates the OpenAI and ChatGPT external hosts only, so other
 third-party hosts are classified `unknown` and need an explicit host/endpoint allow or the scoped
 external-provider opt-in; the `allowUnknownHosts` switch also works but is intentionally not used
-by the client.
+by the client. Client creation fails closed when the scoped policy still denies the configured URL.
 
 ## Verification
 
@@ -103,8 +109,10 @@ by the client.
 HTTP mock server for both transports and covers, for every preset and for a settings-only custom
 provider: non-streaming chat, streaming text, streamed tool calls, non-streaming tool calls, and
 embeddings where advertised. It also covers the frozen catalog, settings overrides, accessor and
-prototype hardening, endpoint denial and the two opt-in paths, secret non-exposure, HTTP error
-body suppression, response-size limits and malformed input.
+prototype hardening, endpoint denial and the two opt-in paths, secret non-exposure, HTTP error body
+suppression, response-size limits, redirect refusal, a body-stall timeout, an oversized streamed
+body, the async-iterable-only body rule, control and bidi characters in a credential, and that the
+external-provider opt-in cannot reach Copilot, Copilot-telemetry, GitHub or metadata hosts.
 
 The `docs/vibe` suite, `node vibe/tools/verify.mjs --strict` and
 `node vibe/tools/docs-check.mjs --strict` are the remaining acceptance commands.
