@@ -26,6 +26,7 @@ Vibecodium is a standalone, Windows-first AI IDE built on VSCodium. This folder 
 | [design/m1-ai-surfaces.md](design/m1-ai-surfaces.md) | M1 A2 native AI surfaces without Copilot: product transform, extension defaults, tests and boundaries |
 | [adr/0009-docs-mcp-local-first.md](adr/0009-docs-mcp-local-first.md) | Local-first docs MCP decision and the later upstream adapter boundary |
 | [design/m1-endpoint-audit.md](design/m1-endpoint-audit.md) | M1 Microsoft endpoint audit and the deny-by-default AI policy core |
+| [design/m2-provider-presets.md](design/m2-provider-presets.md) | M2 B1 provider catalog, settings-JSON path and the two-transport request client |
 | [CHANGELOG.md](CHANGELOG.md) | User-visible changes per release |
 | [SECURITY.md](SECURITY.md) | Security model and how to report issues |
 | [adr/README.md](adr/README.md) | Architecture decision records |
