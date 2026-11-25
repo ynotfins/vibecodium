@@ -45,16 +45,16 @@ A provider can be added, or a built-in overridden, from a settings object alone:
 
 ```json
 {
-  "providers": {
-    "my-lab": {
+   "providers": {
+      "my-lab": {
       "label": "My Lab",
       "transport": "openai-chat",
       "baseUrl": "http://127.0.0.1:9999/v1",
       "model": "lab-model",
       "auth": "none",
       "capabilities": ["chat", "stream", "tools"]
-    }
-  }
+      }
+   }
 }
 ```
 
@@ -74,7 +74,7 @@ Both transports are implemented:
 
 - `openai-chat` posts to `/chat/completions` and `/embeddings`.
 - `openai-responses` posts to `/responses` and converts messages and function tools to the
-  Responses input shape.
+   Responses input shape.
 
 Non-streaming replies return assembled text, normalized tool calls and normalized usage. Streaming
 replies parse SSE incrementally, assemble text deltas and tool-argument deltas by index, bound the
