@@ -33,6 +33,7 @@ export const MAX_TOOLS = 128;
 export const MAX_TOOL_NAME_CHARS = 128;
 export const MAX_TOOL_CALLS = 32;
 export const MAX_ARGUMENT_CHARS = 1_000_000;
+export const MAX_OUTPUT_TOKENS = 1_000_000;
 export const MAX_SSE_EVENTS = 10_000;
 export const MAX_SSE_EVENT_CHARS = 512 * 1024;
 export const MAX_EMBEDDING_INPUTS = 256;
@@ -387,21 +388,23 @@ function parseSseBlock(block) {
   return name === undefined ? payload : { ...payload, ...(payload.type === undefined ? { type: name } : {}) };
 }
 
-function chatRequest(body, model, stream, tools) {
+function chatRequest(body, model, stream, tools, maxTokens) {
   return {
     model,
     messages: body.messages,
     stream,
     ...(tools === undefined ? {} : { tools, tool_choice: 'auto' }),
+    ...(maxTokens === undefined ? {} : { max_tokens: maxTokens }),
   };
 }
 
-function responsesRequest(body, model, stream, tools) {
+function responsesRequest(body, model, stream, tools, maxTokens) {
   return {
     model,
     input: toResponsesInput(body.messages),
     stream,
     ...(tools === undefined ? {} : { tools: toResponsesTools(tools), tool_choice: 'auto' }),
+    ...(maxTokens === undefined ? {} : { max_output_tokens: maxTokens }),
   };
 }
 
@@ -643,9 +646,12 @@ export function createProviderClient(id, options = {}) {
     const model = validateProviderModel(input.model ?? config.model);
     const stream = input.stream === true;
     if (input.stream !== undefined && typeof input.stream !== 'boolean') fail('invalid-options', 'stream must be a boolean');
+    const maxTokens = input.maxTokens === undefined
+      ? undefined
+      : validateInteger('maxTokens', input.maxTokens, 1, MAX_OUTPUT_TOKENS);
     const body = config.transport === 'openai-chat'
-      ? chatRequest({ messages }, model, stream, tools)
-      : responsesRequest({ messages }, model, stream, tools);
+      ? chatRequest({ messages }, model, stream, tools, maxTokens)
+      : responsesRequest({ messages }, model, stream, tools, maxTokens);
     const pathname = config.transport === 'openai-chat' ? '/chat/completions' : '/responses';
     const { response, release, signal, timedOut } = await request(pathname, body, { stream });
     try {

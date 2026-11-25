@@ -1,6 +1,6 @@
 # M2 B2 ordered provider fallback
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-24
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-25
 >
 > The fallback layer that composes the B1 request clients. It lives in
 > [provider-fallback.mjs](../../../src/stable/gateway/provider-fallback.mjs), and its acceptance
@@ -11,7 +11,9 @@
 B2 requires that a forced primary-provider failure produces an answer from the next provider in
 the same turn, or fails cleanly. This slice supplies that ordered fallback layer for chat and
 embeddings. It does not choose providers by task class, enforce token or daily budgets, surface a
-provider UI, start Bifrost, or call a live provider. Those remain B3/B5 and later integration work.
+provider UI, start Bifrost, or call a live provider. Task-class routing and budgets now live in the
+B3 router; the provider UI and live-provider calls remain B5 and later integration work, and
+Bifrost supervision remains M2 work.
 
 ## Chain contract
 
