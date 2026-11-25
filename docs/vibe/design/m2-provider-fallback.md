@@ -59,8 +59,8 @@ A successful answer adds two fields without changing the provider result:
 
 - `servedBy`: `{ id, label, fallback }`, where `fallback` is true after the first provider.
 - `attempts`: frozen attempt summaries, `{ id, label, outcome }`, with `outcome` equal to
-  `answered`, `empty` or `failed`. A failed attempt also carries only its safe error `code` and,
-  when present, integer `status`.
+   `answered`, `empty` or `failed`. A failed attempt also carries only its safe error `code` and,
+   when present, integer `status`.
 
 If every provider fails transiently, `chat` or `embeddings` rejects with
 `ProviderFallbackError.code === 'fallback-exhausted'` and the same bounded attempt summaries.
