@@ -5,11 +5,25 @@
 Goal state: active
 Owner priorities (2026-11-20): alongside M0/M1, begin the standalone engine packages (Vibe Context Engine, multi-project indexer/graph) - they are testable without the IDE build. Build-dependent work continues now that the MSVC Spectre component is installed. Milestone numbering is unchanged.
 
-Current milestone: M2 (in progress; B1 provider catalog and request client delivered, B2/B3/B5/B6 open); M1's weekly upstream-compat compile job remains open; M0 build evidence remains owner-parked
+Current milestone: M2 (in progress; B1 provider catalog and request client plus B2 ordered fallback delivered, B3/B5/B6 open); M1's weekly upstream-compat compile job remains open; M0 build evidence remains owner-parked
 
 ## Task log
 
 Newest first. One entry per task slice, written by `vibe-overseer` after the after-every-task chain.
+
+### 2026-11-24 - M2 B2 provider fallback
+
+- Goal / must-haves: add an ordered provider fallback layer over the B1 request clients so a primary provider failure returns a complete answer from the next provider within the same turn, without retrying request, authentication, endpoint-policy or cancellation failures.
+- Must-have IDs: B2 (primary); consumes B1 clients and prepares B3 routing.
+- Files allowed: `src/stable/gateway/provider-fallback.mjs`, `tests/vibe/provider-fallback.test.mjs`, `docs/vibe/design/m2-provider-fallback.md`, `docs/vibe/README.md`, `docs/vibe/ROADMAP.md`, `docs/vibe/CHANGELOG.md`, `docs/vibe/STATUS.md`, `docs/vibe/SECURITY.md`.
+- Files forbidden: locked docs, upstream source and patches, IDE or extension code, changes to the B1 catalog or request client, new dependencies or vendored binaries, build scripts, CI workflows, release infrastructure, provider UI, budgets/routing policy, Bifrost binaries or sidecar supervision, M0 owner-parked packaging work.
+- Acceptance commands: `node --test tests/vibe/provider-fallback.test.mjs`, `node vibe/tools/verify.mjs --strict`, `node vibe/tools/docs-check.mjs --strict`.
+- Acceptance test: with two configured local mock providers, forced primary timeout, HTTP 429, HTTP 5xx and empty streaming responses each return the fallback provider's complete answer in the same `chat` call; streamed text and tool calls survive failover; attempt metadata identifies the failed and serving providers; a non-retryable HTTP 400, an endpoint-policy denial and caller cancellation never invoke the fallback; when every provider fails retryably the call rejects with a bounded `fallback-exhausted` error carrying only safe attempt summaries; custom fallback model selection, embeddings failover, malformed chain definitions and secret non-exposure are covered.
+- Out of scope: automatic routing by task class, token/day budgets, cache-aware assembly, provider UI and secret storage, Bifrost sidecar supervision, live provider smoke tests, local runtime, and workbench request interception. No dependency change.
+- Delivered: `src/stable/gateway/provider-fallback.mjs` adds an ordered chain of one to eight B1 clients. It retries only timeout, network error (including a connection reset while consuming a non-streaming body or SSE stream), HTTP 408/429/5xx and a chat answer with neither text nor a tool call; request/auth validation, further HTTP failures, endpoint-policy denial and caller cancellation propagate unchanged. The caller model applies to the first provider, each later provider uses its own optional model or its client default, and `servedBy` plus frozen attempt summaries report the provider that answered. Exhaustion raises `fallback-exhausted` with only id, label, outcome, error code and integer status, so bodies, prompts and credentials never enter errors or `describe()`. Unknown/duplicate/sparse entries, accessors, invalid labels/models and malformed chains fail closed. `docs/vibe/design/m2-provider-fallback.md` records the contract, policy, metadata and boundaries.
+- Tests: `node --test tests/vibe/provider-fallback.test.mjs` PASS (14/14: timeout, 429, 5xx, 408, network error and socket reset body/stream failover; empty stream; text/tool streaming; 400, policy and cancellation boundaries; exhaustion; model selection; embeddings; metadata allowlist; malformed/unknown fields). `node --test tests/vibe/provider-presets.test.mjs tests/vibe/provider-client.test.mjs` PASS (20/20). `node vibe/tools/verify.mjs --strict` PASS (4/4 steps; 397 tests: 389 pass, 8 Windows skips, 0 fail). `node vibe/tools/docs-check.mjs --strict` PASS (0 errors, 0 warnings); `git diff --check` clean.
+- Guardians: qa-verifier PASS on the final revision (the first pass found a mid-body/mid-stream reset gap; it was fixed and re-verified with discriminating tests); drift-sentinel PASS with no findings; security-reviewer PASS with no findings; docs-keeper PASS (one design wording correction); governance-verifier PASS (no locked path changed; 13/13 locks ok); tech-scout PASS (no dependency or radar row needed); release-manager PASS (N/A: no milestone exit or release artifact).
+- Next step: keep M2 open for B3 task-class routing and budgets, B5 point-and-click provider setup, B6 direct-provider feature parity, Bifrost supervision and live smoke tests.
 
 ### 2026-11-24 - M2 B1 provider presets and request client
 
