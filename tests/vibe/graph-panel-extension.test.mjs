@@ -59,8 +59,9 @@ test('the built-in extension activates and registers the graph commands', () => 
     'vibecodium.graph.setData',
     'vibecodium.memory.open',
     'vibecodium.memory.setStore',
+    'vibecodium.providers.open',
   ]);
-  assert.equal(context.subscriptions.length, 4);
+  assert.equal(context.subscriptions.length, 5);
   assert.equal(typeof api.open, 'function');
   api.setGraph({ projects: [{ id: 'api' }], nodes: [], edges: [] });
   assert.equal(loaded.opened(), 0);

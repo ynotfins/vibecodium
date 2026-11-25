@@ -82,8 +82,9 @@ test('the built-in extension activates and registers graph and memory commands',
     'vibecodium.graph.setData',
     'vibecodium.memory.open',
     'vibecodium.memory.setStore',
+    'vibecodium.providers.open',
   ]);
-  assert.equal(context.subscriptions.length, 4);
+  assert.equal(context.subscriptions.length, 5);
 
   await loaded.commands['vibecodium.memory.open']();
   assert.equal(loaded.panels.length, 0);

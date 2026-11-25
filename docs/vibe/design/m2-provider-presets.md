@@ -12,8 +12,9 @@
 
 This slice delivers the data-driven provider layer only. It does not start Bifrost, supervise a
 sidecar, choose a fallback or budget policy, call a live provider, or add the point-and-click
-provider UI. Fallback, task-class routing and budgets now live in B2 and B3; the provider UI,
-direct-provider feature parity, Bifrost supervision and later M3/M6 integration remain.
+provider UI. Fallback, task-class routing and budgets now live in B2 and B3; the provider UI is delivered in B5,
+and direct-provider feature
+parity, Bifrost supervision and later M3/M6 integration remain.
 
 ## Catalog
 

@@ -1,8 +1,27 @@
 'use strict';
 
 const vscode = require('vscode');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { createGraphPanelController } = require('./graph-panel.cjs');
 const { createMemoryReviewController } = require('./memory-review.cjs');
+const { createProviderSetupController } = require('./provider-setup.cjs');
+
+const PROVIDER_CATALOG_PATH = path.join(__dirname, '..', '..', '..', 'gateway', 'provider-presets.mjs');
+
+function listEnvironmentNames() {
+  return Object.keys(process.env).filter((name) =>
+    /^[A-Z][A-Z0-9_]{0,127}$/.test(name) &&
+    typeof process.env[name] === 'string' &&
+    process.env[name].length > 0);
+}
+
+function loadProviderCatalog(providers) {
+  return import(pathToFileURL(PROVIDER_CATALOG_PATH).href)
+    .then((module) => providers.setCatalog(module.listProviderPresets()))
+    .then(() => true)
+    .catch(() => false);
+}
 
 function activate(context) {
   let currentGraph = null;
@@ -18,6 +37,17 @@ function activate(context) {
     extensionUri: context.extensionUri,
     storeProvider: () => currentStore,
   });
+  const providers = createProviderSetupController({
+    vscode,
+    extensionUri: context.extensionUri,
+    secretStorage: context.secrets,
+    environmentNames: listEnvironmentNames(),
+    document: context.globalState?.get?.('vibecodium.providers'),
+    saveDocument: context.globalState?.update
+      ? (document) => context.globalState.update('vibecodium.providers', document)
+      : undefined,
+  });
+  const catalogReady = context.secrets ? loadProviderCatalog(providers) : Promise.resolve(false);
 
   context.subscriptions.push(vscode.commands.registerCommand('vibecodium.graph.open', () => graph.open()));
   context.subscriptions.push(vscode.commands.registerCommand('vibecodium.graph.setData', (data) => {
@@ -35,6 +65,10 @@ function activate(context) {
 
   context.subscriptions.push(vscode.commands.registerCommand('vibecodium.memory.open', () => memory.open()));
   context.subscriptions.push(vscode.commands.registerCommand('vibecodium.memory.setStore', applyStore));
+  context.subscriptions.push(vscode.commands.registerCommand('vibecodium.providers.open', async () => {
+    await catalogReady;
+    return providers.open();
+  }));
 
   return {
     open: () => graph.open(),
@@ -52,6 +86,14 @@ function activate(context) {
     getMemoryPanelHtml: () => memory.html(),
     handleMemoryMessage: (message) => memory.handleMessage(message),
     disposeMemory: () => memory.dispose(),
+    openProviders: async () => {
+      await catalogReady;
+      return providers.open();
+    },
+    getProviderSetupView: () => providers.view(),
+    getProviderSetupHtml: () => providers.html(),
+    handleProviderSetupMessage: (message) => providers.handleMessage(message),
+    disposeProviders: () => providers.dispose(),
   };
 }
 

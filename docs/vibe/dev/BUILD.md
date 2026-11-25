@@ -1,6 +1,6 @@
 # Building Vibecodium on Windows
 
-> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-24
+> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-25
 
 Vibecodium builds with VSCodium's scripts. Run everything in **Git Bash** from the repository root.
 
@@ -58,6 +58,30 @@ VIBECODIUM_APP_PATH="/c/Program Files/Microsoft VS Code/Code.exe" node --test te
 ```
 
 The runner checks the three chat settings, that the throwaway profile has no user-installed Copilot-branded extension (the test disables the stock host's built-ins by exact id, the runner prints `AI_SURFACES_USER_COPILOT_IDS=`, `AI_SURFACES_COPILOT_IDS=` and `AI_SURFACES_EXT_COUNT=` as evidence, and a planted `GitHub.copilot-probe` is reported as `AI_SURFACES_PROBE_DETECTED=` so the user-installed check is positive-controlled; the test asserts on a JSON report (`VIBECODIUM_AI_SURFACES_REPORT`) rather than the interleaved stdout lines; a stock host may still list or load its bundled Copilot Chat; the throwaway extensions directory starts empty, so this proves the classifier wiring plus the planted probe, not the owner's normal profile); the Vibecodium build removes the bundled `extensions/copilot` folder via `patches/52-ext-copilot-remove-it.json`, the chat, inline-chat, Agents, session and checkpoint commands, and that opening chat creates no GitHub authentication session. It accepts either `workbench.action.sessions.newChat` (1.143) or `workbench.action.newChatWindow` (1.135). A rebuilt-app smoke remains M12.
+
+### Provider setup panel
+
+The built-in `vibecodium.vibecodium-ai` extension registers `vibecodium.providers.open`. At
+activation it loads the B1 preset catalog directly; the only public command is
+`vibecodium.providers.open`. The panel lists the B1 preset catalog, adds and switches a provider,
+accepts a model and an environment-variable name, and stores an entered API key only in
+`context.secrets`. The non-secret document is persisted in extension global state and converts to
+the B1 settings-JSON override shape with `toProviderSettings()`. The document also stores the catalog transport/auth/base-URL fingerprint and rejects a reload whose catalog no longer matches.
+
+Run the model and extension contract checks:
+
+```bash
+node --test tests/vibe/provider-setup.test.mjs src/stable/extensions/vibecodium-ai/src/extension-contract.test.cjs
+```
+
+The real extension-host acceptance uses a throwaway profile and scans it for the planted secret:
+
+```bash
+VIBECODIUM_APP_PATH="/c/Program Files/Microsoft VS Code/Code.exe" node --test tests/vibe/provider-setup-ide.test.mjs
+```
+
+The panel is not yet wired to live gateway calls, Bifrost supervision or a live-provider smoke
+test; those remain M6 and later M2 work.
 
 ### Documentation MCP server
 

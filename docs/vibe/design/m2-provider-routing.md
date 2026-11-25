@@ -12,7 +12,9 @@ B3 needs a policy table to choose the model for each task class and a hard stop 
 day budget can be exceeded. This slice supplies that decision layer for `plan`, `code-edit`,
 `quick-edit`, `review`, `summarize` and `embed`. It does not start Bifrost, intercept workbench
 requests, classify prompts automatically, store provider secrets, surface the provider UI or price
-calls in currency. Those remain B5/B6 and later M2/M6 integration work.
+calls in currency. Provider setup and secret storage are delivered in B5;
+B6 parity, workbench interception and Bifrost remain M2/M6
+integration work.
 
 ## Policy contract
 

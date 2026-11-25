@@ -12,8 +12,8 @@ B2 requires that a forced primary-provider failure produces an answer from the n
 the same turn, or fails cleanly. This slice supplies that ordered fallback layer for chat and
 embeddings. It does not choose providers by task class, enforce token or daily budgets, surface a
 provider UI, start Bifrost, or call a live provider. Task-class routing and budgets now live in the
-B3 router; the provider UI and live-provider calls remain B5 and later integration work, and
-Bifrost supervision remains M2 work.
+B3 router; the provider UI is delivered in B5,
+while live-provider calls and Bifrost supervision remain later integration work.
 
 ## Chain contract
 

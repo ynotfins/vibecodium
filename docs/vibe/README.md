@@ -29,6 +29,7 @@ Vibecodium is a standalone, Windows-first AI IDE built on VSCodium. This folder 
 | [design/m2-provider-presets.md](design/m2-provider-presets.md) | M2 B1 provider catalog, settings-JSON path and the two-transport request client |
 | [design/m2-provider-fallback.md](design/m2-provider-fallback.md) | M2 B2 ordered fallback, its retry boundary and safe attempt metadata |
 | [design/m2-provider-routing.md](design/m2-provider-routing.md) | M2 B3 task-class policy routing, output caps and task/day token budgets |
+| [design/m2-provider-setup.md](design/m2-provider-setup.md) | M2 B5 point-and-click provider setup, secret-only credentials and the panel contract |
 | [CHANGELOG.md](CHANGELOG.md) | User-visible changes per release |
 | [SECURITY.md](SECURITY.md) | Security model and how to report issues |
 | [adr/README.md](adr/README.md) | Architecture decision records |
