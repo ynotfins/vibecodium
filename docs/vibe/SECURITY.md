@@ -1,6 +1,6 @@
 # Security
 
-> Doc class: living · Owner: security-reviewer · Last reviewed: 2026-11-25
+> Doc class: living - Owner: security-reviewer - Last reviewed: 2026-11-25
 
 ## Model
 
@@ -17,7 +17,7 @@
 
 ## Build loop
 
-The autonomous build loop's isolation and accepted risks are documented in `GOVERNANCE.md` §5 "Enforcement".
+The autonomous build loop's isolation and accepted risks are documented in `GOVERNANCE.md` Section 5 "Enforcement".
 
 ## Reporting
 
