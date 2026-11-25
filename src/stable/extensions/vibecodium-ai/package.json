@@ -14,7 +14,9 @@
     "onCommand:vibecodium.graph.open",
     "onCommand:vibecodium.graph.setData",
     "onCommand:vibecodium.memory.open",
-    "onCommand:vibecodium.memory.setStore"
+    "onCommand:vibecodium.memory.setStore",
+    "onCommand:vibecodium.providers.open",
+    "onCommand:vibecodium.providers.setSetup"
   ],
   "contributes": {
     "configuration": {
@@ -42,6 +44,11 @@
         "command": "vibecodium.memory.open",
         "title": "Open Memory Review",
         "category": "Vibecodium"
+      },
+      {
+        "command": "vibecodium.providers.open",
+        "title": "Open Provider Setup",
+        "category": "Vibecodium"
       }
     ],
     "menus": {
@@ -51,6 +58,9 @@
         },
         {
           "command": "vibecodium.memory.open"
+        },
+        {
+          "command": "vibecodium.providers.open"
         }
       ]
     }

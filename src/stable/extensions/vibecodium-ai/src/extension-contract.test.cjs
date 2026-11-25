@@ -65,7 +65,7 @@ const emptyStore = {
   async forget() {},
 };
 
-test('activate registers the graph and memory panel commands without touching the workbench', () => {
+test('activate registers the graph, memory and provider panel commands without touching the workbench', () => {
   const loaded = loadWithFakeVscode();
   const context = { subscriptions: [], extensionUri: { fsPath: 'x' } };
   const api = loaded.activate(context);
@@ -74,8 +74,10 @@ test('activate registers the graph and memory panel commands without touching th
     'vibecodium.graph.setData',
     'vibecodium.memory.open',
     'vibecodium.memory.setStore',
+    'vibecodium.providers.open',
+    'vibecodium.providers.setSetup',
   ]);
-  assert.equal(context.subscriptions.length, 4);
+  assert.equal(context.subscriptions.length, 6);
   assert.equal(typeof api.open, 'function');
   assert.equal(typeof api.openMemory, 'function');
   api.setGraph({ projects: [{ id: 'api' }], nodes: [], edges: [] });
@@ -136,4 +138,19 @@ test('the extension exposes memory panel state and handles a review message thro
   assert.equal(missing.ok, false);
   assert.equal(missing.code, 'not-found');
   assert.doesNotThrow(() => api.disposeMemory());
+});
+
+test('the provider setup panel opens after a setup service is supplied', async () => {
+  const loaded = loadWithFakeVscode();
+  const context = { subscriptions: [], extensionUri: { fsPath: 'x' } };
+  const api = loaded.activate(context);
+  assert.equal(api.setProviderSetup(null), undefined);
+  api.setProviderSetup({
+    view: () => ({ version: 1, activeProvider: null, providers: [], envNames: [] }),
+  });
+  const opened = await api.openProviders();
+  assert.equal(opened.opened, true);
+  assert.equal(loaded.opened(), 1);
+  assert.match(api.getProviderPanelHtml(), /Providers/);
+  assert.doesNotThrow(() => api.disposeProviders());
 });
