@@ -254,6 +254,10 @@ test('secrets never appear in a config, error, or serialized client', async () =
     (value) => value instanceof ProviderClientError && value.code === 'invalid-api-key',
   );
   assert.throws(
+    () => createProviderClient('openrouter', { model: 'm', apiKey: 'sk-' + String.fromCharCode(0x202e) + 'key' }),
+    (value) => value instanceof ProviderClientError && value.code === 'invalid-api-key',
+  );
+  assert.throws(
     () => createProviderClient('openrouter', { model: 'm', apiKey: 'a'.repeat(4097) }),
     (value) => value instanceof ProviderClientError && value.code === 'invalid-api-key',
   );
@@ -323,7 +327,7 @@ test('input and response validation fail closed', async () => {
     baseUrl: urlFor(1, '/v1'),
     model: 'm',
     env: {},
-    fetch: async () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => '{}' }),
+    fetch: async () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ choices: [{ message: { content: 'ok' } }], usage: {} }) }),
   });
   await assert.rejects(textFallback.chat({ messages: MESSAGES }), (error) => error.code === 'invalid-response');
 });
@@ -345,8 +349,8 @@ test('configuration resolves base URLs and models without exposing credentials',
   assert.throws(() => resolveProviderConfig('llama-cpp', { model: 'm', policy: [] }), (error) => error.code === 'invalid-options');
 });
 
-test('the external-provider opt-in cannot reach Copilot, telemetry or GitHub hosts', () => {
-  for (const host of ['api.githubcopilot.com', 'copilot-telemetry.githubusercontent.com', 'api.github.com']) {
+test('the external-provider opt-in cannot reach Copilot, telemetry, GitHub or metadata hosts', () => {
+  for (const host of ['api.githubcopilot.com', 'copilot-telemetry.githubusercontent.com', 'api.github.com', 'metadata.google.internal']) {
     assert.throws(
       () => createProviderClient('openai-compatible', {
         baseUrl: 'https://' + host + '/v1',
@@ -453,5 +457,21 @@ test('an oversized streamed body is rejected while reading', async () => {
   await assert.rejects(
     client.chat({ messages: MESSAGES }),
     (error) => error instanceof ProviderClientError && error.code === 'response-too-large',
+  );
+});
+
+test('a caller abort is reported as aborted', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const client = createProviderClient('llama-cpp', {
+    baseUrl: urlFor(1, '/v1'),
+    model: 'm',
+    env: {},
+    signal: controller.signal,
+    fetch: async () => { throw new Error('should not be reached'); },
+  });
+  await assert.rejects(
+    client.chat({ messages: MESSAGES }),
+    (error) => error instanceof ProviderClientError && error.code === 'aborted',
   );
 });
