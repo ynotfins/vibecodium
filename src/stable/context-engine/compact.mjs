@@ -191,7 +191,7 @@ function validateMessage(raw, index) {
   const toolCallId = ownData(raw, 'tool_call_id', 'compact-message', label);
   if (toolCallId !== undefined &&
       (typeof toolCallId !== 'string' || toolCallId.length === 0 || toolCallId.length > 512 ||
-       CONTROL_OR_BIDI.test(toolCallId) || hasLoneSurrogate(toolCallId))) {
+      CONTROL_OR_BIDI.test(toolCallId) || hasLoneSurrogate(toolCallId))) {
     fail('compact-message', label + ' has an invalid tool_call_id');
   }
   return { role, content, name, toolCallId };
