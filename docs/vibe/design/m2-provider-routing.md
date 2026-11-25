@@ -68,13 +68,13 @@ Budgets are token counts. The router reserves a conservative input upper bound p
 cap against both the task and the UTC day before it dispatches:
 
 - Input uses the exact UTF-8 byte length of the JSON-serialized messages or embedding input, the
-  complete tool schemas (including numeric and enum tool parameters) and fixed message and tool
-  allowances. A token cannot encode less than one UTF-8 byte, so this is an upper bound without
-  shipping a tokenizer.
+   complete tool schemas (including numeric and enum tool parameters) and fixed message and tool
+   allowances. A token cannot encode less than one UTF-8 byte, so this is an upper bound without
+   shipping a tokenizer.
 - The output reservation is the highest route cap for the class.
 - The reservation is multiplied by the route count, because B2 can contact each route once.
 - If either the task or day cannot cover the reservation, `ProviderRouterError` with code
-  `budget-exhausted` and scope `task` or `day` is raised before a provider call.
+   `budget-exhausted` and scope `task` or `day` is raised before a provider call.
 
 A reservation remembers the UTC day record it started under. Settlement always releases the
 reservation from that record and charges actual usage to the day that is current at settlement. If a
