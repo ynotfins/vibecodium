@@ -47,12 +47,12 @@ A provider can be added, or a built-in overridden, from a settings object alone:
 {
    "providers": {
       "my-lab": {
-      "label": "My Lab",
-      "transport": "openai-chat",
-      "baseUrl": "http://127.0.0.1:9999/v1",
-      "model": "lab-model",
-      "auth": "none",
-      "capabilities": ["chat", "stream", "tools"]
+         "label": "My Lab",
+         "transport": "openai-chat",
+         "baseUrl": "http://127.0.0.1:9999/v1",
+         "model": "lab-model",
+         "auth": "none",
+         "capabilities": ["chat", "stream", "tools"]
       }
    }
 }
