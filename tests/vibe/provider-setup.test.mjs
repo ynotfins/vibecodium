@@ -218,7 +218,7 @@ test('createClient accepts a key from the configured environment variable', asyn
 test('the credential store spawns the absolute system PowerShell, not a bare name', () => {
   const fromSystemRoot = powershellPath({ SystemRoot: 'C:\\Windows' });
   assert.equal(fromSystemRoot, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
-  assert.equal(path.isAbsolute(fromSystemRoot), true);
+  assert.equal(path.win32.isAbsolute(fromSystemRoot), true);
   assert.equal(
     powershellPath({ windir: 'D:\\Win\\' }),
     'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
