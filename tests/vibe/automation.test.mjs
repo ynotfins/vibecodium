@@ -53,10 +53,10 @@ test('goal runner: codex BYOK on OmniRoute, opencode fallback, secrets removed, 
   assert.match(s, /AddDays\(-14\)/);
 });
 
-test('model routing: OmniRoute forced unless down, codex only for OmniRoute, Morph order', () => {
+test('model routing: OmniRoute forced unless down, harnesses pinned, Morph order', () => {
   const m = JSON.parse(read('vibe/goal/models.json'));
   assert.deepEqual(m.order.slice(0, 2), ['omniroute', 'morph']);
-  assert.equal(m.providers.omniroute.harness, 'codex');
+  assert.equal(m.providers.omniroute.harness, 'opencode', 'the OmniRoute lane runs OpenCode: Codex elevation re-triggers UAC per session');
   assert.ok(!Object.values(m.providers.omniroute.classes).some((v) => ['agent', 'reasoning', 'review', 'cheap', 'default'].includes(v)), 'OmniRoute must use pinned model ids, not combos that can switch mid-session');
   assert.equal(m.providers.morph.harness, 'opencode');
   assert.equal(m.providers.deepinfra.harness, 'opencode');
@@ -116,7 +116,7 @@ test('goal runner refuses to start when its lock fails', { skip: WIN_PWSH }, () 
   assert.match(log, /governance check failed on trunk; refusing to start a session/);
 });
 
-test('codex harness: BYOK config, sandbox roots, no subscription login, Morph tools, secrets removed', { skip: WIN_PWSH }, () => {
+test('codex harness config generation (not used by the loop: Codex elevation triggers UAC)', { skip: 'no provider uses the codex harness; the runner still rejects codex on non-Responses providers' }, () => {
   const f = runnerFixture();
   const out = dryRun(f, 'omniroute');
   assert.match(out, /DRYRUN harness=codex provider=omniroute/, out);
