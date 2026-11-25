@@ -1,6 +1,6 @@
 # M2 B1 provider presets and request client
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-24
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-25
 >
 > The dependency-free provider catalog and request client that M2 builds on. The catalog lives in
 > [provider-presets.mjs](../../../src/stable/gateway/provider-presets.mjs), the client in
@@ -12,7 +12,8 @@
 
 This slice delivers the data-driven provider layer only. It does not start Bifrost, supervise a
 sidecar, choose a fallback or budget policy, call a live provider, or add the point-and-click
-provider UI. Those remain B2/B3/B5/B6 and M3/M6 work.
+provider UI. Fallback, task-class routing and budgets now live in B2 and B3; the provider UI,
+direct-provider feature parity, Bifrost supervision and later M3/M6 integration remain.
 
 ## Catalog
 
