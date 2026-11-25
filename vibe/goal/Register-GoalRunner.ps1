@@ -11,6 +11,8 @@
 #>
 param(
   [Parameter(Mandatory)] [string]$Root,
+  # Separate lanes must not share a log directory: the runner lock and the daily counter live there.
+  [string]$LogDir = '',
   [switch]$Unregister,
   [string]$TaskName = 'Vibecodium Goal Runner'
 )
@@ -39,6 +41,7 @@ $conhost = Join-Path $env:WINDIR 'System32\conhost.exe'
 # task scripts. Mitigations: the runner, its prompt and this script are governance-locked files, and
 # the runner refuses to start a session when the governance check fails.
 $argLine = "--headless `"$pwsh`" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$runner`" -Root `"$Root`""
+if ($LogDir) { $argLine += " -LogDir `"$LogDir`"" }
 $action = New-ScheduledTaskAction -Execute $conhost -Argument $argLine -WorkingDirectory $Root
 $atLogon = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $repeat = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 30)
