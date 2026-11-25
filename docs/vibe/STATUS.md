@@ -1,6 +1,6 @@
 # Vibecodium Status
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-24
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-25
 
 Goal state: active
 Owner priorities (2026-11-20): alongside M0/M1, begin the standalone engine packages (Vibe Context Engine, multi-project indexer/graph) - they are testable without the IDE build. Build-dependent work continues now that the MSVC Spectre component is installed. Milestone numbering is unchanged.
