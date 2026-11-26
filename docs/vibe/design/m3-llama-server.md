@@ -14,8 +14,9 @@ This is M3's first slice: the local runtime boundary. It starts, health-checks a
 `llama-server` child on loopback, and it proves that the delivered B1 `llama-cpp` preset serves chat,
 streaming, tool calls and embeddings through it. It does not bundle or download llama.cpp or any
 weights, probe the hardware, render the first-run wizard, proxy chat itself, restart a failed
-server or manage descendants. The model downloader, the hardware probe and the wizard build on this
-module in later M3 slices; the binary pinning belongs with `vibe/sidecars.json`.
+server or manage descendants. The model downloader is a sibling slice that supplies the weights; the
+hardware probe and the wizard build on this module in later M3 slices, and the binary pinning belongs
+with `vibe/sidecars.json`.
 
 ## Contract
 
