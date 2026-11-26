@@ -9,7 +9,6 @@ import {
   OllamaError,
   discoverOllama,
   toOllamaProviderOptions,
-  validateOllamaResult,
 } from '../../src/stable/runtime/ollama.mjs';
 
 const HOST = ['127', '0', '0', '1'].join('.');
@@ -850,107 +849,4 @@ test('aborts the request on a non-200 or non-JSON failure and accepts DataView a
   });
   assert.equal(parsed.available, true);
   assert.equal(parsed.chatModel, 'llama3.2:3b');
-});
-
-test('validateOllamaResult projects an available result to a frozen display summary', async (t) => {
-  const { port } = await startServer(t, tagsHandler([
-    model('nomic-embed-text:latest', { details: { family: 'nomic-bert' } }),
-    model('llama3.2:3b', { size: 900 }),
-  ]));
-  const summary = validateOllamaResult(await discoverOllama({ port }));
-  assert.deepEqual({ ...summary }, {
-    version: 1,
-    available: true,
-    reason: null,
-    status: 200,
-    port,
-    baseUrl: 'http://' + HOST + ':' + port + '/v1',
-    chatModel: 'llama3.2:3b',
-    embeddingModel: 'nomic-embed-text:latest',
-    modelCount: 2,
-    notices: [],
-  });
-  assert.equal('models' in summary, false);
-  assert.equal(Object.isFrozen(summary), true);
-  assert.equal(Object.isFrozen(summary.notices), true);
-});
-
-test('validateOllamaResult summarizes an unavailable result and rejects forged or unsafe results', async (t) => {
-  const unavailable = await discoverOllama({ port: await unusedPort(t), timeoutMs: 500 });
-  const summary = validateOllamaResult(unavailable);
-  assert.equal(summary.available, false);
-  assert.equal(summary.reason, 'unreachable');
-  assert.equal(summary.status, null);
-  assert.equal(summary.baseUrl, null);
-  assert.equal(summary.chatModel, null);
-  assert.equal(summary.modelCount, 0);
-  assert.deepEqual([...summary.notices], ['ollama-unreachable']);
-  assert.equal(Object.isFrozen(summary), true);
-
-  const { port } = await startServer(t, tagsHandler([model('llama3.2:3b')]));
-  const result = await discoverOllama({ port });
-  for (const forged of [
-    { ...result, version: 2 },
-    { ...result, available: 'yes' },
-    { ...result, port: 80 },
-    { ...result, chatModel: 'missing:1b' },
-    { ...result, notices: ['ollama-unknown'] },
-    { ...result, notices: [{ length: 0 }] },
-    { ...result, baseUrl: 'http://example.com/v1' },
-  ]) {
-    assert.throws(() => validateOllamaResult(forged), isOllamaCode('invalid-result'));
-  }
-  assert.throws(() => validateOllamaResult({ ...unavailable, reason: 'melted' }), isOllamaCode('invalid-result'));
-  assert.throws(() => validateOllamaResult({ ...unavailable, status: 99 }), isOllamaCode('invalid-result'));
-  assert.throws(() => validateOllamaResult({ ...unavailable, baseUrl: 'http://example.com/v1' }),
-    isOllamaCode('invalid-result'));
-  assert.throws(() => validateOllamaResult({ ...unavailable, status: '500' }), isOllamaCode('invalid-result'));
-  assert.throws(() => validateOllamaResult({ ...unavailable, models: [{ id: 'llama3.2:3b' }] }),
-    isOllamaCode('invalid-result'));
-  assert.throws(() => validateOllamaResult({ ...unavailable, chatModel: 'llama3.2:3b' }),
-    isOllamaCode('invalid-result'));
-  assert.throws(() => validateOllamaResult({ ...unavailable, embeddingModel: 'nomic-embed-text:latest' }),
-    isOllamaCode('invalid-result'));
-
-  const missingNotices = { ...result };
-  delete missingNotices.notices;
-  assert.throws(() => validateOllamaResult(missingNotices), isOllamaCode('invalid-result'));
-
-  // A live Proxy whose get trap throws must still be read through own data descriptors.
-  const proxied = new Proxy(result, {
-    get() { throw new Error('get trap must not run'); },
-  });
-  assert.equal(validateOllamaResult(proxied).available, true);
-
-  let invoked = false;
-  const accessor = { ...result };
-  Object.defineProperty(accessor, 'chatModel', {
-    enumerable: true,
-    get() { invoked = true; return 'llama3.2:3b'; },
-  });
-  assert.throws(() => validateOllamaResult(accessor), isOllamaCode('invalid-result'));
-  assert.equal(invoked, false);
-
-  const revoked = Proxy.revocable(result, {});
-  revoked.revoke();
-  assert.throws(() => validateOllamaResult(revoked.proxy), isOllamaCode('invalid-result'));
-});
-
-test('validateOllamaResult never invokes a Proxy array get trap', async (t) => {
-  const { port } = await startServer(t, (request, response) => sendJson(response, 200, {
-    models: [model('llama3.2:3b')],
-  }));
-  const result = await discoverOllama({ port });
-  const trapped = (items) => new Proxy(items, {
-    get() { throw new Error('get trap ran'); },
-  });
-  const summary = validateOllamaResult({
-    ...result,
-    models: trapped([...result.models]),
-    notices: trapped([...result.notices]),
-  });
-  assert.equal(summary.available, true);
-  assert.equal(summary.modelCount, 1);
-  assert.deepEqual([...summary.notices], ['ollama-no-embedding-model']);
-  assert.ok(Object.isFrozen(summary.notices));
 });

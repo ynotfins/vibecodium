@@ -9,7 +9,6 @@ import {
   createFirstRunWizard,
   projectCatalogModels,
 } from '../../src/stable/runtime/first-run.mjs';
-import { buildOllamaBaseUrl } from '../../src/stable/runtime/ollama.mjs';
 
 const GIB = 1024 * 1024 * 1024;
 const MIB = 1024 * 1024;
@@ -58,57 +57,8 @@ function wizard(t, overrides = {}) {
     destinationDir: path.join(root, 'models'),
     probe: probe(),
     verifyModel: async () => ({ verified: false }),
-    discoverOllama: async () => ollamaDown(),
     ...overrides.options,
   });
-}
-
-function ollamaModel(id, embedding) {
-  return {
-    id,
-    sizeBytes: 1024 * MIB,
-    parameterSize: null,
-    quantization: null,
-    family: embedding ? 'nomic-bert' : null,
-    embedding,
-    remote: false,
-  };
-}
-
-function ollamaUp(overrides = {}) {
-  return {
-    version: 1,
-    available: true,
-    reason: null,
-    status: 200,
-    port: 11434,
-    baseUrl: buildOllamaBaseUrl(11434),
-    models: [ollamaModel('llama3.2:3b', false), ollamaModel('nomic-embed-text:latest', true)],
-    chatModel: 'llama3.2:3b',
-    embeddingModel: 'nomic-embed-text:latest',
-    notices: [],
-    ...overrides,
-  };
-}
-
-function ollamaDown(reason = 'unreachable') {
-  const notice = reason === 'http-error' ? 'ollama-http-error'
-    : reason === 'timeout' ? 'ollama-timeout'
-      : reason === 'invalid-response' ? 'ollama-invalid-response'
-        : reason === 'policy-denied' ? 'ollama-policy-denied'
-          : 'ollama-unreachable';
-  return {
-    version: 1,
-    available: false,
-    reason,
-    status: reason === 'http-error' ? 500 : null,
-    port: 11434,
-    baseUrl: null,
-    models: [],
-    chatModel: null,
-    embeddingModel: null,
-    notices: [notice],
-  };
 }
 
 test('projectCatalogModels projects only chat and embedding entries to four fields', () => {
@@ -191,7 +141,6 @@ test('a ready machine exposes the start plan once the binary and both models are
   assert.equal(view.downloadBytes, 0);
   assert.deepEqual(view.start, {
     available: true,
-    kind: 'llama-server',
     executablePath: runtime,
     modelPath: path.join(root, 'models', chatEntry.file),
     embeddingModelPath: path.join(root, 'models', embeddingEntry.file),
@@ -436,207 +385,6 @@ test('install fails closed when a downloaded file does not verify', async (t) =>
   assert.equal(JSON.stringify(view).includes('did not verify'), false);
 });
 
-test('an available Ollama daemon is reported but the pinned plan stays the default', async (t) => {
-  const root = tempRoot(t);
-  const wizardInstance = wizard(t, {
-    root,
-    options: { discoverOllama: async () => ollamaUp() },
-  });
-  const view = await wizardInstance.refresh();
-  assert.equal(view.source, 'pinned');
-  assert.equal(view.phase, 'needs-download');
-  assert.deepEqual({ ...view.ollama }, {
-    version: 1,
-    available: true,
-    reason: null,
-    status: 200,
-    port: 11434,
-    baseUrl: buildOllamaBaseUrl(11434),
-    chatModel: 'llama3.2:3b',
-    embeddingModel: 'nomic-embed-text:latest',
-    modelCount: 2,
-    notices: [],
-  });
-  assert.equal(Object.isFrozen(view.ollama), true);
-  assert.equal(Object.isFrozen(view.ollama.notices), true);
-  assert.deepEqual(view.start, { available: false, reason: 'not-ready' });
-});
-
-test('useOllama switches to the daemon and usePinned returns to the pinned plan', async (t) => {
-  const root = tempRoot(t);
-  let downloads = 0;
-  const wizardInstance = wizard(t, {
-    root,
-    options: {
-      discoverOllama: async () => ollamaUp(),
-      downloadModel: async () => { downloads += 1; return { verified: true }; },
-    },
-  });
-  const view = await wizardInstance.refresh();
-  assert.equal(view.phase, 'needs-download');
-
-  assert.deepEqual(wizardInstance.useOllama(), { ok: true, source: 'ollama' });
-  const using = wizardInstance.view();
-  assert.equal(using.source, 'ollama');
-  assert.equal(using.phase, 'ready');
-  assert.equal(using.downloadBytes, view.downloadBytes);
-  assert.deepEqual(using.start, {
-    available: true,
-    kind: 'ollama',
-    baseUrl: buildOllamaBaseUrl(11434),
-    model: 'llama3.2:3b',
-    embeddingModel: 'nomic-embed-text:latest',
-  });
-  assert.equal(Object.isFrozen(using.start), true);
-  assert.deepEqual(wizardInstance.startPlan(), using.start);
-  assert.deepEqual(await wizardInstance.install(), { ok: true, installed: 0, reason: 'ollama-selected' });
-  assert.equal(downloads, 0);
-
-  assert.deepEqual(wizardInstance.usePinned(), { ok: true, source: 'pinned' });
-  assert.equal(wizardInstance.view().source, 'pinned');
-  assert.equal(wizardInstance.view().phase, 'needs-download');
-  assert.deepEqual(wizardInstance.startPlan(), { available: false, reason: 'not-ready' });
-});
-
-test('preferOllama selects the daemon on refresh even when the pinned plan is insufficient', async (t) => {
-  const root = tempRoot(t);
-  const wizardInstance = wizard(t, {
-    root,
-    options: {
-      preferOllama: true,
-      probe: probe(hardware({ totalMemoryBytes: 4 * GIB, freeMemoryBytes: 2 * GIB })),
-      discoverOllama: async () => ollamaUp(),
-    },
-  });
-  const view = await wizardInstance.refresh();
-  assert.equal(view.verdict, 'insufficient');
-  assert.equal(view.source, 'ollama');
-  assert.equal(view.phase, 'ready');
-  assert.equal(view.start.kind, 'ollama');
-  assert.deepEqual(await wizardInstance.install(), { ok: true, installed: 0, reason: 'ollama-selected' });
-});
-
-test('an unavailable daemon falls back to the pinned plan and useOllama fails closed', async (t) => {
-  const root = tempRoot(t);
-  let calls = 0;
-  const wizardInstance = wizard(t, {
-    root,
-    options: {
-      preferOllama: true,
-      discoverOllama: async () => { calls += 1; return ollamaDown('timeout'); },
-    },
-  });
-  assert.deepEqual(wizardInstance.useOllama(), { ok: false, reason: 'not-ready' });
-  const view = await wizardInstance.refresh();
-  assert.equal(calls, 1);
-  assert.equal(view.source, 'pinned');
-  assert.equal(view.phase, 'needs-download');
-  assert.deepEqual({ ...view.ollama }, {
-    version: 1,
-    available: false,
-    reason: 'timeout',
-    status: null,
-    port: 11434,
-    baseUrl: null,
-    chatModel: null,
-    embeddingModel: null,
-    modelCount: 0,
-    notices: ['ollama-timeout'],
-  });
-  assert.deepEqual(wizardInstance.useOllama(), { ok: false, reason: 'ollama-unavailable' });
-  assert.equal(wizardInstance.view().source, 'pinned');
-
-  const second = await wizardInstance.refresh();
-  assert.equal(calls, 2);
-  assert.equal(second.ollama.reason, 'timeout');
-});
-
-test('a hostile discovery function cannot break refresh or echo its text', async (t) => {
-  const root = tempRoot(t);
-  const thrown = wizard(t, {
-    root,
-    options: {
-      discoverOllama: async () => { throw new Error('C:\\Users\\me\\secret and a response body'); },
-    },
-  });
-  const failed = await thrown.refresh();
-  assert.equal(failed.phase, 'needs-download');
-  assert.equal(failed.ollama.available, false);
-  assert.equal(failed.ollama.reason, 'discovery-failed');
-  assert.equal(JSON.stringify(failed).includes('secret'), false);
-  assert.equal(JSON.stringify(failed).includes('response body'), false);
-
-  const accessor = ollamaUp();
-  Object.defineProperty(accessor, 'available', {
-    enumerable: true,
-    get() { throw new Error('getter ran'); },
-  });
-  const forged = wizard(t, { root: tempRoot(t), options: { discoverOllama: async () => accessor } });
-  const forgedView = await forged.refresh();
-  assert.equal(forgedView.ollama.reason, 'invalid-result');
-
-  const revoked = Proxy.revocable(ollamaUp(), {});
-  revoked.revoke();
-  const revokedWizard = wizard(t, { root: tempRoot(t), options: { discoverOllama: async () => revoked.proxy } });
-  const revokedView = await revokedWizard.refresh();
-  // Resolving an async function with a revoked proxy rejects before the validator can run, so the
-  // wizard reports a bounded discovery failure rather than an invalid result.
-  assert.equal(revokedView.ollama.reason, 'discovery-failed');
-  assert.equal(revokedView.phase, 'needs-download');
-
-  const unknownModel = wizard(t, {
-    root: tempRoot(t),
-    options: { discoverOllama: async () => ollamaUp({ chatModel: 'not-installed:1b' }) },
-  });
-  assert.equal((await unknownModel.refresh()).ollama.reason, 'invalid-result');
-
-  const unknownNotice = wizard(t, {
-    root: tempRoot(t),
-    options: { discoverOllama: async () => ollamaUp({ notices: ['ollama-secret'] }) },
-  });
-  assert.equal((await unknownNotice.refresh()).ollama.reason, 'invalid-result');
-});
-
-test('an ollama-aware wizard refuses an invalid discovery option without invoking an accessor', () => {
-  const base = { catalog, destinationDir: path.join(os.tmpdir(), 'vibe-models') };
-  assert.throws(() => createFirstRunWizard({ ...base, discoverOllama: 'no' }), { code: 'invalid-options' });
-  assert.throws(() => createFirstRunWizard({ ...base, preferOllama: 'yes' }), { code: 'invalid-options' });
-  let invoked = false;
-  const accessor = { ...base };
-  Object.defineProperty(accessor, 'preferOllama', {
-    enumerable: true,
-    get() { invoked = true; return true; },
-  });
-  assert.throws(() => createFirstRunWizard(accessor), { code: 'invalid-options' });
-  assert.equal(invoked, false);
-});
-
-test('the daemon controls refuse to switch while a download is in flight', async (t) => {
-  const root = tempRoot(t);
-  let release;
-  const gate = new Promise((resolve) => { release = resolve; });
-  const installed = new Set();
-  const wizardInstance = wizard(t, {
-    root,
-    options: {
-      discoverOllama: async () => ollamaUp(),
-      downloadModel: async (entry) => {
-        await gate;
-        installed.add(entry.id);
-        return { verified: true };
-      },
-      verifyModel: async (entry) => ({ verified: installed.has(entry.id) }),
-    },
-  });
-  await wizardInstance.refresh();
-  const running = wizardInstance.install();
-  assert.deepEqual(wizardInstance.useOllama(), { ok: false, reason: 'busy' });
-  assert.deepEqual(wizardInstance.usePinned(), { ok: false, reason: 'busy' });
-  release();
-  assert.deepEqual(await running, { ok: true, installed: 2 });
-  assert.equal(wizardInstance.view().source, 'pinned');
-});
-
 test('an abort during a download returns aborted and keeps a resumable state', async (t) => {
   const root = tempRoot(t);
   const controller = new AbortController();
@@ -686,51 +434,6 @@ test('a synchronous downloader throw does not leave the wizard permanently busy'
   assert.deepEqual(failed, { ok: false, code: 'install-failed' });
   const retried = await wizardInstance.install();
   assert.deepEqual(retried, { ok: true, installed: 2 });
-});
-
-test('a selected daemon that later disappears falls back to the pinned plan and returns when it answers again', async (t) => {
-  const root = tempRoot(t);
-  let up = true;
-  let calls = 0;
-  const wizardInstance = wizard(t, {
-    root,
-    options: {
-      discoverOllama: async () => {
-        calls += 1;
-        return up ? ollamaUp() : ollamaDown('unreachable');
-      },
-    },
-  });
-  const initial = await wizardInstance.refresh();
-  assert.equal(initial.source, 'pinned');
-  assert.deepEqual(wizardInstance.useOllama(), { ok: true, source: 'ollama' });
-  assert.equal(wizardInstance.view().phase, 'ready');
-  assert.equal(wizardInstance.view().start.kind, 'ollama');
-
-  up = false;
-  const gone = await wizardInstance.refresh();
-  assert.equal(calls, 2);
-  assert.equal(gone.source, 'pinned');
-  assert.equal(gone.phase, 'needs-download');
-  assert.equal(gone.ollama.available, false);
-  assert.deepEqual(gone.start, { available: false, reason: 'not-ready' });
-
-  up = true;
-  const back = await wizardInstance.refresh();
-  assert.equal(calls, 3);
-  assert.equal(back.source, 'ollama');
-  assert.equal(back.phase, 'ready');
-  assert.equal(back.start.kind, 'ollama');
-});
-
-test('usePinned before a refresh and both controls after dispose fail closed', async (t) => {
-  const wizardInstance = wizard(t, { root: tempRoot(t) });
-  assert.deepEqual(wizardInstance.usePinned(), { ok: false, reason: 'not-ready' });
-  await wizardInstance.refresh();
-  assert.deepEqual(wizardInstance.usePinned(), { ok: true, source: 'pinned' });
-  wizardInstance.dispose();
-  assert.deepEqual(wizardInstance.useOllama(), { ok: false, reason: 'disposed' });
-  assert.deepEqual(wizardInstance.usePinned(), { ok: false, reason: 'disposed' });
 });
 
 test('a throwing change callback cannot break an install, and dispose is safe', async (t) => {
