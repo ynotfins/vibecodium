@@ -218,13 +218,21 @@ errors with no URL/body/injected-text echo and the supervisor executable contrac
 The full acceptance uses `node vibe/tools/verify.mjs --strict` and
 `node vibe/tools/docs-check.mjs --strict`.
 
+## First-run hand-off
+
+The first-run wizard now installs this sidecar on demand: it accepts the validated pin plus a
+target directory (or an injected installer), calls `installSidecar` with `{ targetDir,
+onProgress }`, adopts the reported `executablePath` only after the installer reports verified files and
+the supervisor validator accepts it, and then reports an available start plan once the pinned models
+are installed. See [m3-first-run-wizard.md](m3-first-run-wizard.md).
+
 ## Next steps
 
 Copy the installed files and `vibe/models/catalog.json` into the packaged application, sign the
 manifest, add a third-party notices file covering llama.cpp's MIT text and the LLVM/OpenMP notice, add the
 Microsoft VC++ 2015-2022 x64 redistributable to the radar and pin it,
-supply the Microsoft VC++ runtime, wire `installSidecar` into the first-run start action and
-run one live install/start smoke on a clean Windows machine. Keep the pin current from the radar, and
+supply the Microsoft VC++ runtime and
+run one live install/start smoke on a clean Windows machine (the first-run hand-off is delivered). Keep the pin current from the radar, and
 re-check the seven-day rule and the per-file digests whenever the nightly advances. Before the binary
 is bundled into a release, add an ADR (or amend ADR-0010) covering the nightly intake policy, the
 signing route, the CPU/GPU backend matrix and the Microsoft runtime pin.

@@ -754,3 +754,170 @@ test('the panel reports the daemon start status and each selection refusal', asy
     assert.deepEqual(controller.view().status, { message: null, error: message });
   }
 });
+
+test('the panel renders the runtime install status and forwards one install message', async (t) => {
+  const { controller, wizard } = fixture(t);
+  await controller.open();
+  wizard.calls.installRuntime = 0;
+  wizard.installRuntime = async () => {
+    wizard.calls.installRuntime += 1;
+    return { ok: true, installed: true, version: '1.2.3', sizeBytes: 1024 * 1024 };
+  };
+  const outcome = await controller.handleMessage({ type: 'install-runtime' });
+  assert.deepEqual(outcome, { handled: true, kind: 'install-runtime', ok: true });
+  assert.equal(wizard.calls.installRuntime, 1);
+  assert.match(controller.html(), /data-action="install-runtime"/);
+  assert.match(controller.html(), /data-runtime="idle"/);
+  assert.deepEqual(controller.view().status, {
+    message: 'The pinned local runtime was installed and verified.',
+    error: null,
+  });
+});
+
+test('the runtime section escapes a hostile status and keeps a failed install actionable', (t) => {
+  const { controller } = fixture(t);
+  let reads = 0;
+  const hostile = {};
+  Object.defineProperty(hostile, 'status', {
+    get() { reads += 1; return '<b>installed</b>'; },
+    enumerable: true,
+    configurable: true,
+  });
+  const hostileView = Object.assign({}, baseView(), { runtime: hostile });
+  const html = renderFirstRunHtml(hostileView, {});
+  assert.equal(reads, 0);
+  assert.match(html, /data-runtime="idle"/);
+  assert.ok(!html.includes('<b>installed</b>'));
+  const failedView = Object.assign({}, baseView(), {
+    runtime: { status: 'failed', code: 'install-failed' },
+  });
+  const failed = renderFirstRunHtml(failedView, {});
+  assert.match(failed, /data-runtime="failed"/);
+  assert.match(failed, /install-failed/);
+  assert.match(failed, /data-action="install-runtime">Install local runtime/);
+  const installedView = Object.assign({}, baseView(), {
+    runtime: { status: 'installed', version: '1.2.3', sizeBytes: 1024 },
+  });
+  const installed = renderFirstRunHtml(installedView, {});
+  assert.match(installed, /Pinned local runtime installed \(version 1\.2\.3\)/);
+  assert.match(installed, /data-action="install-runtime" disabled/);
+  const numericCode = renderFirstRunHtml(
+    Object.assign({}, baseView(), { runtime: { status: 'failed', code: 42 } }),
+    {},
+  );
+  assert.match(numericCode, /install-failed/);
+  const outOfVocabulary = renderFirstRunHtml(
+    Object.assign({}, baseView(), { runtime: { status: '<img src=x onerror=alert(1)>' } }),
+    {},
+  );
+  assert.match(outOfVocabulary, /data-runtime="idle"/);
+  assert.ok(!outOfVocabulary.includes('<img'));
+  const hostileCode = renderFirstRunHtml(
+    Object.assign({}, baseView(), { runtime: { status: 'failed', code: '"><script>alert(1)</script>' } }),
+    {},
+  );
+  assert.match(hostileCode, /install-failed/);
+  assert.ok(!hostileCode.includes('<script>'));
+  let fieldReads = 0;
+  const accessorBacked = { status: 'installed' };
+  for (const key of ['version', 'sizeBytes', 'received', 'total']) {
+    Object.defineProperty(accessorBacked, key, {
+      get() {
+        fieldReads += 1;
+        return key === 'version' ? '9.9.9' : 1;
+      },
+      enumerable: true,
+      configurable: true,
+    });
+  }
+  const accessed = renderFirstRunHtml(Object.assign({}, baseView(), { runtime: accessorBacked }), {});
+  assert.equal(fieldReads, 0);
+  assert.match(accessed, /data-runtime="installed"/);
+  assert.ok(!accessed.includes('9.9.9'));
+  const revoked = Proxy.revocable({ status: 'failed', code: 'install-failed' }, {});
+  revoked.revoke();
+  const revokedHtml = renderFirstRunHtml(Object.assign({}, baseView(), { runtime: revoked.proxy }), {});
+  assert.match(revokedHtml, /data-runtime="idle"/);
+});
+
+test('the panel reports an already installed runtime without a path', async (t) => {
+  const { controller, wizard } = fixture(t);
+  await controller.open();
+  wizard.installRuntime = async () => ({
+    ok: true,
+    installed: false,
+    skipped: true,
+    version: '1.2.3',
+    sizeBytes: 1024,
+  });
+  const outcome = await controller.handleMessage({ type: 'install-runtime' });
+  assert.deepEqual(outcome, { handled: true, kind: 'install-runtime', ok: true });
+  assert.deepEqual(controller.view().status, {
+    message: 'The pinned local runtime is already installed.',
+    error: null,
+  });
+  assert.ok(!controller.view().status.message.includes('C:'));
+});
+
+test('an unsupported or busy runtime install reports one bounded message', async (t) => {
+  const { controller, wizard } = fixture(t);
+  assert.deepEqual(await controller.handleMessage({ type: 'install-runtime' }), {
+    handled: true,
+    kind: 'unknown-message',
+  });
+  assert.deepEqual(controller.view().status, {
+    message: null,
+    error: 'This build cannot install the local runtime.',
+  });
+  wizard.installRuntime = async () => ({ ok: false, reason: 'busy' });
+  await controller.handleMessage({ type: 'install-runtime' });
+  assert.deepEqual(controller.view().status, {
+    message: null,
+    error: 'An install is already running.',
+  });
+  wizard.installRuntime = async () => ({ ok: false, reason: 'runtime-not-configurable' });
+  await controller.handleMessage({ type: 'install-runtime' });
+  assert.deepEqual(controller.view().status, {
+    message: null,
+    error: 'This build cannot install the local runtime.',
+  });
+  wizard.installRuntime = async () => ({
+    ok: false,
+    code: 'install-failed',
+    executablePath: 'C:\\secret\\llama-server.exe',
+  });
+  const failed = await controller.handleMessage({ type: 'install-runtime' });
+  assert.deepEqual(failed, { handled: true, kind: 'install-runtime', ok: false });
+  assert.deepEqual(controller.view().status, { message: null, error: 'install-failed' });
+  assert.ok(!controller.view().status.error.includes('C:'));
+  wizard.installRuntime = async () => {
+    const error = new Error('boom secret');
+    error.code = 'network-failed';
+    throw error;
+  };
+  const outcome = await controller.handleMessage({ type: 'install-runtime' });
+  assert.equal(outcome.kind, 'error');
+  assert.equal(outcome.code, 'network-failed');
+  assert.ok(!controller.view().status.error.includes('secret'));
+  assert.ok(!controller.view().status.error.includes('C:'));
+});
+
+test('the runtime section escapes a hostile version and byte counts', (t) => {
+  const hostileVersion = renderFirstRunHtml(
+    Object.assign({}, baseView(), {
+      runtime: { status: 'installed', version: '<img src=x onerror=alert(1)>', sizeBytes: 1024 },
+    }),
+    {},
+  );
+  assert.ok(!hostileVersion.includes('<img'));
+  assert.match(hostileVersion, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  const hostileCounts = renderFirstRunHtml(
+    Object.assign({}, baseView(), {
+      runtime: { status: 'installing', received: '<b>1</b>', total: '</p><script>alert(1)</script>' },
+    }),
+    {},
+  );
+  assert.ok(!hostileCounts.includes('<b>'));
+  assert.ok(!hostileCounts.includes('<script>'));
+  assert.match(hostileCounts, /data-runtime="installing"/);
+});

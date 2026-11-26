@@ -1,6 +1,6 @@
 # M3 local model downloader
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-25
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-26
 >
 > First-run model provisioning. The module lives in
 > [model-downloader.mjs](../../../src/stable/runtime/model-downloader.mjs), the pin file in

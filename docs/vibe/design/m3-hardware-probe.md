@@ -158,8 +158,9 @@ The full acceptance uses `node vibe/tools/verify.mjs --strict` and
 
 ## Next steps
 
-The first-run wizard is delivered in [m3-first-run-wizard.md](m3-first-run-wizard.md); the remaining
-runtime work is to install the pinned `llama-server` binary, pass its executable into the wizard's
-start plan, and copy `vibe/models/catalog.json` into the packaged application (with
-`--embedding --pooling last -ub 8192` for the pinned embedding weights). Ollama detection and the
-supervisor's opt-in restart/back-off policy have since been delivered.
+The first-run wizard is delivered in [m3-first-run-wizard.md](m3-first-run-wizard.md) together with its
+on-demand install of the pinned `llama-server` (the pin and verified installer are in
+[m3-sidecar-binary.md](m3-sidecar-binary.md)); the remaining runtime work is one live install/start
+smoke and copying the installed files and `vibe/models/catalog.json` into the packaged application
+(with `--embedding --pooling last -ub 8192` for the pinned embedding weights). Ollama detection and
+the supervisor's opt-in restart/back-off policy have since been delivered.

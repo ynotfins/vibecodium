@@ -239,6 +239,37 @@ function renderOllama(ollama, source) {
     escapeHtml(text(summaryField(ollama, 'reason', null), 'unavailable')) + ').</p>';
 }
 
+// The runtime installer status. Every field is read through a descriptor-safe helper, so a hostile
+// view cannot run an accessor, and only the bounded status vocabulary is rendered.
+function renderRuntimeInstall(runtime) {
+  const raw = summaryField(runtime, 'status', 'idle');
+  const status = ['idle', 'installing', 'installed', 'failed'].includes(raw) ? raw : 'idle';
+  let line;
+  if (status === 'installing') {
+    const received = summaryField(runtime, 'received', 0);
+    const total = summaryField(runtime, 'total', null);
+    line = 'Installing the pinned local runtime' +
+      (Number.isFinite(total) && total > 0 ? ' (' + formatBytes(received) + ' of ' + formatBytes(total) + ')' : '');
+  } else if (status === 'installed') {
+    const version = text(summaryField(runtime, 'version', null), null);
+    const size = summaryField(runtime, 'sizeBytes', null);
+    line = 'Pinned local runtime installed' +
+      (typeof version === 'string' ? ' (version ' + version + ')' : '') +
+      (Number.isFinite(size) ? ' - ' + formatBytes(size) : '');
+  } else if (status === 'failed') {
+    const rawCode = summaryField(runtime, 'code', 'install-failed');
+    const code = typeof rawCode === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(rawCode)
+      ? rawCode : 'install-failed';
+    line = 'Pinned local runtime install failed (' + code + ').';
+  } else {
+    line = 'The pinned local runtime is not installed yet.';
+  }
+  const disabled = status === 'installing' || status === 'installed';
+  return '<p class="runtime" data-runtime="' + escapeHtml(status) + '">' + escapeHtml(line) + '</p>\n' +
+    '<button type="button" data-action="install-runtime"' + (disabled ? ' disabled' : '') +
+    '>Install local runtime</button>\n';
+}
+
 function renderFirstRunHtml(view, status) {
   const state = status && typeof status === 'object' ? status : {};
   if (!view || typeof view !== 'object') {
@@ -291,6 +322,7 @@ function renderFirstRunHtml(view, status) {
     '<h2>Models</h2>\n' + renderModels(view.models) +
     renderNotices(view.notices) +
     '<h2>Local runtime</h2>\n' + renderStart(start) +
+    renderRuntimeInstall(summaryField(view, 'runtime', null)) +
     '<h2>Ollama</h2>\n' + renderOllama(view.ollama, source) +
     '<div class="actions">\n' +
     '<button type="button" data-action="refresh">Check again</button>\n' +
@@ -453,6 +485,30 @@ function createFirstRunController(input) {
       if (type === 'ollama') {
         const summary = await runOllamaCheck(true);
         return { handled: true, kind: 'ollama', ok: summaryField(summary, 'available', false) === true };
+      }
+      if (type === 'install-runtime') {
+        if (typeof wizard().installRuntime !== 'function') {
+          status = { message: null, error: 'This build cannot install the local runtime.' };
+          render();
+          return { handled: true, kind: 'unknown-message' };
+        }
+        const result = await wizard().installRuntime();
+        if (result && result.ok === true) {
+          status = {
+            message: result.installed === true
+              ? 'The pinned local runtime was installed and verified.'
+              : 'The pinned local runtime is already installed.',
+            error: null,
+          };
+        } else if (result && result.reason === 'busy') {
+          status = { message: null, error: 'An install is already running.' };
+        } else if (result && result.reason === 'runtime-not-configurable') {
+          status = { message: null, error: 'This build cannot install the local runtime.' };
+        } else {
+          status = { message: null, error: publicError(result) };
+        }
+        render();
+        return { handled: true, kind: 'install-runtime', ok: Boolean(result && result.ok === true) };
       }
       if (type === 'start') {
         const plan = wizard().startPlan();

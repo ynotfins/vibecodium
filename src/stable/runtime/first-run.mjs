@@ -21,6 +21,7 @@ import {
   discoverOllama as defaultDiscoverOllama,
   toOllamaProviderOptions,
 } from './ollama.mjs';
+import { installSidecar, resolveSidecarTarget } from './sidecar.mjs';
 
 export const FIRST_RUN_VERSION = 1;
 export const WIZARD_PHASES = Object.freeze([
@@ -45,9 +46,14 @@ const CONTROL_OR_BIDI = /[\u0000-\u001F\u007F-\u009F\p{Cf}\p{Zl}\p{Zp}]/u;
 const NOTICE_CODE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const OPTION_KEYS = new Set([
   'catalog', 'destinationDir', 'probe', 'downloadModel', 'verifyModel', 'runtimePath', 'onChange',
-  'discoverOllama', 'restart',
+  'discoverOllama', 'restart', 'installRuntime', 'sidecar', 'sidecarDir',
 ]);
 const INSTALL_OPTION_KEYS = new Set(['signal']);
+const RUNTIME_INSTALL_OPTION_KEYS = new Set([]);
+const RUNTIME_RESULT_KEYS = new Set([
+  'verified', 'installed', 'skipped', 'executablePath', 'version', 'files', 'sizeBytes',
+]);
+const RUNTIME_VERSION_CHARS = 64;
 const PROBE_RESULT_KEYS = new Set(['version', 'hardware', 'notices']);
 
 // The bounded vocabulary the panel may show for an Ollama answer. A value outside it is replaced,
@@ -141,15 +147,15 @@ function isAbsoluteLocalPath(value) {
   return path.isAbsolute(value) && !value.startsWith('//');
 }
 
-function requireDestination(value) {
-  requireText(value, 'destinationDir', MAX_PATH_CHARS);
-  if (!isAbsoluteLocalPath(value)) fail('invalid-options', 'destinationDir must be an absolute local path');
+function requireDestination(value, label = 'destinationDir') {
+  requireText(value, label, MAX_PATH_CHARS);
+  if (!isAbsoluteLocalPath(value)) fail('invalid-options', label + ' must be an absolute local path');
   const parts = value.split(/[\\/]+/);
   for (const part of parts) {
-    if (part === '.' || part === '..') fail('invalid-options', 'destinationDir must not contain relative segments');
+    if (part === '.' || part === '..') fail('invalid-options', label + ' must not contain relative segments');
   }
   if (process.platform === 'win32' && /[. ]$/.test(value)) {
-    fail('invalid-options', 'destinationDir has a Win32-invalid trailing dot or space');
+    fail('invalid-options', label + ' has a Win32-invalid trailing dot or space');
   }
   return value;
 }
@@ -435,6 +441,35 @@ export function createFirstRunWizard(options) {
       fail('invalid-options', 'runtimePath must name a readable llama-server executable');
     }
   }
+  // The runtime installer is either injected, or built from the validated sidecar pin and its target
+  // directory. Both halves are required together, so a half-configured wizard fails before any work.
+  let runtimeEffect = null;
+  if (own.installRuntime !== undefined) {
+    if (typeof own.installRuntime !== 'function') fail('invalid-options', 'installRuntime must be a function');
+    if (own.sidecar !== undefined || own.sidecarDir !== undefined) {
+      fail('invalid-options', 'installRuntime cannot be combined with a sidecar pin');
+    }
+    runtimeEffect = own.installRuntime;
+  } else if (own.sidecar !== undefined || own.sidecarDir !== undefined) {
+    if (own.sidecar === undefined || own.sidecarDir === undefined) {
+      fail('invalid-options', 'sidecar and sidecarDir must be supplied together');
+    }
+    let pinned;
+    try {
+      resolveSidecarTarget(own.sidecar);
+      pinned = true;
+    } catch {
+      pinned = false;
+    }
+    if (pinned !== true) fail('invalid-options', 'sidecar must be a validated sidecar pin for this host');
+    const sidecarDir = requireDestination(own.sidecarDir, 'sidecarDir');
+    runtimeEffect = function (context) {
+      return installSidecar(own.sidecar, {
+        targetDir: sidecarDir,
+        onProgress: context.onProgress,
+      });
+    };
+  }
   let restartPolicy;
   if (own.restart === undefined) {
     restartPolicy = DEFAULT_FIRST_RUN_RESTART_POLICY;
@@ -467,8 +502,10 @@ export function createFirstRunWizard(options) {
     progress: null,
     error: null,
     ollama: null,
+    runtime: null,
   };
   let installing = null;
+  let runtimeInstalling = null;
   let ollamaCheck = null;
   let revision = 0;
   let disposed = false;
@@ -649,7 +686,11 @@ export function createFirstRunWizard(options) {
         : state.phase === 'needs-download' ? 'active' : 'pending';
     const runtime = start.available
       ? 'ready'
-      : start.reason === 'runtime-not-bundled' ? 'blocked' : 'pending';
+      : start.reason === 'runtime-not-bundled'
+        ? runtimeEffect === null
+          ? 'blocked'
+          : state.runtime !== null && state.runtime.status === 'installing' ? 'active' : 'pending'
+        : 'pending';
     return Object.freeze([
       Object.freeze({ id: 'check', status: check }),
       Object.freeze({ id: 'models', status: models }),
@@ -696,6 +737,7 @@ export function createFirstRunWizard(options) {
       start: startPlan(),
       steps: buildSteps(),
       ollama: state.ollama,
+      runtime: state.runtime,
       disposed: disposed,
     });
   }
@@ -830,7 +872,7 @@ export function createFirstRunWizard(options) {
 
   async function install(installOptions) {
     if (disposed) return { ok: false, reason: 'disposed' };
-    if (installing !== null) return { ok: false, reason: 'busy' };
+    if (installing !== null || runtimeInstalling !== null) return { ok: false, reason: 'busy' };
     const ownInstall = readOwnData(installOptions === undefined ? {} : installOptions,
       'install options', INSTALL_OPTION_KEYS);
     const signal = ownInstall.signal;
@@ -839,6 +881,8 @@ export function createFirstRunWizard(options) {
     }
     if (state.phase === 'idle') await refresh();
     if (disposed) return { ok: false, reason: 'disposed' };
+    // The refresh yields; another install may have started while it ran.
+    if (installing !== null || runtimeInstalling !== null) return { ok: false, reason: 'busy' };
     if (effectiveSource() === 'ollama' && state.plan !== null) {
       state.phase = 'ready';
       state.error = null;
@@ -863,15 +907,143 @@ export function createFirstRunWizard(options) {
     return installing;
   }
 
+  // The runtime install adopts a path only after the delivered installer reports verified files and
+  // the supervisor validator accepts the executable. A failed attempt keeps the previous path (null by
+  // default) and reports one bounded code.
+  function summarizeRuntimeResult(raw) {
+    let own;
+    try {
+      own = readOwnData(raw, 'runtime install result', RUNTIME_RESULT_KEYS, 'install-failed');
+    } catch {
+      fail('install-failed', 'the runtime installer returned an invalid result');
+    }
+    if (own.verified !== true) fail('install-failed', 'the runtime installer did not verify its files');
+    if (typeof own.installed !== 'boolean') {
+      fail('install-failed', 'the runtime installer returned no install state');
+    }
+    if (typeof own.executablePath !== 'string' || own.executablePath.length < 1
+      || own.executablePath.length > MAX_PATH_CHARS) {
+      fail('install-failed', 'the runtime installer returned no executable');
+    }
+    let executablePath;
+    try {
+      executablePath = validateLlamaExecutablePath(own.executablePath);
+    } catch {
+      fail('install-failed', 'the installed runtime executable is not usable');
+    }
+    if (typeof own.skipped !== 'boolean') {
+      fail('install-failed', 'the runtime installer returned no skip state');
+    }
+    if (typeof own.version !== 'string' || own.version.length < 1
+      || own.version.length > RUNTIME_VERSION_CHARS || CONTROL_OR_BIDI.test(own.version)) {
+      fail('install-failed', 'the runtime installer returned an invalid version');
+    }
+    if (!Number.isSafeInteger(own.sizeBytes) || own.sizeBytes < 0) {
+      fail('install-failed', 'the runtime installer returned an invalid size');
+    }
+    return {
+      executablePath: executablePath,
+      version: own.version,
+      sizeBytes: own.sizeBytes,
+      installed: own.installed,
+      skipped: own.skipped,
+    };
+  }
+
+  function failRuntimeInstall(code) {
+    const bounded = safeCode(code, 'install-failed');
+    state.runtime = Object.freeze({ status: 'failed', code: bounded });
+    state.error = Object.freeze({ code: bounded, message: 'The local runtime install did not complete.' });
+    emit();
+    return { ok: false, code: bounded };
+  }
+
+  async function runRuntimeInstall() {
+    state.runtime = Object.freeze({ status: 'installing', received: 0, total: null });
+    emit();
+    let raw;
+    try {
+      raw = await runtimeEffect({
+        onProgress: function (progress) {
+          if (disposed) return;
+          const total = progress && Number.isSafeInteger(progress.total) && progress.total >= 0
+            ? progress.total : null;
+          const received = progress && Number.isSafeInteger(progress.received) && progress.received >= 0
+            ? progress.received : 0;
+          state.runtime = Object.freeze({
+            status: 'installing',
+            received: total === null ? received : Math.min(total, received),
+            total: total,
+          });
+          emit();
+        },
+      });
+    } catch (error) {
+      if (disposed) return { ok: false, reason: 'disposed' };
+      let code;
+      try {
+        const field = readDataField(error, 'code');
+        code = field && field.ok === true ? field.value : undefined;
+      } catch {
+        code = undefined;
+      }
+      return failRuntimeInstall(code);
+    }
+    if (disposed) return { ok: false, reason: 'disposed' };
+    let summary;
+    try {
+      summary = summarizeRuntimeResult(raw);
+    } catch {
+      return failRuntimeInstall('install-failed');
+    }
+    runtimePath = summary.executablePath;
+    state.error = null;
+    state.runtime = Object.freeze({
+      status: 'installed',
+      version: summary.version,
+      sizeBytes: summary.sizeBytes,
+      installed: summary.installed,
+      skipped: summary.skipped,
+    });
+    state.phase = pinnedPhase();
+    emit();
+    return {
+      ok: true,
+      installed: summary.installed,
+      skipped: summary.skipped,
+      version: summary.version,
+      sizeBytes: summary.sizeBytes,
+    };
+  }
+
+  function installRuntime(installOptions) {
+    if (disposed) return Promise.resolve({ ok: false, reason: 'disposed' });
+    if (runtimeEffect === null) return Promise.resolve({ ok: false, reason: 'runtime-not-configurable' });
+    // A probe in flight would otherwise race the model install's own idle refresh.
+    if (runtimeInstalling !== null || installing !== null || state.phase === 'probing') {
+      return Promise.resolve({ ok: false, reason: 'busy' });
+    }
+    readOwnData(installOptions === undefined ? {} : installOptions,
+      'install options', RUNTIME_INSTALL_OPTION_KEYS);
+    runtimeInstalling = Promise.resolve()
+      .then(function () { return runRuntimeInstall(); })
+      .finally(function () { runtimeInstalling = null; });
+    return runtimeInstalling;
+  }
+
   function dispose() {
     disposed = true;
     installing = null;
+    runtimeInstalling = null;
+    if (state.runtime !== null && state.runtime.status === 'installing') {
+      state.runtime = Object.freeze({ status: 'failed', code: 'disposed' });
+    }
   }
 
   // Selecting a discovered daemon is an explicit action; `checkOllama` itself stays read-only.
   function useOllama() {
     if (disposed) return { ok: false, reason: 'disposed' };
-    if (installing !== null) return { ok: false, reason: 'busy' };
+    if (installing !== null || runtimeInstalling !== null) return { ok: false, reason: 'busy' };
     if (state.plan === null) return { ok: false, reason: 'not-ready' };
     if (!ollamaUsable()) {
       return { ok: false, reason: state.ollama === null ? 'not-checked' : 'ollama-unavailable' };
@@ -885,7 +1057,7 @@ export function createFirstRunWizard(options) {
 
   function usePinned() {
     if (disposed) return { ok: false, reason: 'disposed' };
-    if (installing !== null) return { ok: false, reason: 'busy' };
+    if (installing !== null || runtimeInstalling !== null) return { ok: false, reason: 'busy' };
     if (state.plan === null) return { ok: false, reason: 'not-ready' };
     source = 'pinned';
     state.phase = pinnedPhase();
@@ -900,6 +1072,7 @@ export function createFirstRunWizard(options) {
     install: install,
     startPlan: startPlan,
     runtimeOptions: runtimeOptions,
+    installRuntime: installRuntime,
     checkOllama: checkOllama,
     useOllama: useOllama,
     usePinned: usePinned,
