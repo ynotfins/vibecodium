@@ -4,7 +4,8 @@
 // controller the setup panel can drive: probe the machine, project the catalog to the recommendation
 // input, report which pinned weights are already on disk, download only the missing ones with
 // progress, and expose the local B1 start plan. It never spawns llama-server, never opens a socket
-// and never reads a secret: every effect is injected or delegated to the already-reviewed modules.
+// itself and never reads a secret: every effect is injected or delegated to the already-reviewed
+// modules (the start action delegates the pinned sidecar install to the reviewed installer).
 
 import path from 'node:path';
 import { types } from 'node:util';
@@ -21,6 +22,14 @@ import {
   discoverOllama as defaultDiscoverOllama,
   toOllamaProviderOptions,
 } from './ollama.mjs';
+import {
+  installSidecar as defaultInstallSidecar,
+  findSidecar,
+  MAX_ID_CHARS as MAX_SIDECAR_ID_CHARS,
+  resolveSidecarTarget,
+  validateSidecarManifest,
+  verifySidecarInstall as defaultVerifySidecar,
+} from './sidecar.mjs';
 
 export const FIRST_RUN_VERSION = 1;
 export const WIZARD_PHASES = Object.freeze([
@@ -45,9 +54,11 @@ const CONTROL_OR_BIDI = /[\u0000-\u001F\u007F-\u009F\p{Cf}\p{Zl}\p{Zp}]/u;
 const NOTICE_CODE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const OPTION_KEYS = new Set([
   'catalog', 'destinationDir', 'probe', 'downloadModel', 'verifyModel', 'runtimePath', 'onChange',
-  'discoverOllama', 'restart',
+  'discoverOllama', 'restart', 'sidecar', 'installSidecar', 'verifySidecar',
 ]);
 const INSTALL_OPTION_KEYS = new Set(['signal']);
+const SIDECAR_OPTION_KEYS = new Set(['manifest', 'id', 'targetDir', 'platformKey']);
+const PLATFORM_KEY = /^(?:win32|linux|darwin)-(?:x64|arm64)$/;
 const PROBE_RESULT_KEYS = new Set(['version', 'hardware', 'notices']);
 
 // The bounded vocabulary the panel may show for an Ollama answer. A value outside it is replaced,
@@ -141,17 +152,73 @@ function isAbsoluteLocalPath(value) {
   return path.isAbsolute(value) && !value.startsWith('//');
 }
 
-function requireDestination(value) {
-  requireText(value, 'destinationDir', MAX_PATH_CHARS);
-  if (!isAbsoluteLocalPath(value)) fail('invalid-options', 'destinationDir must be an absolute local path');
+function requireDestination(value, code, label) {
+  const failure = code || 'invalid-options';
+  const name = label || 'destinationDir';
+  requireText(value, name, MAX_PATH_CHARS, failure);
+  if (!isAbsoluteLocalPath(value)) fail(failure, name + ' must be an absolute local path');
   const parts = value.split(/[\\/]+/);
   for (const part of parts) {
-    if (part === '.' || part === '..') fail('invalid-options', 'destinationDir must not contain relative segments');
+    if (part === '.' || part === '..') fail(failure, name + ' must not contain relative segments');
   }
   if (process.platform === 'win32' && /[. ]$/.test(value)) {
-    fail('invalid-options', 'destinationDir has a Win32-invalid trailing dot or space');
+    fail(failure, name + ' has a Win32-invalid trailing dot or space');
   }
   return value;
+}
+
+// The sidecar configuration belongs to the host, never to the webview: the manifest is validated
+// once, the id must name one of its entries, the target directory must be an absolute local path the
+// installer can own, and the platform must have a pinned target. Resolving the target here means the
+// start action cannot fail for a reason the settings already prove.
+function resolveSidecarConfig(value, destinationDir) {
+  if (value === undefined) return null;
+  const own = readOwnData(value, 'sidecar options', SIDECAR_OPTION_KEYS, 'invalid-sidecar');
+  let manifest;
+  try {
+    manifest = validateSidecarManifest(own.manifest);
+  } catch {
+    fail('invalid-sidecar', 'sidecar manifest is invalid');
+  }
+  let id;
+  if (own.id !== undefined) {
+    id = requireText(own.id, 'sidecar id', MAX_SIDECAR_ID_CHARS, 'invalid-sidecar');
+  } else if (manifest.sidecars.length === 1) {
+    id = manifest.sidecars[0].id;
+  } else {
+    fail('invalid-sidecar', 'sidecar id is required when the manifest has more than one entry');
+  }
+  let sidecar;
+  try {
+    sidecar = findSidecar(manifest, id);
+  } catch {
+    fail('invalid-sidecar', 'sidecar id is not in the manifest');
+  }
+  const targetDir = own.targetDir === undefined
+    ? path.join(destinationDir, 'runtime')
+    : requireDestination(own.targetDir, 'invalid-sidecar', 'sidecar targetDir');
+  let platformKey;
+  if (own.platformKey !== undefined) {
+    if (typeof own.platformKey !== 'string' || !PLATFORM_KEY.test(own.platformKey)) {
+      fail('invalid-sidecar', 'platformKey must be <platform>-<arch>');
+    }
+    platformKey = own.platformKey;
+  }
+  let resolved;
+  try {
+    resolved = resolveSidecarTarget(sidecar, platformKey === undefined
+      ? process.platform + '-' + process.arch
+      : platformKey);
+  } catch {
+    fail('invalid-sidecar', 'the sidecar has no target for this platform');
+  }
+  return Object.freeze({
+    sidecar,
+    id,
+    targetDir,
+    platformKey: resolved.platformKey,
+    sizeBytes: resolved.target.sizeBytes,
+  });
 }
 
 function isAbortSignal(value) {
@@ -170,6 +237,14 @@ function safeCode(value, fallback) {
 function safeMessage(value, fallback) {
   if (typeof value !== 'string' || value.length < 1 || value.length > MAX_ERROR_MESSAGE_CHARS) return fallback;
   return CONTROL_OR_BIDI.test(value) ? fallback : value;
+}
+
+// A thrown effect's `code` is read through an own data descriptor too, so a hostile thrown object
+// cannot run a getter while the wizard turns the failure into a bounded code.
+function safeErrorCode(error, fallback) {
+  if (error === null || typeof error !== 'object' || types.isProxy(error)) return fallback;
+  const field = readDataField(error, 'code');
+  return field.ok ? safeCode(field.value, fallback) : fallback;
 }
 
 // Reads one own data property without running an accessor, so a hostile discovery answer cannot
@@ -446,6 +521,12 @@ export function createFirstRunWizard(options) {
     }
   }
 
+  const sidecarConfig = resolveSidecarConfig(own.sidecar, destinationDir);
+  const installSidecar = own.installSidecar === undefined ? defaultInstallSidecar : own.installSidecar;
+  if (typeof installSidecar !== 'function') fail('invalid-options', 'installSidecar must be a function');
+  const verifySidecar = own.verifySidecar === undefined ? defaultVerifySidecar : own.verifySidecar;
+  if (typeof verifySidecar !== 'function') fail('invalid-options', 'verifySidecar must be a function');
+
   let catalog;
   try {
     catalog = validateCatalog(own.catalog);
@@ -468,7 +549,17 @@ export function createFirstRunWizard(options) {
     error: null,
     ollama: null,
   };
+  // The installed pinned runtime: a host-supplied `runtimePath` starts installed; otherwise the
+  // start action (or an offline refresh check) fills it from the pinned sidecar. `progress` is the
+  // bounded transfer view while the installer runs.
+  const runtime = {
+    installed: runtimePath !== null,
+    version: null,
+    progress: null,
+  };
   let installing = null;
+  let starting = null;
+  let startAbort = null;
   let ollamaCheck = null;
   let revision = 0;
   let disposed = false;
@@ -647,14 +738,14 @@ export function createFirstRunWizard(options) {
       : state.plan !== null && state.plan.verdict === 'insufficient'
         ? 'blocked'
         : state.phase === 'needs-download' ? 'active' : 'pending';
-    const runtime = start.available
+    const runtimeStep = start.available
       ? 'ready'
-      : start.reason === 'runtime-not-bundled' ? 'blocked' : 'pending';
+      : start.reason === 'runtime-not-bundled' && sidecarConfig === null ? 'blocked' : 'pending';
     return Object.freeze([
       Object.freeze({ id: 'check', status: check }),
       Object.freeze({ id: 'models', status: models }),
       Object.freeze({ id: 'download', status: download }),
-      Object.freeze({ id: 'runtime', status: runtime }),
+      Object.freeze({ id: 'runtime', status: runtimeStep }),
     ]);
   }
 
@@ -696,6 +787,12 @@ export function createFirstRunWizard(options) {
       start: startPlan(),
       steps: buildSteps(),
       ollama: state.ollama,
+      runtime: Object.freeze({
+        configured: sidecarConfig !== null,
+        installed: runtimePath !== null,
+        version: runtime.version,
+        progress: runtime.progress === null ? null : Object.freeze(Object.assign({}, runtime.progress)),
+      }),
       disposed: disposed,
     });
   }
@@ -743,6 +840,36 @@ export function createFirstRunWizard(options) {
       return view();
     }
     const verified = await verifyAll();
+    if (mine !== revision) return view();
+    // Adopt a runtime that a previous install already put on disk. The verifier is offline; a
+    // missing, unreadable or hostile check is advisory and leaves the start action to install.
+    if (sidecarConfig !== null && runtimePath === null) {
+      try {
+        const checked = await verifySidecar(sidecarConfig.sidecar, {
+          targetDir: sidecarConfig.targetDir,
+          platformKey: sidecarConfig.platformKey,
+        });
+        if (checked !== null && typeof checked === 'object' && !types.isProxy(checked) &&
+          readDataField(checked, 'verified').value === true) {
+          const executable = readDataField(checked, 'executablePath');
+          if (executable.ok) {
+            try {
+              runtimePath = validateLlamaExecutablePath(executable.value);
+              runtime.installed = true;
+              const version = readDataField(checked, 'version');
+              runtime.version = version.ok && typeof version.value === 'string' &&
+                version.value.length <= MAX_SIDECAR_ID_CHARS && !CONTROL_OR_BIDI.test(version.value)
+                ? version.value
+                : sidecarConfig.sidecar.version;
+            } catch {
+              /* a verified file set without a usable executable stays not installed */
+            }
+          }
+        }
+      } catch {
+        /* the offline check never fails the refresh */
+      }
+    }
     if (mine !== revision) return view();
     state.hardware = hardwareSummary(probedOwn.hardware);
     state.plan = plan;
@@ -818,7 +945,7 @@ export function createFirstRunWizard(options) {
       const aborted = signal !== undefined && signal.aborted;
       state.phase = aborted ? 'needs-download' : 'failed';
       state.error = aborted ? null : Object.freeze({
-        code: safeCode(error && error.code, 'install-failed'),
+        code: safeErrorCode(error, 'install-failed'),
         message: 'The model download did not complete.',
       });
       emit();
@@ -863,9 +990,107 @@ export function createFirstRunWizard(options) {
     return installing;
   }
 
+  // The start action prepares the pinned runtime: with models ready it installs the pinned sidecar
+  // only when no validated executable exists yet, then returns the same plan `startPlan()` reports.
+  // It never spawns the server; the caller still owns the process boundary.
+  async function runStart(signal) {
+    if (state.phase === 'idle') await refresh();
+    if (disposed) return Object.freeze({ available: false, reason: 'disposed' });
+    if (effectiveSource() === 'ollama') return startPlan();
+    if (state.plan === null) return Object.freeze({ available: false, reason: 'not-ready' });
+    if (state.phase === 'insufficient') return Object.freeze({ available: false, reason: 'insufficient' });
+    if (state.phase !== 'ready') return Object.freeze({ available: false, reason: 'not-ready' });
+    if (runtimePath === null) {
+      if (sidecarConfig === null) {
+        return Object.freeze({ available: false, reason: 'runtime-not-bundled' });
+      }
+      runtime.progress = null;
+      try {
+        const result = await installSidecar(sidecarConfig.sidecar, {
+          targetDir: sidecarConfig.targetDir,
+          platformKey: sidecarConfig.platformKey,
+          signal: signal,
+          onProgress: function (progress) {
+            const total = sidecarConfig.sizeBytes;
+            const received = progress && Number.isSafeInteger(progress.received) ? progress.received : 0;
+            const bounded = Math.max(0, Math.min(total, received));
+            runtime.progress = Object.freeze({
+              received: bounded,
+              total: total,
+              fraction: total > 0 ? bounded / total : 0,
+            });
+            emit();
+          },
+        });
+        if (disposed) return Object.freeze({ available: false, reason: 'disposed' });
+        if (!result || typeof result !== 'object' || types.isProxy(result)) {
+          throw new FirstRunError('runtime-install-failed', 'the runtime install returned no result');
+        }
+        const verified = readDataField(result, 'verified');
+        const executable = readDataField(result, 'executablePath');
+        if (verified.value !== true || !executable.ok || typeof executable.value !== 'string') {
+          throw new FirstRunError('runtime-install-failed', 'the runtime did not verify');
+        }
+        runtimePath = validateLlamaExecutablePath(executable.value);
+        runtime.installed = true;
+        const version = readDataField(result, 'version');
+        runtime.version = version.ok && typeof version.value === 'string' &&
+          version.value.length <= MAX_SIDECAR_ID_CHARS && !CONTROL_OR_BIDI.test(version.value)
+          ? version.value
+          : sidecarConfig.sidecar.version;
+        runtime.progress = null;
+        emit();
+      } catch (error) {
+        runtime.progress = null;
+        emit();
+        return Object.freeze({
+          available: false,
+          reason: 'runtime-install-failed',
+          code: safeErrorCode(error, 'runtime-install-failed'),
+        });
+      }
+    }
+    return startPlan();
+  }
+
+  async function start(startOptions) {
+    if (disposed) return Object.freeze({ available: false, reason: 'disposed' });
+    if (installing !== null) return Object.freeze({ available: false, reason: 'busy' });
+    if (starting !== null) return starting;
+    const ownStart = readOwnData(startOptions === undefined ? {} : startOptions,
+      'start options', INSTALL_OPTION_KEYS);
+    const signal = ownStart.signal;
+    if (signal !== undefined && !isAbortSignal(signal)) {
+      fail('invalid-options', 'signal must be an AbortSignal');
+    }
+    const controller = new AbortController();
+    if (signal !== undefined) {
+      if (signal.aborted) controller.abort();
+      else signal.addEventListener('abort', function () { controller.abort(); }, { once: true });
+    }
+    startAbort = controller;
+    const mine = controller;
+    const promise = Promise.resolve().then(function () {
+      return runStart(controller.signal);
+    }).finally(function () {
+      if (startAbort === mine) startAbort = null;
+      starting = null;
+    });
+    starting = promise;
+    return promise;
+  }
+
   function dispose() {
     disposed = true;
     installing = null;
+    if (startAbort !== null) {
+      try {
+        startAbort.abort();
+      } catch {
+        /* already aborted */
+      }
+      startAbort = null;
+    }
   }
 
   // Selecting a discovered daemon is an explicit action; `checkOllama` itself stays read-only.
@@ -898,6 +1123,7 @@ export function createFirstRunWizard(options) {
     version: FIRST_RUN_VERSION,
     refresh: refresh,
     install: install,
+    start: start,
     startPlan: startPlan,
     runtimeOptions: runtimeOptions,
     checkOllama: checkOllama,

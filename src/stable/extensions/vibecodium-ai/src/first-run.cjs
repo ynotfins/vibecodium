@@ -192,11 +192,18 @@ function renderRestart(restart) {
     escapeHtml(reset) + '.</p>';
 }
 
-function renderStart(start) {
+function renderStart(start, runtime) {
   if (!start || typeof start !== 'object' || start.available !== true) {
+    const configured = runtime !== null && runtime !== undefined &&
+      typeof runtime === 'object' && !types.isProxy(runtime) &&
+      summaryField(runtime, 'configured', false) === true;
     const reason = start && start.reason === 'runtime-not-bundled'
-      ? 'The llama.cpp binary is not bundled yet.'
-      : 'Finish the setup steps before starting the local runtime.';
+      ? configured
+        ? 'The pinned llama.cpp runtime will be downloaded and verified when you start.'
+        : 'The llama.cpp binary is not bundled yet.'
+      : start && start.reason === 'runtime-install-failed'
+        ? 'The pinned llama.cpp runtime could not be installed.'
+        : 'Finish the setup steps before starting the local runtime.';
     return '<p class="muted">' + escapeHtml(reason) + '</p>';
   }
   if (start.kind === 'ollama') {
@@ -211,6 +218,21 @@ function renderStart(start) {
     escapeHtml(String(start.threads)) + ' threads, ' +
     escapeHtml(String(start.gpuLayers)) + ' GPU layers.</p>' +
     renderRestart(summaryField(start, 'restart', null));
+}
+
+// The pinned runtime install has its own bounded progress; a hostile wizard cannot make the renderer
+// walk an accessor or show an unbounded value.
+function renderRuntimeProgress(runtime) {
+  if (!runtime || typeof runtime !== 'object' || types.isProxy(runtime)) return '';
+  const progress = summaryField(runtime, 'progress', null);
+  if (!progress || typeof progress !== 'object' || types.isProxy(progress)) return '';
+  const total = summaryField(progress, 'total', 0);
+  const raw = summaryField(progress, 'received', 0);
+  if (!Number.isFinite(total) || total <= 0) return '';
+  const received = Number.isFinite(raw) ? Math.max(0, Math.min(total, raw)) : 0;
+  return '<p>Downloading the local runtime: ' + escapeHtml(formatBytes(received)) + ' of ' +
+    escapeHtml(formatBytes(total)) + ' <progress max="' + escapeHtml(total) + '" value="' +
+    escapeHtml(received) + '"></progress></p>';
 }
 
 function renderOllama(ollama, source) {
@@ -261,12 +283,16 @@ function renderFirstRunHtml(view, status) {
     ? '<p class="error" role="alert">' + escapeHtml(text(view.error.message, 'The first-run check failed.')) + '</p>'
     : '';
   const start = view.start && typeof view.start === 'object' ? view.start : { available: false };
+  const runtime = view.runtime && typeof view.runtime === 'object' ? view.runtime : null;
   const source = view.source === 'ollama' ? 'ollama' : 'pinned';
   const canUseDaemon = summaryField(view.ollama, 'available', false) === true &&
     summaryField(view.ollama, 'providerOptions', null) !== null;
   const installDisabled = phase === 'downloading' || phase === 'ready' || phase === 'insufficient' ||
     !(Number.isFinite(view.downloadBytes) && view.downloadBytes > 0);
-  const startDisabled = start.available !== true;
+  // A configured sidecar lets the start action install the runtime itself, so the button stays
+  // usable while the plan still says `runtime-not-bundled`.
+  const startDisabled = start.available !== true &&
+    !(summaryField(runtime, 'configured', false) === true && phase === 'ready');
   const verdict = text(view.verdict, 'unknown');
   const acceleration = text(view.acceleration, 'unknown');
   return '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n' +
@@ -288,9 +314,10 @@ function renderFirstRunHtml(view, status) {
     statusBlock + errorBlock + viewError +
     '<ol class="steps">\n' + renderSteps(view.steps) + '\n</ol>\n' +
     renderProgress(view.progress) +
+    renderRuntimeProgress(runtime) +
     '<h2>Models</h2>\n' + renderModels(view.models) +
     renderNotices(view.notices) +
-    '<h2>Local runtime</h2>\n' + renderStart(start) +
+    '<h2>Local runtime</h2>\n' + renderStart(start, runtime) +
     '<h2>Ollama</h2>\n' + renderOllama(view.ollama, source) +
     '<div class="actions">\n' +
     '<button type="button" data-action="refresh">Check again</button>\n' +
@@ -455,7 +482,10 @@ function createFirstRunController(input) {
         return { handled: true, kind: 'ollama', ok: summaryField(summary, 'available', false) === true };
       }
       if (type === 'start') {
-        const plan = wizard().startPlan();
+        const active = wizard();
+        // The wizard's start action installs the pinned runtime when it is missing; an older or
+        // injected wizard without it keeps the read-only plan behaviour.
+        const plan = typeof active.start === 'function' ? await active.start() : active.startPlan();
         if (plan && plan.available === true) {
           status = {
             message: plan.kind === 'ollama'
@@ -465,6 +495,10 @@ function createFirstRunController(input) {
           };
         } else if (plan && plan.reason === 'runtime-not-bundled') {
           status = { message: null, error: 'The llama.cpp binary is not bundled yet.' };
+        } else if (plan && plan.reason === 'runtime-install-failed') {
+          status = { message: null, error: 'The pinned llama.cpp runtime could not be installed.' };
+        } else if (plan && plan.reason === 'busy') {
+          status = { message: null, error: 'A download is already running.' };
         } else {
           status = { message: null, error: 'Finish the setup steps before starting the local runtime.' };
         }

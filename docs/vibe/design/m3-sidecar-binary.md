@@ -223,8 +223,9 @@ The full acceptance uses `node vibe/tools/verify.mjs --strict` and
 Copy the installed files and `vibe/models/catalog.json` into the packaged application, sign the
 manifest, add a third-party notices file covering llama.cpp's MIT text and the LLVM/OpenMP notice, add the
 Microsoft VC++ 2015-2022 x64 redistributable to the radar and pin it,
-supply the Microsoft VC++ runtime, wire `installSidecar` into the first-run start action and
-run one live install/start smoke on a clean Windows machine. Keep the pin current from the radar, and
+supply the Microsoft VC++ runtime, and run one live install/start smoke on a clean Windows machine.
+The first-run start action now calls `installSidecar` when no host-supplied `runtimePath` exists (see
+[m3-first-run-wizard.md](m3-first-run-wizard.md)), so the installer is no longer only a library. Keep the pin current from the radar, and
 re-check the seven-day rule and the per-file digests whenever the nightly advances. Before the binary
 is bundled into a release, add an ADR (or amend ADR-0010) covering the nightly intake policy, the
 signing route, the CPU/GPU backend matrix and the Microsoft runtime pin.
