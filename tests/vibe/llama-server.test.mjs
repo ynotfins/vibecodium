@@ -483,3 +483,272 @@ test('the controller, its status and reserved ports are bounded and immutable', 
   assert.ok(Number.isInteger(port) && port >= 1024 && port <= 65535);
   assert.equal(server.status().port, null);
 });
+
+function startsCount(file) {
+  if (!existsSync(file)) return 0;
+  return readFileSync(file, 'utf8').split('\n').filter((line) => line.length > 0).length;
+}
+
+function startsTimes(file) {
+  return readFileSync(file, 'utf8').split('\n').filter((line) => line.length > 0)
+    .map((line) => Number.parseInt(line.split(':')[0], 10));
+}
+
+async function waitForState(server, wanted, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (server.status().state === wanted) return true;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return server.status().state === wanted;
+}
+
+function makeCrashServer(t, { mode = 'crash-once', crashMs = 150, restart, env: extraEnv = {} } = {}) {
+  const { dir, modelPath } = makeModel(t);
+  const log = path.join(dir, 'argv.json');
+  const starts = path.join(dir, 'starts.txt');
+  const options = {
+    executablePath: NODE,
+    commandArgs: [FIXTURE],
+    modelPath,
+    env: {
+      FAKE_LLAMA_LOG: log,
+      FAKE_LLAMA_STARTS: starts,
+      FAKE_LLAMA_MODE: mode,
+      FAKE_LLAMA_CRASH_MS: String(crashMs),
+      ...extraEnv,
+    },
+    startupTimeoutMs: 5000,
+    healthIntervalMs: 20,
+    stopTimeoutMs: 3000,
+  };
+  if (restart !== undefined) options.restart = restart;
+  const server = createLlamaServer(options);
+  t.after(async () => { await server.stop(); });
+  return { server, dir, log, starts };
+}
+
+test('the restart policy fails closed without spawning', (t) => {
+  const { dir, modelPath } = makeModel(t);
+  const log = path.join(dir, 'argv.json');
+  const valid = { executablePath: NODE, commandArgs: [FIXTURE], modelPath, env: { FAKE_LLAMA_LOG: log } };
+  for (const restart of [
+    null, [], 'on', {}, { maxRestarts: 0 }, { maxRestarts: 11 }, { maxRestarts: 1.5 },
+    { maxRestarts: 1, baseDelayMs: 49 }, { maxRestarts: 1, baseDelayMs: 300_001 },
+    { maxRestarts: 1, baseDelayMs: 500, maxDelayMs: 400 },
+    { maxRestarts: 1, baseDelayMs: 500, maxDelayMs: 400_000 },
+    { maxRestarts: 1, maxDelayMs: 0 },
+    { maxRestarts: 1, stableMs: 1.5 },
+    { maxRestarts: 1, stableMs: 500 },
+    { maxRestarts: 1, baseDelayMs: 500, stableMs: -1 },
+    { maxRestarts: 1, baseDelayMs: 500, stableMs: 600_001 },
+    { maxRestarts: 1, baseDelayMs: 500, unknown: true },
+  ]) {
+    assert.throws(
+      () => createLlamaServer({ ...valid, restart }),
+      isCode('invalid-restart-policy'),
+      'accepted a bad policy: ' + JSON.stringify(restart),
+    );
+  }
+  const accessor = { maxRestarts: 2, baseDelayMs: 100 };
+  Object.defineProperty(accessor, 'maxDelayMs', { enumerable: true, get() { throw new Error('getter invoked'); } });
+  assert.throws(() => createLlamaServer({ ...valid, restart: accessor }), isCode('invalid-restart-policy'));
+  const revoked = Proxy.revocable({ maxRestarts: 1 }, {});
+  revoked.revoke();
+  assert.throws(() => createLlamaServer({ ...valid, restart: revoked.proxy }), isCode('invalid-restart-policy'));
+  const hostile = new Proxy({ maxRestarts: 1 }, {
+    ownKeys() { throw new Error('ownKeys trap invoked'); },
+  });
+  assert.throws(() => createLlamaServer({ ...valid, restart: hostile }), isCode('invalid-restart-policy'));
+  const descriptorHostile = new Proxy({ maxRestarts: 1 }, {
+    getOwnPropertyDescriptor() { throw new Error('descriptor trap invoked'); },
+  });
+  assert.throws(
+    () => createLlamaServer({ ...valid, restart: descriptorHostile }),
+    isCode('invalid-restart-policy'),
+  );
+  const reserved = JSON.parse('{"__proto__": {"maxRestarts": 1}}');
+  assert.throws(() => createLlamaServer({ ...valid, restart: reserved }), isCode('invalid-restart-policy'));
+  assert.equal(existsSync(log), false, 'no rejected policy spawns a child');
+});
+
+test('without a restart policy an unexpected exit stays exited', async (t) => {
+  const { server, starts } = makeCrashServer(t, { mode: 'crash-once', crashMs: 150 });
+  await server.start();
+  assert.equal(await waitForState(server, 'exited'), true);
+  const status = server.status();
+  assert.equal(status.restarts, 0);
+  assert.equal(status.failure, null);
+  assert.ok(Object.isFrozen(status));
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(startsCount(starts), 1, 'no automatic restart without a policy');
+  assert.equal(server.status().state, 'exited');
+  assert.deepEqual(await server.health(), { ok: false, status: 0 });
+});
+
+test('a crash while running restarts on the same port after the back-off', async (t) => {
+  const { server, starts } = makeCrashServer(t, {
+    mode: 'crash-once',
+    crashMs: 150,
+    restart: { maxRestarts: 2, baseDelayMs: 200, maxDelayMs: 500, stableMs: 60_000 },
+  });
+  const first = await server.start();
+  assert.equal(await waitForState(server, 'restarting'), true);
+  assert.equal(server.status().port, first.port, 'the restart keeps the target port');
+  assert.ok(Object.isFrozen(server.status()), 'the snapshot stays frozen while restarting');
+  assert.deepEqual(await server.health(), { ok: false, status: 0 });
+  assert.equal(await waitForState(server, 'running'), true);
+  const second = server.status();
+  assert.equal(second.port, first.port);
+  assert.notEqual(second.pid, first.pid);
+  assert.equal(second.restarts, 1);
+  assert.equal(second.failure, null);
+  assert.equal(startsCount(starts), 2);
+  assert.deepEqual(await server.health(), { ok: true, status: 200 });
+  const client = createProviderClient('llama-cpp', { baseUrl: second.baseUrl, model: 'fake-gguf', env: {} });
+  assert.equal((await client.chat({ messages: MESSAGES })).text, 'local answer');
+});
+
+test('the back-off grows and the restart budget ends in a bounded failed state', async (t) => {
+  const baseDelayMs = 120;
+  const crashMs = 120;
+  const { server, starts } = makeCrashServer(t, {
+    mode: 'crash-after',
+    crashMs,
+    restart: { maxRestarts: 2, baseDelayMs, maxDelayMs: 400, stableMs: 60_000 },
+  });
+  await server.start();
+  assert.equal(await waitForState(server, 'failed', 15_000), true);
+  const status = server.status();
+  assert.equal(status.failure, 'restarts-exhausted');
+  assert.equal(status.restarts, 2);
+  assert.equal(status.port, null);
+  assert.equal(status.pid, null);
+  assert.equal(startsCount(starts), 3);
+  const [t1, t2, t3] = startsTimes(starts);
+  assert.ok(t2 - t1 >= crashMs + baseDelayMs, 'the first restart waits at least the base delay: ' + (t2 - t1));
+  assert.ok(
+    t3 - t2 >= crashMs + baseDelayMs * 2,
+    'the second restart waits at least twice the base delay: ' + (t3 - t2),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  assert.equal(startsCount(starts), 3, 'nothing restarts after the budget is spent');
+  assert.equal(server.status().state, 'failed');
+  assert.deepEqual(await server.health(), { ok: false, status: 0 });
+});
+
+test('a stable run resets the restart budget', async (t) => {
+  const { server, starts } = makeCrashServer(t, {
+    mode: 'crash-twice',
+    crashMs: 1_500,
+    restart: { maxRestarts: 1, baseDelayMs: 80, maxDelayMs: 200, stableMs: 1_000 },
+  });
+  await server.start();
+  const deadline = Date.now() + 15_000;
+  while (startsCount(starts) < 3 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.equal(startsCount(starts), 3, 'the second crash restarted because the first run was stable');
+  assert.equal(await waitForState(server, 'running'), true);
+  assert.equal(server.status().failure, null);
+});
+
+test('a stableMs of 0 never resets the budget', async (t) => {
+  const { server, starts } = makeCrashServer(t, {
+    mode: 'crash-twice',
+    crashMs: 200,
+    restart: { maxRestarts: 1, baseDelayMs: 60, maxDelayMs: 120, stableMs: 0 },
+  });
+  await server.start();
+  assert.equal(await waitForState(server, 'failed', 15_000), true);
+  assert.equal(server.status().restarts, 1);
+  assert.equal(startsCount(starts), 2);
+});
+
+test('a stop during the back-off cancels the pending restart', async (t) => {
+  const { server, starts } = makeCrashServer(t, {
+    mode: 'crash-once',
+    crashMs: 150,
+    restart: { maxRestarts: 2, baseDelayMs: 500, maxDelayMs: 1000, stableMs: 60_000 },
+  });
+  await server.start();
+  assert.equal(await waitForState(server, 'restarting'), true);
+  assert.equal((await server.stop()).stopped, true);
+  assert.equal(server.status().state, 'stopped');
+  assert.equal(server.status().port, null);
+  assert.equal(server.status().restarts, 0);
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  assert.equal(startsCount(starts), 1, 'a stopped controller spawns nothing');
+  assert.equal(server.status().state, 'stopped');
+});
+
+test('a crash during start still fails closed and never auto-restarts', async (t) => {
+  const { server, starts } = makeCrashServer(t, {
+    mode: 'exit',
+    restart: { maxRestarts: 2, baseDelayMs: 60, maxDelayMs: 120, stableMs: 60_000 },
+  });
+  await assert.rejects(server.start(), isCode('server-exited'));
+  assert.equal(server.status().state, 'stopped');
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.equal(startsCount(starts), 1);
+  assert.equal(server.status().restarts, 0);
+});
+
+test('the back-off delay is capped by maxDelayMs', async (t) => {
+  // With baseDelayMs and maxDelayMs both 50 ms every delay is clamped, so ten restarts add about
+  // half a second of waiting; the uncapped exponential sum for the same ten attempts is 51.15 s.
+  const { server, starts } = makeCrashServer(t, {
+    mode: 'crash-after',
+    crashMs: 150,
+    restart: { maxRestarts: 10, baseDelayMs: 50, maxDelayMs: 50, stableMs: 60_000 },
+  });
+  const began = Date.now();
+  await server.start();
+  assert.equal(await waitForState(server, 'failed', 15_000), true);
+  const elapsed = Date.now() - began;
+  const status = server.status();
+  assert.equal(status.failure, 'restarts-exhausted');
+  assert.equal(status.restarts, 10);
+  assert.equal(startsCount(starts), 11);
+  assert.ok(elapsed < 8_000, 'ten capped delays keep the run bounded: ' + elapsed + ' ms');
+});
+
+test('a restart that never becomes ready exhausts the budget and fails closed', async (t) => {
+  // The first child is healthy and then crashes; every restarted child exits before it is ready, so
+  // the failed health-gated starts themselves must spend the budget and end bounded.
+  const { server, starts } = makeCrashServer(t, {
+    mode: 'crash-once-then-exit',
+    crashMs: 150,
+    restart: { maxRestarts: 2, baseDelayMs: 60, maxDelayMs: 120, stableMs: 60_000 },
+  });
+  await server.start();
+  assert.equal(await waitForState(server, 'failed', 15_000), true);
+  const status = server.status();
+  assert.equal(status.failure, 'restarts-exhausted');
+  assert.equal(status.restarts, 2);
+  assert.equal(status.port, null);
+  assert.equal(status.pid, null);
+  assert.equal(startsCount(starts), 3);
+  assert.deepEqual(await server.health(), { ok: false, status: 0 });
+});
+
+test('the restart policy applies the documented defaults', async (t) => {
+  const { dir, modelPath } = makeModel(t);
+  const log = path.join(dir, 'argv.json');
+  const base = { executablePath: NODE, commandArgs: [FIXTURE], modelPath, env: { FAKE_LLAMA_LOG: log } };
+  // maxDelayMs defaults to max(baseDelayMs, 30 s), so a base delay above the 30 s default is accepted
+  // instead of tripping the maxDelayMs >= baseDelayMs check.
+  assert.doesNotThrow(() => createLlamaServer({ ...base, restart: { maxRestarts: 1, baseDelayMs: 40_000 } }));
+  assert.doesNotThrow(() => createLlamaServer({ ...base, restart: { maxRestarts: 1 } }));
+  // stableMs defaults to 60 s, so two crashes 200 ms apart exhaust a one-restart budget instead of
+  // resetting it.
+  const { server, starts } = makeCrashServer(t, {
+    mode: 'crash-twice',
+    crashMs: 200,
+    restart: { maxRestarts: 1, baseDelayMs: 60, maxDelayMs: 120 },
+  });
+  await server.start();
+  assert.equal(await waitForState(server, 'failed', 10_000), true);
+  assert.equal(server.status().restarts, 1);
+  assert.equal(startsCount(starts), 2);
+});

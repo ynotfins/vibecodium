@@ -1,6 +1,6 @@
 # ADR-0010: Local models run under a caller-supplied llama-server supervisor
 
-> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-25
+> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-26
 
 - Status: accepted
 - Date: 2026-11-25
@@ -37,10 +37,14 @@ Ship `src/stable/runtime/llama-server.mjs` as a dependency-free supervisor for a
    user-writable search paths do not reach the local server.
 - `stop()` is idempotent and escalates from `SIGTERM` to `SIGKILL`. The controller and its snapshots
    are frozen; child output is retained in a bounded tail but is not exposed.
+- An optional, validated `restart` policy recovers a child that exits while serving: it restarts on
+   the same loopback port with exponential back-off, a small bounded budget and a stability reset,
+   and reports `failed` with `restarts-exhausted` once the budget is spent. Without the policy the
+   supervisor keeps the earlier behaviour, where an exit is reported as `exited`.
 
-Bundling the llama.cpp release, pinning it in `vibe/sidecars.json`, downloading weights and
-detecting Ollama are later M3 slices. This ADR approves the supervisor boundary, not a binary
-version.
+Bundling the llama.cpp release and pinning it in `vibe/sidecars.json` are later M3 slices; the model
+downloader and the Ollama discovery are separate modules delivered since. This ADR approves the
+supervisor boundary, not a binary version.
 
 ## Consequences
 
@@ -55,7 +59,8 @@ version.
    bundled binary will be installer-owned, which closes that gap.
 - Only the direct child is terminated on Windows; a server that spawns descendants would leave them
    until a later process-tree slice, and a parent crash leaves the child running on loopback until it
-   is killed. There is no restart/back-off policy yet, and the ephemeral port is reserved before the
-   child binds (a narrow race).
+   is killed. The opt-in restart policy recovers a direct child that dies while serving within a
+   bounded budget and then stops in `failed`; it does not supervise descendants. The ephemeral port is
+   reserved before the child binds (a narrow race).
 - A bundled binary needs a radar row, a pinned version, a SHA-256 checksum, the seven-day rule and a
    signing route before it ships; none of that is approved by this ADR.
