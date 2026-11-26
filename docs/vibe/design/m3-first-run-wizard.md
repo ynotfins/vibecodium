@@ -17,11 +17,13 @@
 
 ## Scope
 
-This document covers M3's fourth runtime slice, the first-run wizard, plus the later wiring of Ollama
-detection and explicit daemon selection into it and of the supervisor's restart policy into the
-hand-off: one flow that tells a new install what this machine can run, which pinned weights are
-already present, downloads only the missing ones, and hands the caller the exact local B1 start
-plan and, for the pinned path, the exact `createLlamaServer` options. It ships no `llama-server`
+This document covers M3's fourth runtime slice, the first-run wizard, plus the later wiring into it of
+Ollama detection and explicit daemon selection, of the supervisor's restart policy and the
+`runtimeOptions()` hand-off, and of the pinned sidecar install through `installRuntime()`: one flow
+that tells a new install what this
+machine can run, which pinned weights are already present, downloads only the missing ones, and hands
+the caller the exact local B1 start plan and, for the pinned path, the exact `createLlamaServer`
+options. It ships no `llama-server`
 process and no binary: the supervisor still owns the process boundary, the pin and verified
 installer are the separate [m3-sidecar-binary.md](m3-sidecar-binary.md) slice, and the wizard
 installs that pin on demand through `installRuntime()` (adopting the verified executable) or an
@@ -31,7 +33,7 @@ installed or passed as `runtimePath`. Node built-ins only.
 Out of scope: spawning or supervising `llama-server`, bundling or signing the binary (the pin and
 download/install module are delivered separately in [m3-sidecar-binary.md](m3-sidecar-binary.md)),
 copying the catalog into a packaged application, changing the supervisor's restart behaviour,
-starting/installing/updating [PERSON_NAME], pulling [PERSON_NAME] models, switching the active B1 provider or writing
+starting/installing/updating Ollama, pulling Ollama models, switching the active B1 provider or writing
 provider config, provider calls, model-ladder changes and NVML/vendor GPU libraries. Ollama detection
 and the explicit selection of a discovered daemon as the local runtime are in scope; the wizard never
 starts, installs or updates the daemon and never writes provider configuration.
@@ -189,7 +191,8 @@ a forged, accessor-backed, revoked-Proxy, malformed or non-executable answer, an
 leave the path unset on a first attempt and report one bounded code (a failed re-install keeps an
 earlier verified path, which the supervisor re-validates at start). On success the runtime step turns `ready` once the
 pinned models are installed, when the start plan and `runtimeOptions()` become available with that
-path (before that the phase stays `needs-download` and the plan `not-ready`), and the returned result
+path (before that the phase stays at the pinned verdict's phase, normally `needs-download`, and the
+plan is `not-ready`), and the returned result
 carries no path. The wizard still never downloads in a test, never extracts, never spawns and never
 starts the server.
 
@@ -253,7 +256,7 @@ of UTF-8, and uses the same nonce in `style-src`, `script-src`, the `<style>` ta
 Residual risks: the wizard trusts its injected `probe`, `downloadModel`, `verifyModel`, `discoverOllama`,
 `installRuntime` (or the `sidecar` pin it delegates to) and `runtimePath` exactly as the supervisor
 trusts a caller-supplied binary; the product wiring leaves them at their reviewed defaults. Any loopback service that answers `/api/tags` with a valid shape is
-reported as [PERSON_NAME], though the only effect is a displayed base URL and the overrides offered to that
+reported as Ollama, though the only effect is a displayed base URL and the overrides offered to that
 same endpoint, with no secret and no write. The start action and `runtimeOptions()` only assemble data,
 so a bug there cannot start a process with unexpected flags or an unbounded restart loop, but the
 eventual caller must still pass the options through the supervisor rather than building a child itself.
