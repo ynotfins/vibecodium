@@ -141,6 +141,7 @@ test('a ready machine exposes the start plan once the binary and both models are
   assert.equal(view.downloadBytes, 0);
   assert.deepEqual(view.start, {
     available: true,
+    kind: 'llama-server',
     executablePath: runtime,
     modelPath: path.join(root, 'models', chatEntry.file),
     embeddingModelPath: path.join(root, 'models', embeddingEntry.file),
