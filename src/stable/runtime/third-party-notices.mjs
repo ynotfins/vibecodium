@@ -39,8 +39,6 @@ const LEGAL_FENCE = '```';
 
 const LEDGER_KEYS = new Set(['version', 'reviewed', 'licenses']);
 const LICENSE_KEYS = new Set(['id', 'name', 'url', 'text', 'sha256']);
-const COMPONENT_KEYS = new Set(['name', 'version', 'source', 'licenses', 'kind']);
-const COMPONENT_KINDS = Object.freeze(['binary', 'model']);
 
 export class NoticeError extends Error {
   constructor(code, message) {
@@ -122,8 +120,17 @@ function requireText(value, label, max, code) {
   return value;
 }
 
+// A review date must be a real calendar day (2026-02-31 is not) and cannot be in the future, so a
+// stale or impossible ledger cannot claim a review that never happened.
 function isIsoDate(value) {
-  return typeof value === 'string' && DATE.test(value) && !Number.isNaN(Date.parse(value + 'T00:00:00Z'));
+  if (typeof value !== 'string' || !DATE.test(value)) return false;
+  const parsed = new Date(value + 'T00:00:00Z');
+  if (Number.isNaN(parsed.getTime())) return false;
+  return parsed.toISOString().slice(0, 10) === value;
+}
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 // A license text is placed under a relative, directory-free path inside `vibe/licenses/`.
@@ -161,7 +168,8 @@ export function digestLicenseText(text) {
 export function validateNoticesLedger(value) {
   const ledger = readOwnData(value, 'notices ledger', LEDGER_KEYS);
   if (ledger.version !== NOTICES_LEDGER_VERSION) fail('invalid-ledger', 'notices ledger version must be ' + NOTICES_LEDGER_VERSION);
-  if (!isIsoDate(ledger.reviewed)) fail('invalid-ledger', 'notices ledger reviewed must be a YYYY-MM-DD date');
+  if (!isIsoDate(ledger.reviewed)) fail('invalid-ledger', 'notices ledger reviewed must be a real YYYY-MM-DD date');
+  if (ledger.reviewed > todayIso()) fail('invalid-ledger', 'notices ledger reviewed must not be in the future');
   const raw = readArray(ledger.licenses, 'notices ledger licenses', MAX_LICENSES, 'invalid-ledger');
   const seen = new Set();
   const licenses = [];
@@ -341,7 +349,7 @@ export function buildThirdPartyNotices({ ledger, components, texts } = {}) {
   lines.push('| Component | Kind | Version | Source | Licenses |');
   lines.push('|---|---|---|---|---|');
   for (const component of list) {
-    const names = component.licenses
+    const names = [...new Set(component.licenses)]
       .map((id) => (findLicense(valid, id) || { name: id }).name)
       .map((name) => cell(name))
       .join(', ');
@@ -369,5 +377,3 @@ export function buildThirdPartyNotices({ ledger, components, texts } = {}) {
   if (Buffer.byteLength(document, 'utf8') > MAX_DOCUMENT_BYTES) fail('document-too-large', 'notice document is too large');
   return document;
 }
-
-export const COMPONENT_KIND_LIST = COMPONENT_KINDS;

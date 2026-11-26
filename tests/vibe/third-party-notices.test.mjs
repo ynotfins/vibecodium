@@ -136,6 +136,24 @@ test('the document escapes a table cell and never breaks the row', () => {
   assert.equal(row, '| evil\\|name | binary | b1 | owner/repo | MIT License |');
 });
 
+test('a repeated license id is rendered once in the row', () => {
+  const document = buildThirdPartyNotices({
+    ledger,
+    components: [{
+      name: 'llama-server',
+      kind: 'binary',
+      version: 'b1',
+      source: 'owner/repo',
+      licenses: ['mit', 'mit'],
+    }],
+    texts: texts(),
+  });
+  const row = document.split('\n').find((line) => line.startsWith('| llama-server |'));
+  assert.ok(row, 'no component row was rendered');
+  assert.equal(row, '| llama-server | binary | b1 | owner/repo | MIT License |');
+  assert.equal((document.match(/^### MIT License$/gm) || []).length, 1);
+});
+
 test('checkNotices passes on the real repository root', () => {
   const { errors, document } = checkNotices(ROOT);
   assert.deepEqual(errors, []);
@@ -202,6 +220,8 @@ test('malformed ledger fields fail closed', () => {
   expectCode(() => validateNoticesLedger(duplicated), 'invalid-ledger');
   const many = ledgerJson({ licenses: Array.from({ length: MAX_LICENSES + 1 }, (_, index) => ({ ...ledger.licenses[0], id: 'lic-' + index })) });
   expectCode(() => validateNoticesLedger(many), 'invalid-ledger');
+  expectCode(() => validateNoticesLedger(ledgerJson({ reviewed: '2026-02-31' })), 'invalid-ledger');
+  expectCode(() => validateNoticesLedger(ledgerJson({ reviewed: '2999-12-31' })), 'invalid-ledger');
 });
 
 test('a malformed license entry fails closed', () => {
@@ -329,6 +349,37 @@ test('the tool reports a ledger error without a document', () => {
     assert.match(errors[0], /^invalid-ledger: /);
     assert.equal(document, undefined);
     assert.ok(!existsSync(path.join(dir, NOTICES_DOCUMENT_PATH)));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('each used license is rendered exactly once and none is dropped', () => {
+  const components = collectThirdPartyComponents({ sidecars, catalog });
+  const document = buildThirdPartyNotices({ ledger, components, texts: texts() });
+  const used = [...new Set(components.flatMap((component) => [...component.licenses]))].sort();
+  assert.equal((document.match(/^### /gm) || []).length, used.length, 'a license section is repeated or dropped');
+  for (const id of used) {
+    const license = ledger.licenses.find((entry) => entry.id === id);
+    const body = readFileSync(path.join(ROOT, license.text), 'utf8').replace(/\n+$/, '');
+    assert.equal(document.split(body).length - 1, 1, `${id} text is rendered more than once`);
+    assert.ok(document.includes('`' + license.sha256 + '`'), `${id} digest is missing`);
+  }
+});
+
+test('the tool fails when a shipped pin license has no ledger row', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'vibe-notices-coverage-'));
+  try {
+    cpSync(path.join(ROOT, 'vibe'), path.join(dir, 'vibe'), { recursive: true });
+    mkdirSync(path.join(dir, 'docs', 'vibe', 'legal'), { recursive: true });
+    const ledgerPath = path.join(dir, 'vibe', 'notices.json');
+    const json = JSON.parse(readFileSync(ledgerPath, 'utf8'));
+    json.licenses = json.licenses.filter((license) => license.id !== 'apache-2.0');
+    writeFileSync(ledgerPath, JSON.stringify(json, null, 2) + '\n');
+    const { errors, document } = checkNotices(dir);
+    assert.equal(document, undefined);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /^missing-license-text: license apache-2\.0 is used by a pinned component but missing from the ledger$/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
