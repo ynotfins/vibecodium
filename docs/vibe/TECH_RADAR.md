@@ -1,6 +1,6 @@
 # Vibecodium Technology Radar
 
-> Doc class: living · Owner: tech-scout · Last reviewed: 2026-11-24
+> Doc class: living · Owner: tech-scout · Last reviewed: 2026-11-25
 
 Maintained by the `tech-scout` sub-agent. Every component the product ships or the build depends on has one row. A row is reviewed by its "Next review" date, at every milestone start, and whenever its component changes. The docs check warns on overdue rows; a new dependency without a row fails the drift check.
 
@@ -11,7 +11,7 @@ Rings: `adopt` (in use, keep), `trial` (in use, under evaluation), `assess` (wat
 | Component | Choice | Version in use | Latest seen | Checked | Alternatives watched | Ring | Next review |
 |---|---|---|---|---|---|---|---|
 | Editor base | VSCodium build scripts (fork `ynotfins/vibecodium`) | 1.143.17232 (`upstream/stable.json` 1.143.1) | 1.143.17232 | 2026-11-20 | VS Code upstream directly; Theia (EPL-2.0) | adopt | 2026-11-27 |
-| Upstream editor | microsoft/vscode | 1.143.1 | 1.147.0 | 2026-11-20 | 1.147.0 is two days old; defer adoption until at least 2026-11-25 | adopt | 2026-11-25 |
+| Upstream editor | microsoft/vscode | 1.143.1 | 1.148.0 (published 2026-11-25) | 2026-11-25 | 1.148.0 is new; defer adoption until at least 2026-12-02; VSCodium `upstream/stable.json` is still 1.143.1 | adopt | 2026-12-02 |
 | Build Node.js | Node per `.nvmrc` | 24.18.0 | 24.22.3 (published 2026-11-10) | 2026-11-23 | Node 26.13.1 LTS (Lithium, 2026-11-10) - major bump, not adopted | adopt | 2026-11-27 |
 | Agent harness | OpenCode via ACP | 1.19.5 (workstation CLI) | 1.19.5 (carried) | 2026-11-08 carried | Goose (Apache-2.0), Cline (Apache-2.0), Kilo Code runtime | adopt | 2026-11-27 |
 | Gateway / router / MCP gateway | Bifrost | not yet bundled | transports v2.6.0 (2026-11-19) | 2026-11-20 | OmniRoute (MIT), LiteLLM, Portkey (stale) | adopt | 2026-11-27 |
@@ -27,7 +27,7 @@ Rings: `adopt` (in use, keep), `trial` (in use, under evaluation), `assess` (wat
 | Semantic / visual graph | Understand-Anything (MIT) | `knowledge-graph.json` 1.0.0 projection in `src/stable/index-engine/understand-projection.mjs` (upstream agent not vendored) | v2.9.8 (2026-11-15) | 2026-11-24 | CodeGraphContext, code-graph-rag; SCIP as symbol/reference feed | adopt | 2026-12-07 |
 | Documentation grounding | Local Vibecodium docs MCP server (in-repo, Node built-ins only) | 0.1.0; MCP 2025-06-18 stdio; local Markdown roots only | no shipped dependency; `@arabold/docs-mcp-server` 3.5.0 (2026-11-22, MIT), adoption deferred to 2026-11-29, is the candidate web-scraping adapter | 2026-11-24 | arabold/docs-mcp-server, Context7 (hosted corpus), Crawl4AI (Python) | adopt | 2026-12-08 |
 | Vector-core challenger | USearch (Apache-2.0) | not used | v2.26.6 (2026-10-25) | 2026-11-23 | LanceDB embedded vector index | assess | 2026-12-07 |
-| Local model runtime | llama.cpp `llama-server` | not yet bundled | carried | 2026-11-08 carried | Ollama, LocalAI | adopt | 2026-11-27 |
+| Local model runtime | llama.cpp `llama-server` (MIT) | caller-supplied supervisor delivered 2026-11-25; no binary bundled or downloaded, so any future bundle must first be public for 7 days | v1.0.0 (2026-11-13); latest nightly b12751 (2026-11-25); supervisor flags and endpoints re-verified against v1.0.0 | 2026-11-25 | Ollama 0.40.18 (2026-11-24, MIT), LocalAI v5.0.1 (2026-11-20, MIT) watched, not adopted; `/v1/embeddings` still needs `--embeddings` | adopt | 2026-12-02 |
 | Sandbox | anthropics/sandbox-runtime | not yet used | carried | 2026-11-08 carried | devcontainers, microsandbox | adopt | 2026-11-27 |
 | Autonomous lane | OpenHands Agent Canvas | 1.43.0 stable, `main` edge (workstation) | 1.43.0 (2026-11-20) | 2026-11-20 | — | trial | 2026-11-27 |
 | Installer | Inno Setup | VSCodium default | 7.1.1 (carried) | 2026-11-08 carried | WiX v6+ (fee EULA), MSIX | adopt | 2026-11-27 |

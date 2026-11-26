@@ -33,6 +33,7 @@ Vibecodium is a standalone, Windows-first AI IDE built on VSCodium. This folder 
 | [design/m2-morph-direct.md](design/m2-morph-direct.md) | M2 B6 direct second-option policy, same-turn fallback and its security boundary |
 | [design/m2-compact.md](design/m2-compact.md) | M2 B6 Compact history pruning, the byte-identical line guarantee and its boundaries |
 | [design/m2-fast-apply.md](design/m2-fast-apply.md) | M2 B6 bounded Fast Apply `edit_file` agent tool and its workspace, write and error boundaries |
+| [design/m3-llama-server.md](design/m3-llama-server.md) | M3 local `llama-server` supervisor: loopback process boundary, health gating, environment allowlist and failure model |
 | [CHANGELOG.md](CHANGELOG.md) | User-visible changes per release |
 | [SECURITY.md](SECURITY.md) | Security model and how to report issues |
 | [adr/README.md](adr/README.md) | Architecture decision records |
