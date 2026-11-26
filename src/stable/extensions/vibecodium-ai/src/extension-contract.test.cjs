@@ -183,6 +183,17 @@ test('the first-run setup panel opens after a wizard is supplied', async () => {
     refresh: async () => view,
     install: async () => ({ ok: true, installed: 0, reason: 'already-installed' }),
     startPlan: () => ({ available: false, reason: 'not-ready' }),
+    checkOllama: async () => ({
+      checked: true,
+      available: false,
+      reason: 'unreachable',
+      baseUrl: null,
+      chatModel: null,
+      embeddingModel: null,
+      modelCount: 0,
+      notices: ['ollama-unreachable'],
+      providerOptions: null,
+    }),
   };
   api.setFirstRunWizard(wizard);
   const opened = await api.openFirstRun();
@@ -191,5 +202,8 @@ test('the first-run setup panel opens after a wizard is supplied', async () => {
   assert.match(api.getFirstRunPanelHtml(), /Vibecodium Setup/);
   const message = await api.handleFirstRunMessage({ type: 'install' });
   assert.equal(message.kind, 'install');
+  const ollama = await api.handleFirstRunMessage({ type: 'ollama' });
+  assert.deepEqual(ollama, { handled: true, kind: 'ollama', ok: false });
+  assert.match(api.getFirstRunPanelHtml(), /No local .* daemon answered/);
   assert.doesNotThrow(() => api.disposeFirstRun());
 });
