@@ -457,12 +457,12 @@ test('verifySidecarInstall reports missing, size, checksum and unsafe paths with
   const base = tempDir(t);
   const files = runtimeFiles('verify');
   const sidecar = manifestForFiles(files).sidecar;
-  const empty = await verifySidecarInstall(sidecar, { targetDir: path.join(base, 'empty') });
+  const empty = await verifySidecarInstall(sidecar, { platformKey: 'win32-x64', targetDir: path.join(base, 'empty') });
   assert.deepEqual(empty, Object.freeze({ verified: false, reason: 'missing', version: 'b12426' }));
 
   const dir = path.join(base, 'installed');
   writeRuntimeFiles(dir, files);
-  const verified = await verifySidecarInstall(sidecar, { targetDir: dir });
+  const verified = await verifySidecarInstall(sidecar, { platformKey: 'win32-x64', targetDir: dir });
   assert.equal(verified.verified, true);
   assert.equal(verified.version, 'b12426');
   assert.equal(verified.executablePath, path.join(dir, 'llama-server.exe'));
@@ -472,11 +472,11 @@ test('verifySidecarInstall reports missing, size, checksum and unsafe paths with
   assert.ok(verified.files.every((file) => Object.isFrozen(file)));
 
   writeFileSync(path.join(dir, 'llama.dll'), Buffer.from('short'));
-  const sized = await verifySidecarInstall(sidecar, { targetDir: dir });
+  const sized = await verifySidecarInstall(sidecar, { platformKey: 'win32-x64', targetDir: dir });
   assert.equal(sized.reason, 'size');
 
   writeFileSync(path.join(dir, 'llama.dll'), Buffer.from('fake runtime dll verifX'));
-  const digest = await verifySidecarInstall(sidecar, { targetDir: dir });
+  const digest = await verifySidecarInstall(sidecar, { platformKey: 'win32-x64', targetDir: dir });
   assert.equal(digest.reason, 'checksum');
 });
 
@@ -499,7 +499,7 @@ test('verifySidecarInstall refuses a symbolic link where the host allows creatin
     throw error;
   }
   assert.ok(lstatSync(target).isSymbolicLink());
-  const result = await verifySidecarInstall(sidecar, { targetDir: dir });
+  const result = await verifySidecarInstall(sidecar, { platformKey: 'win32-x64', targetDir: dir });
   assert.equal(result.verified, false);
   assert.equal(result.reason, 'unsafe-path');
 });
@@ -518,7 +518,7 @@ test('installSidecar downloads, verifies, extracts only the allowlist and skips 
     const sidecar = makeSidecar({ url: base + 'llama.zip', archive, files });
     const dir = path.join(tempDir(t), 'runtime');
     const progress = [];
-    const result = await installSidecar(sidecar, {
+    const result = await installSidecar(sidecar, { platformKey: 'win32-x64',
       targetDir: dir,
       onProgress: (event) => progress.push(event),
     });
@@ -538,7 +538,7 @@ test('installSidecar downloads, verifies, extracts only the allowlist and skips 
     assert.equal(progress[progress.length - 1].received, archive.length);
     assert.equal(progress[progress.length - 1].total, archive.length);
 
-    const second = await installSidecar(sidecar, {
+    const second = await installSidecar(sidecar, { platformKey: 'win32-x64',
       targetDir: dir,
       fetchImpl: () => {
         throw new Error('the second install must not open a socket');
@@ -549,7 +549,7 @@ test('installSidecar downloads, verifies, extracts only the allowlist and skips 
     assert.equal(second.installed, false);
     assert.equal(second.skipped, true);
 
-    const verified = await verifySidecarInstall(sidecar, { targetDir: dir });
+    const verified = await verifySidecarInstall(sidecar, { platformKey: 'win32-x64', targetDir: dir });
     assert.equal(verified.verified, true);
     assert.equal(verified.executablePath, result.executablePath);
   });
@@ -566,7 +566,7 @@ test('installSidecar installs from an injected fetch without a socket', async (t
   });
   const dir = path.join(tempDir(t), 'runtime');
   let calls = 0;
-  const result = await installSidecar(sidecar, {
+  const result = await installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async (url) => {
       calls += 1;
@@ -624,7 +624,7 @@ test('a corrupt archive digest installs nothing', async (t) => {
     targetOverrides: { sha256: '0'.repeat(64) },
   });
   const dir = path.join(tempDir(t), 'runtime');
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => archiveResponse(archive),
   }), 'checksum-mismatch');
@@ -641,7 +641,7 @@ test('a pinned entry with a wrong digest or size fails before anything is instal
   ));
   const digestSidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files: badDigest });
   const dirOne = path.join(tempDir(t), 'digest');
-  await expectFailure(installSidecar(digestSidecar, {
+  await expectFailure(installSidecar(digestSidecar, { platformKey: 'win32-x64',
     targetDir: dirOne,
     fetchImpl: async () => archiveResponse(archive),
   }), 'entry-checksum');
@@ -654,7 +654,7 @@ test('a pinned entry with a wrong digest or size fails before anything is instal
   ));
   const sizeSidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files: badSize });
   const dirTwo = path.join(tempDir(t), 'size');
-  await expectFailure(installSidecar(sizeSidecar, {
+  await expectFailure(installSidecar(sizeSidecar, { platformKey: 'win32-x64',
     targetDir: dirTwo,
     fetchImpl: async () => archiveResponse(archive),
   }), 'entry-size');
@@ -668,7 +668,7 @@ test('a missing allowlisted entry fails closed', async (t) => {
   files.push(fileEntry('ggml.dll', Buffer.from('not in the archive')));
   const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
   const dir = path.join(tempDir(t), 'runtime');
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => archiveResponse(archive),
   }), 'missing-entry');
@@ -682,32 +682,32 @@ test('HTTP failures, an insecure redirect and a missing body are bounded', async
   const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
   const dir = path.join(tempDir(t), 'runtime');
 
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async (url) => ({ status: 503, url, headers: { get: () => null }, body: { cancel: async () => {} } }),
   }), 'http-status');
 
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => ({ status: 200, url: 'http://evil.example/llama.zip', headers: { get: () => null }, body: null }),
   }), 'insecure-redirect');
 
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => ({ status: 200, url: 'https://user:x/llama.zip', headers: { get: () => null }, body: null }),
   }), 'insecure-redirect');
 
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => ({ status: 200, url: 'https://example.com/llama.zip#fragment', headers: { get: () => null }, body: null }),
   }), 'insecure-redirect');
 
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async (url) => ({ status: 200, url, headers: { get: () => null }, body: null }),
   }), 'invalid-response');
 
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async (url) => ({
       status: 200,
@@ -726,7 +726,7 @@ test('a stalled transfer, a total timeout and a caller abort are bounded and kee
   const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
   const dir = path.join(tempDir(t), 'runtime');
 
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     idleTimeoutMs: 50,
     fetchImpl: (url, init) => new Promise((resolve, reject) => {
@@ -734,7 +734,7 @@ test('a stalled transfer, a total timeout and a caller abort are bounded and kee
     }),
   }), 'stalled');
 
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     totalTimeoutMs: 1000,
     fetchImpl: (url, init) => new Promise((resolve, reject) => {
@@ -744,7 +744,7 @@ test('a stalled transfer, a total timeout and a caller abort are bounded and kee
 
   const controller = new AbortController();
   controller.abort();
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     signal: controller.signal,
     fetchImpl: async () => {
@@ -762,7 +762,7 @@ test('a second concurrent install of the same directory is refused', async (t) =
   const dir = path.join(tempDir(t), 'runtime');
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
-  const first = installSidecar(sidecar, {
+  const first = installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => {
       await gate;
@@ -770,7 +770,7 @@ test('a second concurrent install of the same directory is refused', async (t) =
     },
   });
   await new Promise((resolve) => setTimeout(resolve, 25));
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => archiveResponse(archive),
   }), 'busy');
@@ -786,13 +786,13 @@ test('install options and verification options are validated', async (t) => {
   const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
   const dir = path.join(tempDir(t), 'runtime');
 
-  await expectFailure(installSidecar(sidecar, {}), 'invalid-options');
-  await expectFailure(installSidecar(sidecar, { targetDir: dir, unknown: true }), 'invalid-options');
-  await expectFailure(installSidecar(sidecar, { targetDir: dir, idleTimeoutMs: 1 }), 'invalid-options');
-  await expectFailure(installSidecar(sidecar, { targetDir: dir, signal: {} }), 'invalid-options');
-  await expectFailure(installSidecar(sidecar, { targetDir: 'relative/runtime' }), 'invalid-destination');
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',}), 'invalid-options');
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64', targetDir: dir, unknown: true }), 'invalid-options');
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64', targetDir: dir, idleTimeoutMs: 1 }), 'invalid-options');
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64', targetDir: dir, signal: {} }), 'invalid-options');
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64', targetDir: 'relative/runtime' }), 'invalid-destination');
   await expectFailure(installSidecar(sidecar, { targetDir: dir, platformKey: 'linux-x64' }), 'unsupported-platform');
-  await expectFailure(verifySidecarInstall(sidecar, { targetDir: dir, unknown: true }), 'invalid-options');
+  await expectFailure(verifySidecarInstall(sidecar, { platformKey: 'win32-x64', targetDir: dir, unknown: true }), 'invalid-options');
 
   let invoked = 0;
   const options = {};
@@ -813,7 +813,7 @@ async function installArchive(t, entries, manifestEntries, code, options = {}) {
   const files = manifestEntries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
   const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files, ...options });
   const dir = path.join(tempDir(t), 'runtime');
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => archiveResponse(archive),
   }), code);
@@ -846,7 +846,7 @@ test('duplicate, unsupported, truncated and oversized archives fail closed', asy
   const truncated = archive.subarray(0, archive.length - 5);
   const truncatedSidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive: truncated, files });
   const truncatedDir = path.join(tempDir(t), 'truncated');
-  await expectFailure(installSidecar(truncatedSidecar, {
+  await expectFailure(installSidecar(truncatedSidecar, { platformKey: 'win32-x64',
     targetDir: truncatedDir,
     fetchImpl: async () => archiveResponse(truncated),
   }), 'invalid-archive');
@@ -854,7 +854,7 @@ test('duplicate, unsupported, truncated and oversized archives fail closed', asy
   const notZip = Buffer.from('not a zip at all');
   const notZipSidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive: notZip, files });
   const notZipDir = path.join(tempDir(t), 'not-zip');
-  await expectFailure(installSidecar(notZipSidecar, {
+  await expectFailure(installSidecar(notZipSidecar, { platformKey: 'win32-x64',
     targetDir: notZipDir,
     fetchImpl: async () => archiveResponse(notZip),
   }), 'invalid-archive');
@@ -876,7 +876,7 @@ test('a directory entry and an unlisted file in the archive are ignored', async 
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
   const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
   const dir = path.join(tempDir(t), 'runtime');
-  const result = await installSidecar(sidecar, {
+  const result = await installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => archiveResponse(archive),
   });
@@ -891,7 +891,7 @@ test('errors and results never echo the URL, an entry body or the injected error
   const sidecar = makeSidecar({ url: 'https://example.com/secret-path/llama.zip', archive, files });
   const dir = path.join(tempDir(t), 'runtime');
   let message = '';
-  await assert.rejects(installSidecar(sidecar, {
+  await assert.rejects(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => ({
       status: 500,
@@ -913,7 +913,7 @@ test('errors and results never echo the URL, an entry body or the injected error
   assert.ok(!message.includes('SECRET-BODY'));
 
   let thrown = '';
-  await assert.rejects(installSidecar(sidecar, {
+  await assert.rejects(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => { throw new Error('connection to 10.0.0.1 failed'); },
   }), (error) => {
@@ -927,7 +927,7 @@ test('errors and results never echo the URL, an entry body or the injected error
     const okArchive = makeZip(entries);
     const okFiles = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
     const okSidecar = makeSidecar({ url: 'https://example.com/secret-path/llama.zip', archive: okArchive, files: okFiles });
-    return installSidecar(okSidecar, {
+    return installSidecar(okSidecar, { platformKey: 'win32-x64',
       targetDir: dir,
       fetchImpl: async () => archiveResponse(okArchive, 'https://example.com/secret-path/llama.zip'),
     });
@@ -943,7 +943,7 @@ test('the installed executable satisfies the supervisor path contract', async (t
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
   const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
   const dir = path.join(tempDir(t), 'runtime');
-  const result = await installSidecar(sidecar, {
+  const result = await installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => archiveResponse(archive),
   });
@@ -989,7 +989,7 @@ test('a final URL on an internal literal host is refused when the pin was not lo
     'https://' + ['240', '0', '0', '1'].join('.') + '/llama.zip',
   ];
   for (const url of hosts) {
-    await expectFailure(installSidecar(sidecar, {
+    await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
       targetDir: dir,
       fetchImpl: async () => ({ status: 200, url, headers: { get: () => null }, body: null }),
     }), 'insecure-redirect');
@@ -1015,7 +1015,7 @@ test('a symlinked target directory or nested parent is refused', async (t) => {
     }
     throw error;
   }
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: link,
     fetchImpl: async () => archiveResponse(archive),
   }), 'invalid-destination');
@@ -1034,7 +1034,7 @@ test('a symlinked target directory or nested parent is refused', async (t) => {
     files: nestedFiles,
     executable: 'linkd/llama-server.exe',
   });
-  await expectFailure(installSidecar(nested, {
+  await expectFailure(installSidecar(nested, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => archiveResponse(nestedArchive),
   }), 'unsafe-path');
@@ -1049,13 +1049,13 @@ test('ZIP64, multi-disk, encrypted and unsafe archive names fail closed', async 
   const dir = path.join(tempDir(t), 'runtime');
 
   const zip64 = patchEocd(patchEocd(archive, 8, 0xffff), 10, 0xffff);
-  await expectFailure(installSidecar(make(zip64), {
+  await expectFailure(installSidecar(make(zip64), { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => archiveResponse(zip64),
   }), 'invalid-archive');
 
   const multiDisk = patchEocd(archive, 4, 1);
-  await expectFailure(installSidecar(make(multiDisk), {
+  await expectFailure(installSidecar(make(multiDisk), { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => archiveResponse(multiDisk),
   }), 'invalid-archive');
@@ -1066,14 +1066,14 @@ test('ZIP64, multi-disk, encrypted and unsafe archive names fail closed', async 
     url: 'https://example.com/llama.zip',
     archive: encrypted,
     files: encryptedFiles,
-  }), {
+  }), { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => archiveResponse(encrypted),
   }), 'invalid-archive');
 
   for (const name of ['evil.', 'evil ', 'evil\u202E', 'CON.tar.gz']) {
     const unsafe = makeZip([...entries, { name, data: 'x' }]);
-    await expectFailure(installSidecar(make(unsafe), {
+    await expectFailure(installSidecar(make(unsafe), { platformKey: 'win32-x64',
       targetDir: dir,
       fetchImpl: async () => archiveResponse(unsafe),
     }), 'unsafe-entry');
@@ -1095,7 +1095,7 @@ test('a nested executable path is installed inside the target directory only', a
     executable: 'bin/llama-server.exe',
   });
   const dir = path.join(tempDir(t), 'runtime');
-  const result = await installSidecar(sidecar, {
+  const result = await installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => archiveResponse(archive),
   });
@@ -1223,7 +1223,7 @@ test('the archive request is one credential-free GET and only an allowed final U
   const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
   const dir = path.join(tempDir(t), 'runtime');
   const calls = [];
-  const result = await installSidecar(sidecar, {
+  const result = await installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async (url, init) => {
       calls.push({ url, init });
@@ -1240,7 +1240,7 @@ test('the archive request is one credential-free GET and only an allowed final U
   assert.equal(typeof calls[0].init.signal.aborted, 'boolean');
 
   const second = path.join(tempDir(t), 'second');
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: second,
     fetchImpl: async () => archiveResponse(archive, 'http://' + ['127', '0', '0', '1'].join('.') + ':8080/llama.zip'),
   }), 'insecure-redirect');
@@ -1253,7 +1253,7 @@ test('a loopback pin accepts a loopback redirect that carries a query', async (t
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
   const sidecar = makeSidecar({ url: 'http://' + ['127', '0', '0', '1'].join('.') + ':9/llama.zip', archive, files });
   const dir = path.join(tempDir(t), 'runtime');
-  const result = await installSidecar(sidecar, {
+  const result = await installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => archiveResponse(archive, 'http://' + ['127', '0', '0', '1'].join('.') + ':8080/llama.zip?sp=r&sig=abc'),
   });
@@ -1268,7 +1268,7 @@ test('a streamed archive that exceeds or falls short of the pin fails and leaves
   const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
 
   const overDir = path.join(tempDir(t), 'over');
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: overDir,
     fetchImpl: async () => ({
       status: 200,
@@ -1284,7 +1284,7 @@ test('a streamed archive that exceeds or falls short of the pin fails and leaves
   assert.deepEqual(readdirSync(overDir), []);
 
   const underDir = path.join(tempDir(t), 'under');
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: underDir,
     fetchImpl: async () => ({
       status: 200,
@@ -1315,7 +1315,7 @@ test('verify options are read through own data descriptors', async (t) => {
   assert.equal(invoked, 0);
 
   let hits = 0;
-  const proxied = new Proxy({ targetDir: path.join(tempDir(t), 'runtime') }, {
+  const proxied = new Proxy({ platformKey: 'win32-x64', targetDir: path.join(tempDir(t), 'runtime') }, {
     get(target, property, receiver) {
       hits += 1;
       return Reflect.get(target, property, receiver);
@@ -1373,7 +1373,7 @@ test('a successful install removes the archive and leaves no temporary file', as
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
   const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
   const dir = path.join(tempDir(t), 'runtime');
-  const result = await installSidecar(sidecar, {
+  const result = await installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => archiveResponse(archive),
   });
@@ -1389,14 +1389,14 @@ test('a failed rename leaves no temporary file and no unverified file; the skip 
   const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
   const dir = path.join(tempDir(t), 'runtime');
   mkdirSync(path.join(dir, 'llama.dll'), { recursive: true });
-  await expectFailure(installSidecar(sidecar, {
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => archiveResponse(archive),
   }), 'install-failed');
   assert.deepEqual(readdirSync(dir).sort(), ['llama-server.exe', 'llama.dll'].sort());
   assert.ok(lstatSync(path.join(dir, 'llama.dll')).isDirectory());
   assert.deepEqual(readFileSync(path.join(dir, 'llama-server.exe')), Buffer.from(entries[0].data));
-  const result = await verifySidecarInstall(sidecar, { targetDir: dir });
+  const result = await verifySidecarInstall(sidecar, { platformKey: 'win32-x64', targetDir: dir });
   assert.equal(result.verified, false);
   assert.equal(result.reason, 'unsafe-path');
 });
@@ -1408,7 +1408,7 @@ test('an unsafe archive entry name is not echoed in the error', async (t) => {
   const sidecar = makeSidecar({ url: 'https://example.com/secret-path/llama.zip', archive, files });
   const dir = path.join(tempDir(t), 'runtime');
   let message = '';
-  await assert.rejects(installSidecar(sidecar, {
+  await assert.rejects(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => archiveResponse(archive),
   }), (error) => {

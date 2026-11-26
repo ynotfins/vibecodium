@@ -998,10 +998,8 @@ async function downloadArchive(target, partPath, options) {
   const touch = () => {
     if (idle) clearTimeout(idle);
     idle = setTimeout(() => stop('stalled'), options.idleTimeoutMs);
-    if (typeof idle.unref === 'function') idle.unref();
   };
   const totalTimer = setTimeout(() => stop('timeout'), options.totalTimeoutMs);
-  if (typeof totalTimer.unref === 'function') totalTimer.unref();
   let writer = null;
   let received = 0;
   try {
