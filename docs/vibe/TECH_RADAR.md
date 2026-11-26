@@ -1,6 +1,6 @@
 # Vibecodium Technology Radar
 
-> Doc class: living · Owner: tech-scout · Last reviewed: 2026-11-25
+> Doc class: living · Owner: tech-scout · Last reviewed: 2026-11-26
 
 Maintained by the `tech-scout` sub-agent. Every component the product ships or the build depends on has one row. A row is reviewed by its "Next review" date, at every milestone start, and whenever its component changes. The docs check warns on overdue rows; a new dependency without a row fails the drift check.
 
@@ -45,6 +45,6 @@ Rings: `adopt` (in use, keep), `trial` (in use, under evaluation), `assess` (wat
 | Agent harness major version | OpenCode 2.x (new config format: `agents`, `permissions` lists) | — | v2.3.2 (2026-11-18) | 2026-11-20 | stay on 1.19.x | assess | 2026-11-27 |
 | Build models: primary | OmniRoute combos `agent`, `reasoning`, `review`, `cheap` | 3.8.53 (workstation) | — | 2026-11-20 | Bifrost routing rules | adopt | 2026-11-27 |
 | Build models: second option | Morph API (`morph-kimik31`, `morph-glm53-744b`, `morph-dsv41flash`) | live model list 2026-11-20 | — | 2026-11-20 | DeepInfra DeepSeek V4 Pro (third option) | adopt | 2026-11-27 |
-| Morph agent tools | `@morphllm/morphmcp` (MIT): WarpGrep, Fast Apply, GitHub search | 0.8.222 (2026-11-11) | 0.8.222 | 2026-11-20 | morph CLI (no native Windows binary) | adopt | 2026-11-27 |
+| Morph agent tools | Build harness: `@morphllm/morphmcp` (MIT). In-product: the direct Morph API (WarpGrep `morph-warp-grep-v2.1`, Fast Apply `morph-v3-fast`); WarpGrep's five search tools are built into the model and no `tools` array is sent | 0.8.222 (2026-11-11) in the harness | 0.8.223 (npm, 2026-11-26) | 2026-11-26 | morph CLI (no native Windows binary) | adopt | 2026-11-27 |
 | Build toolchain: Rust | rustup stable | cargo 1.100.0 | 1.100.0 | 2026-11-20 | — | adopt | 2026-12-04 |
 | Build toolchain: Python | CPython 3.11 (node-gyp) | 3.11.9 | — | 2026-11-20 | — | adopt | 2026-12-04 |

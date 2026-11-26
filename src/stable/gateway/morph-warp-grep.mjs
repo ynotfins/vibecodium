@@ -1,11 +1,12 @@
 // M2 B6 WarpGrep code-search agent tool.
 //
 // The tool runs a bounded, read-only tool loop over one workspace with the `morph-warp-grep-v2.1`
-// model through the existing B1 provider client. The caller supplies a client already scoped to the
-// WarpGrep model. This module owns the `codebase_search` definition, its five read-only loop tools
-// (`grep_search`, `glob`, `list_directory`, `read`, `finish`), strict path and argument validation,
-// bounded file reads and the finish result. It never reads an environment variable, stores a
-// credential, writes a file or exposes a query, file body or response body in an error.
+// model through the existing B1 provider client. The caller supplies a B1 client; this module
+// selects the WarpGrep model itself. The module owns the `codebase_search` definition, its five
+// read-only loop tools (`grep_search`, `glob`, `list_directory`, `read`, `finish`), strict path and
+// argument validation, bounded file reads and the finish result. It never reads an environment
+// variable, stores a credential, writes a file or exposes a query, file body or response body in an
+// error.
 
 import { constants } from 'node:fs';
 import { lstat, open, readdir, realpath, stat } from 'node:fs/promises';
@@ -185,6 +186,9 @@ const LOOP_TOOLS = deepFreeze([
   },
 ]);
 
+// Executor-side descriptions of the WarpGrep model's built-in tools. They document what this module
+// implements locally and are never sent as a `tools` array: the WarpGrep model has these tools built
+// in (docs.morphllm.com, WarpGrep Direct API, read 2026-11-26), so sending them would be off-protocol.
 export const WARP_GREP_TOOLS = LOOP_TOOLS;
 
 export class WarpGrepError extends Error {
@@ -921,16 +925,18 @@ export function createMorphWarpGrepTool(options) {
     const structure = await buildRepoStructure(workspace, request.searchType);
     const messages = [
       { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: 
-        '<repo_structure>\n' + structure + '\n</repo_structure>\n\n<search_string>' +
-        request.searchString + '</search_string>' },
+      {
+        role: 'user',
+        content: '<repo_structure>\n' + structure + '\n</repo_structure>\n\n<search_string>' +
+          request.searchString + '</search_string>',
+      },
     ];
     const usage = { inputTokens: 0, outputTokens: 0 };
     let toolCallsTotal = 0;
     for (let turn = 1; turn <= MAX_TURNS; turn += 1) {
       let answer;
       try {
-        answer = await config.client.chat({ model: WARP_GREP_MODEL, messages, tools: WARP_GREP_TOOLS });
+        answer = await config.client.chat({ model: WARP_GREP_MODEL, messages });
       } catch (error) {
         let status;
         try {

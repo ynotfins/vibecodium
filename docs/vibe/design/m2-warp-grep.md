@@ -1,6 +1,6 @@
 # M2 B6 WarpGrep code-search agent tool
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-25
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-26
 >
 > The bounded `codebase_search` tool around the `morph-warp-grep-v2.1` model. It lives in
 > [morph-warp-grep.mjs](../../../src/stable/gateway/morph-warp-grep.mjs), and its acceptance tests
@@ -25,8 +25,8 @@ environment variable.
 ```js
 const tool = createMorphWarpGrepTool({ client, workspaceRoot });
 const result = await tool.execute({
-  search_string: 'Where is the needle constant defined?',
-  search_type: 'default',
+   search_string: 'Where is the needle constant defined?',
+   search_type: 'default',
 });
 ```
 
@@ -41,11 +41,12 @@ The loop is at most six model turns through the supplied B1 client. The user tur
 documented `<repo_structure>` (a bounded flat listing of the workspace, depth two) and
 `<search_string>` blocks (the structure lists workspace-relative paths, depth two, capped at 32 KiB so
 no absolute local path is sent), and after every tool round a user turn reports how many turns were used and
-that the model must call `finish` on the penultimate turn. Every turn sends the same five read-only
-tools:
+that the model must call `finish` on the penultimate turn. The model has its search tools built in
+(`docs.morphllm.com/sdk/components/warp-grep/direct`, read 2026-11-26), so the request carries no
+`tools` array; the executor below implements the five read-only tools the model calls:
 
 - `grep_search` searches workspace text files for a literal string and returns `path:line: text`
-  matches, with optional `path`, `glob` and `case_sensitive`.
+   matches, with optional `path`, `glob` and `case_sensitive`.
 - `read` returns numbered lines of one workspace file, whole or for `start-end` ranges.
 - `glob` lists workspace files whose path matches a glob such as `src/**/*.mjs`.
 - `list_directory` lists one workspace directory.
@@ -119,10 +120,10 @@ failure uses a fixed `WarpGrepError` code (`invalid-input`, `invalid-options`, `
 
 ## Verification
 
-`node --test tests/vibe/morph-warp-grep.test.mjs` runs 39 tests. They cover the immutable schema, loop
+`node --test tests/vibe/morph-warp-grep.test.mjs` runs 42 tests. They cover the immutable schema, loop
 tools and `describe()` surface; a real B1 client against a local mock endpoint running a scripted
-grep/read/finish loop with the finished spans, bounded content, aggregated usage and the exact
-five-tool request shape with no stream; whole-file and line-range finishes; default
+grep/read/finish loop with the finished spans, bounded content, aggregated usage and the request shape
+(no `tools` array, the model's tools are built in) with no stream; whole-file and line-range finishes; default
 `.git`/`node_modules` exclusion and the `node_modules` opt-in; escaping, symlinked, binary, directory,
 missing and oversized targets, including absolute, drive, UNC, encoded and oversized path strings;
 text-only answers, empty, malformed and oversized finishes; a finish with too many files; an oversized

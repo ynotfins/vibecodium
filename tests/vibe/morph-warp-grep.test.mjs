@@ -162,7 +162,7 @@ test('a scripted grep, read and finish loop returns the finished spans and bound
     assert.equal(request.headers.authorization, 'Bearer ' + SECRET);
     assert.equal(request.body.model, WARP_GREP_MODEL);
     assert.equal(request.body.stream, false);
-    assert.deepEqual(request.body.tools.map((entry) => entry.function.name), ['grep_search', 'glob', 'list_directory', 'read', 'finish']);
+    assert.equal('tools' in request.body, false);
   }
   const first = mock.state.requests[0].body.messages;
   assert.equal(first[0].role, 'system');
@@ -898,4 +898,74 @@ test('a case-variant of an excluded name is excluded on a case-insensitive files
   const strictTool = createMorphWarpGrepTool({ client: strictClient, workspaceRoot: root });
   await rejection(strictTool.execute({ search_string: QUERY }), 'invalid-finish');
   assert.equal(result.files[0].path, 'src/alpha.mjs');
+});
+
+test('read refuses a directory, missing, binary and oversized target and accepts an in-workspace absolute file', async (t) => {
+  const root = await workspace(t);
+  await writeFile(path.join(root, 'src', 'alpha.mjs'), ALPHA, 'utf8');
+  await writeFile(path.join(root, 'src', 'binary.bin'), Buffer.from([0x6e, 0x00, 0x6e]));
+  await writeFile(path.join(root, 'src', 'big.txt'), 'x'.repeat(1024 * 1024 + 1), 'utf8');
+  const absolute = path.join(root, 'src', 'alpha.mjs');
+  const { state, client } = scriptClient([
+    chatPayload('', [toolCall('c1', 'read', { path: 'src' })]),
+    chatPayload('', [toolCall('c2', 'read', { path: 'src/missing.mjs' })]),
+    chatPayload('', [toolCall('c3', 'read', { path: 'src/binary.bin' })]),
+    chatPayload('', [toolCall('c4', 'read', { path: 'src/big.txt' })]),
+    chatPayload('', [toolCall('c5', 'read', { path: absolute, lines: '2-2' })]),
+    chatPayload('', [toolCall('c6', 'finish', { files: 'src/alpha.mjs:2-2' })]),
+  ]);
+  const tool = createMorphWarpGrepTool({ client, workspaceRoot: root });
+  const result = await tool.execute({ search_string: QUERY });
+  const outputs = toolResults(state.requests[5].messages);
+  assert.equal(outputs.length, 5);
+  assert.equal(outputs[0].content, 'error: read path must be a file inside the workspace');
+  assert.equal(outputs[1].content, 'error: read path must be a file inside the workspace');
+  assert.equal(outputs[2].content, 'error: read path is not a readable text file');
+  assert.equal(outputs[3].content, 'error: read path is not a readable text file');
+  assert.match(outputs[4].content, /^2\| export const needle = "alpha";$/);
+  assert.equal(result.files[0].path, 'src/alpha.mjs');
+});
+
+test('a traversal glob pattern cannot list a sibling file outside the workspace', async (t) => {
+  const root = await workspace(t);
+  await writeFile(path.join(root, 'src', 'alpha.mjs'), ALPHA, 'utf8');
+  await writeFile(path.join(root, '..', 'outside-glob.txt'), 'OUTSIDE-GLOB-SECRET\n', 'utf8');
+  t.after(() => rm(path.join(root, '..', 'outside-glob.txt'), { force: true }));
+  const { state, client } = scriptClient([
+    chatPayload('', [toolCall('c1', 'glob', { pattern: '../**' })]),
+    chatPayload('', [toolCall('c2', 'glob', { pattern: '**/outside-glob.txt' })]),
+    chatPayload('', [toolCall('c3', 'finish', { files: 'src/alpha.mjs:1-1' })]),
+  ]);
+  const tool = createMorphWarpGrepTool({ client, workspaceRoot: root });
+  const result = await tool.execute({ search_string: QUERY });
+  const outputs = toolResults(state.requests[2].messages);
+  assert.equal(outputs[0].content, 'no matches');
+  assert.equal(outputs[1].content, 'no matches');
+  assert.equal(outputs[0].content.includes('OUTSIDE-GLOB-SECRET'), false);
+  assert.equal(result.files[0].path, 'src/alpha.mjs');
+});
+
+test('a throwing provider error maps to a fixed code without the key, query, endpoint or body', async (t) => {
+  const root = await workspace(t);
+  const leak = new Error('POST http://' + HOST + ':9/v1/chat/completions failed body={"error":"nope"} query=' + QUERY + ' key=' + SECRET);
+  leak.status = 502;
+  leak.body = 'nope';
+  leak.endpoint = 'http://' + HOST + ':9/v1/chat/completions';
+  leak.query = QUERY;
+  leak.key = SECRET;
+  const tool = createMorphWarpGrepTool({
+    client: { chat: async () => { throw leak; } },
+    workspaceRoot: root,
+  });
+  await assert.rejects(tool.execute({ search_string: QUERY }), (error) => {
+    assert.equal(error instanceof WarpGrepError, true);
+    assert.equal(error.code, 'provider-error');
+    assert.equal(error.status, 502);
+    const shaped = JSON.stringify(error);
+    for (const secret of [QUERY, SECRET, HOST, 'nope']) {
+      assert.equal(error.message.includes(secret), false);
+      assert.equal(shaped.includes(secret), false);
+    }
+    return true;
+  });
 });
