@@ -15,8 +15,9 @@ on loopback, it proves that the delivered B1 `llama-cpp` preset serves chat, str
 embeddings through it, and it offers an opt-in bounded restart/back-off policy for a child that dies
 while serving. It does not bundle or download llama.cpp or any weights, probe the hardware, render the
 first-run wizard, proxy chat itself or manage descendants. The model downloader is a sibling slice that
-supplies the weights; the wizard will pass its start plan to this module in a later M3 slice, the
-hardware probe is a sibling module, and the binary pinning belongs with `vibe/sidecars.json`.
+supplies the weights; the first-run wizard now hands this module its start options through
+`runtimeOptions()`, the hardware probe is a sibling module, and the binary pinning belongs with
+`vibe/sidecars.json`.
 
 ## Contract
 
@@ -41,6 +42,11 @@ restart budget is exhausted, when it is `restarts-exhausted`).
 | `env` | caller overrides merged over the allowlist | `{}` |
 | `restart` | optional restart policy: `maxRestarts` (required, 1-10), `baseDelayMs` (50-300,000 ms, default 1,000), `maxDelayMs` (default the larger of `baseDelayMs` and 30,000, must be at least `baseDelayMs` and at most 300,000) and `stableMs` (0, or 1,000-600,000 ms, default 60,000) | omitted: no automatic restart |
 | `fetch` | health-request implementation | `globalThis.fetch` |
+
+`validateRestart` is exported so a caller (the first-run wizard) validates and carries exactly the
+policy this module will receive; it reads the policy through own data descriptors and returns a
+frozen object with the documented defaults filled in, or `null` when it is omitted. Anything invalid
+throws `invalid-restart-policy`.
 
 The server flags are exactly `--model <path> --host 127.0.0.1 --port <port>`, followed in order by
 `--ctx-size`, `--threads` and `--n-gpu-layers` when supplied. `commandArgs` precedes that list and

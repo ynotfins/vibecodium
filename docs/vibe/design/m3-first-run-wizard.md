@@ -6,8 +6,9 @@
 > [first-run.mjs](../../../src/stable/runtime/first-run.mjs), the webview panel in
 > [first-run.cjs](../../../src/stable/extensions/vibecodium-ai/src/first-run.cjs), and the acceptance
 > tests in [first-run.test.mjs](../../../tests/vibe/first-run.test.mjs),
-> [first-run-panel.test.mjs](../../../tests/vibe/first-run-panel.test.mjs) and
-> [first-run-ollama.test.mjs](../../../tests/vibe/first-run-ollama.test.mjs). It composes the delivered
+> [first-run-panel.test.mjs](../../../tests/vibe/first-run-panel.test.mjs),
+> [first-run-ollama.test.mjs](../../../tests/vibe/first-run-ollama.test.mjs) and
+> [first-run-restart.test.mjs](../../../tests/vibe/first-run-restart.test.mjs). It composes the delivered
 > probe ([m3-hardware-probe.md](m3-hardware-probe.md)), catalog and downloader
 > ([m3-model-downloader.md](m3-model-downloader.md)) and supervisor contract
 > ([m3-llama-server.md](m3-llama-server.md)).
@@ -15,17 +16,20 @@
 ## Scope
 
 This document covers M3's fourth runtime slice, the first-run wizard, plus the later wiring of Ollama
-detection into it: one flow that tells a new install what this machine can run,
-which pinned weights are already present, downloads only the missing ones, and hands the caller the
-exact local B1 start plan. It ships no `llama-server` process and no binary: the supervisor still
-owns the process boundary, and the start action reports `runtime-not-bundled` until the llama.cpp
-binary is pinned and bundled in a later M3 slice. Node built-ins only.
+detection into it and of the supervisor's restart policy into the hand-off: one flow that tells a new
+install what this machine can run, which pinned weights are already present, downloads only the missing
+ones, and hands the caller the exact local B1 start plan and the exact `createLlamaServer` options. It
+ships no `llama-server` process and no binary: the supervisor still owns the process boundary, and the
+start action reports `runtime-not-bundled` until the llama.cpp binary is pinned and bundled in a later
+M3 slice. Node built-ins only.
 
 Out of scope: spawning or supervising `llama-server`, bundling, downloading or signing the binary,
-copying the catalog into a packaged application, restart/back-off, starting/installing/updating Ollama,
-pulling Ollama models, switching the active B1 provider or writing provider config, provider calls,
-model-ladder changes and NVML/vendor GPU libraries. Ollama *detection* is in scope: the wizard reports
-an already running daemon and its B1 `ollama` overrides, but never adopts it.
+copying the catalog into a packaged application, changing the supervisor's restart behaviour,
+starting/installing/updating Ollama, pulling Ollama models, switching the active B1 provider or writing
+provider config, provider calls, model-ladder changes and NVML/vendor GPU libraries. Ollama *detection*
+is in scope: the wizard reports an already running daemon and its B1 `ollama` overrides, but never
+adopts it. The restart policy is in scope as validated data: the wizard chooses and carries it, the
+supervisor enforces it.
 
 ## Catalog projection
 
@@ -42,9 +46,9 @@ entry fails closed as `no-chat-model` or `no-embedding-model`; a malformed catal
 
 ## The controller
 
-`createFirstRunWizard({ catalog, destinationDir, probe?, downloadModel?, verifyModel?, runtimePath?, onChange?, discoverOllama? })`
-returns a frozen controller with `refresh()`, `install()`, `startPlan()`, `checkOllama()`, `view()`
-and `dispose()`.
+`createFirstRunWizard({ catalog, destinationDir, probe?, downloadModel?, verifyModel?, runtimePath?, onChange?, discoverOllama?, restart? })`
+returns a frozen controller with `refresh()`, `install()`, `startPlan()`, `runtimeOptions()`,
+`checkOllama()`, `view()` and `dispose()`.
 
 | Option | Meaning |
 |---|---|
@@ -56,11 +60,12 @@ and `dispose()`.
 | `runtimePath` | Optional packaged `llama-server` executable. It is validated with the supervisor's `validateLlamaExecutablePath` at construction; without it `startPlan()` reports `runtime-not-bundled`. |
 | `onChange` | Optional display callback, invoked with the current view after a phase or progress change. A throwing callback is ignored. |
 | `discoverOllama` | Optional discovery effect, default the delivered `discoverOllama`. Tests inject a local fake so no socket is opened; the product leaves it unset. |
+| `restart` | Optional restart policy handed to the supervisor. It is validated with the supervisor's exported `validateRestart` at construction; omitted uses the frozen conservative default `{ maxRestarts: 3, baseDelayMs: 1000, maxDelayMs: 30000, stableMs: 60000 }`. |
 
 Options, the probe result and the install options are read through own data descriptors. A Proxy, an
-accessor, an unknown or reserved key, a relative, UNC or traversal destination, a missing catalog and
-an invalid executable path fail closed as `invalid-options` or `invalid-catalog` without invoking a
-getter.
+accessor, an unknown or reserved key, a relative, UNC or traversal destination, a missing catalog, an
+invalid executable path and an invalid restart policy fail closed as `invalid-options` or
+`invalid-catalog` without invoking a getter and before the probe runs.
 
 ### Phases
 
@@ -92,17 +97,26 @@ file for the downloader to resume, keeps the files that already verified and ret
 (`aborted`, `checksum-mismatch`, `install-failed`, ...). A second call after a failure retries only
 the remaining models; a call on a ready machine returns `{ ok: true, installed: 0, reason: 'already-installed' }`.
 
-### Start plan
+### Start plan and runtime options
 
 `startPlan()` returns frozen data only when the phase is `ready` and a validated `runtimePath` exists:
 
 ```
-{ available: true, executablePath, modelPath, embeddingModelPath, contextSize, threads, gpuLayers }
+{ available: true, executablePath, modelPath, embeddingModelPath, contextSize, threads, gpuLayers, restart }
 ```
 
-Otherwise it returns `{ available: false, reason: 'not-ready' | 'runtime-not-bundled' }`. The caller
-passes this to the supervisor, which still validates the executable, the model path and every flag.
-The wizard never spawns the process.
+Otherwise it returns `{ available: false, reason: 'not-ready' | 'runtime-not-bundled' }`. `restart` is
+the effective policy (`DEFAULT_FIRST_RUN_RESTART_POLICY` or the validated caller policy), the same
+frozen object the supervisor will receive. The wizard always chooses a bounded policy; a caller that
+wants no automatic restart builds its own supervisor options instead of using this hand-off.
+
+`runtimeOptions()` is the hand-off to the supervisor. Under the same two conditions it returns
+`{ available: true, options }` where `options` contains exactly the `createLlamaServer` fields
+`executablePath`, `modelPath`, `contextSize`, `threads`, `gpuLayers` and `restart`; it omits the
+wizard-only `embeddingModelPath` and `available`, a port and a `fetch` implementation. Otherwise it
+returns the same `{ available: false, reason }` value as `startPlan()`. A caller can therefore write
+`createLlamaServer(wizard.runtimeOptions().options)` and the supervisor re-validates the executable,
+the model path and every flag. The wizard never spawns the process.
 
 ### Ollama detection
 
@@ -131,7 +145,10 @@ buttons: **Check again**, **Download models**, **Start local runtime** and **Che
 buttons post `refresh`, `install`, `start` and `ollama`; `open()` performs one automatic Ollama check
 after the first refresh. The Ollama section shows the not-checked, available (base URL, chat and
 embedding model, a provider-setup note that activation is not wired yet) and unavailable (bounded reason) states with
-every value escaped. Every message must be a plain object (not a Proxy or an array) with exactly one own enumerable
+every value escaped. When the start plan is available, the local-runtime section also shows the
+bounded restart policy (up to N attempts, the back-off range and the stability window) read through own
+data descriptors; a missing, malformed, out-of-range, accessor-backed or revoked value omits that line
+instead of throwing. Every message must be a plain object (not a Proxy or an array) with exactly one own enumerable
 data `type` property; a Proxy or revoked Proxy, an array, an unknown key, an accessor, a non-object and
 a non-string `type` are rejected as `invalid-message`, and a `type` above 64 KiB of UTF-8 is
 `message-too-large`; any other string is `unknown-message`. The page sets one fresh 24-character base64
@@ -156,10 +173,13 @@ by its own deadline and body cap. The probe, the verifier and the downloader are
 product uses the reviewed modules. The catalog is validated before any entry is projected; the
 recommendation validates the hardware and model descriptors again; the downloader validates the URL,
 the destination and the bytes; `toOllamaProviderOptions` re-validates the whole daemon answer before a
-provider override is exposed; the supervisor validates the executable, the model and the flags.
+provider override is exposed; `validateRestart` validates the restart policy through own data
+descriptors; `runtimeOptions()` copies only the six supervisor fields; and the supervisor re-validates
+the executable, the model, the flags and the policy.
 Errors expose only a code matching `^[a-z0-9][a-z0-9-]{0,63}$` and a fixed message, so an injected
 error body, path or credential is never echoed; the Ollama summary carries only a validated base URL,
-model names, a count and bounded notice codes; the progress view carries byte counts and catalog ids
+model names, a count and bounded notice codes; the restart line carries bounded integers only; the
+progress view carries byte counts and catalog ids
 only, never a URL, a response body or a credential. The panel escapes every dynamic value, caps each
 message `type` at 64 KiB of UTF-8, and uses the same nonce in `style-src`, `script-src`, the `<style>`
 tag and the `<script>` tag.
@@ -168,9 +188,9 @@ Residual risks: the wizard trusts its injected `probe`, `downloadModel`, `verify
 and `runtimePath` exactly as the supervisor trusts a caller-supplied binary; the product wiring leaves
 them at their reviewed defaults. Any loopback service that answers `/api/tags` with a valid shape is
 reported as Ollama, though the only effect is a displayed base URL and the overrides offered to that
-same endpoint, with no secret and no write. The start action only assembles data, so a bug there cannot start a
-process with unexpected flags, but the eventual caller must still pass the plan through the
-supervisor rather than building a child itself.
+same endpoint, with no secret and no write. The start action and `runtimeOptions()` only assemble data,
+so a bug there cannot start a process with unexpected flags or an unbounded restart loop, but the
+eventual caller must still pass the options through the supervisor rather than building a child itself.
 
 ## Verification
 
@@ -179,6 +199,19 @@ the provider overrides and summary, the no-chat-model case, forged/stale/remote/
 every unavailable reason, thrown and malformed effects (including a Proxy, an accessor and a throwing
 trap), unknown and oversized fields, single-flight, the unchanged provisioning state, disposal, and
 option validation without invoking a getter.
+
+`node --test tests/vibe/first-run-restart.test.mjs` covers the hand-off: the default policy in the plan,
+the view and the runtime options, one frozen policy object shared by both, the six exact supervisor
+fields accepted unchanged by `createLlamaServer` with no spawn, a supplied policy copied and frozen but
+never mutated, the documented partial-policy defaults, and the invalid cases (null, array, string,
+empty object, missing or out-of-range fields, a cap below the base delay, a reserved key, an accessor
+that is never invoked, a revoked Proxy and a throwing Proxy) failing closed as `invalid-options`
+before the probe runs. It also proves `runtimeOptions()` reports `not-ready` and
+`runtime-not-bundled` without a process. The panel test renders the restart line for a valid policy,
+formats milliseconds and seconds, omits a malformed or out-of-range policy (an unknown, reserved or
+extra key, a non-integer, or a cap below the base delay), and proves an accessor-backed or revoked
+`restart` value is never invoked. A bounds-alignment test imports the supervisor's `MIN_`/`MAX_`
+restart constants so a change there fails the panel test instead of silently drifting.
 
 `node --test tests/vibe/first-run.test.mjs tests/vibe/first-run-panel.test.mjs` covers the projection,
 both required roles, the ready, needs-download, insufficient and failed phases, merged notices, the
@@ -197,7 +230,7 @@ covers the two new commands. The full acceptance uses `node vibe/tools/verify.mj
 ## Next steps
 
 Pin and bundle the `llama-server` binary, copy `vibe/models/catalog.json` into the packaged
-application, and pass the start plan to the supervisor (with `--embedding --pooling last -ub 8192` for
-the embedding weights). Activating the discovered Ollama daemon from the B5
+application, and start the embedding server from a second plan (with `--embedding --pooling last -ub
+8192` for the embedding weights). Activating the discovered Ollama daemon from the B5
 provider setup panel is M2 work. A real extension-host smoke of the panel and a rebuilt-app screenshot
 remain M6/M12 integration work.

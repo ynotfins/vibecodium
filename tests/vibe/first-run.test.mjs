@@ -147,6 +147,12 @@ test('a ready machine exposes the start plan once the binary and both models are
     contextSize: 8192,
     threads: 6,
     gpuLayers: 999,
+    restart: {
+      maxRestarts: 3,
+      baseDelayMs: 1000,
+      maxDelayMs: 30000,
+      stableMs: 60000,
+    },
   });
   assert.deepEqual(wizardInstance.startPlan(), view.start);
   assert.equal(Object.isFrozen(view.start), true);
