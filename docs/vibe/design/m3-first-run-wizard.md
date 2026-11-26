@@ -63,11 +63,11 @@ getter.
 - `probing` while the probe and the file verification run.
 - `needs-download` when at least one pinned file is missing and the machine can run the selected model.
 - `insufficient` when the recommendation verdict is `insufficient` (below 8 GiB RAM, or the smallest
-  chat model does not fit). `install()` refuses this phase.
+   chat model does not fit). `install()` refuses this phase.
 - `ready` when both pinned files verify and the verdict is not `insufficient`.
 - `downloading` while `install()` runs.
 - `failed` after a probe, recommendation or download failure. The view carries `{ code, message }`
-  with a fixed message, so an error body or path from an injected effect is never echoed.
+   with a fixed message, so an error body or path from an injected effect is never echoed.
 
 `refresh()` probes once, merges the probe notices and the plan notices (`gpu-probe-*` first, then the
 policy codes, de-duplicated and ordered) and verifies both files. A verification error is reported as
