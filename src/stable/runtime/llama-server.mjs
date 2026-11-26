@@ -305,8 +305,9 @@ function validateEnv(value) {
 }
 
 // The restart policy is optional. When it is present every field is bounded, the exponential delay
-// cannot start above its cap, and the whole object is read through own data descriptors.
-function validateRestart(value) {
+// cannot start above its cap, and the whole object is read through own data descriptors. Exported so
+// the first-run wizard validates the same policy it hands to `createLlamaServer`.
+export function validateRestart(value) {
   if (value === undefined) return null;
   const own = readOwnData(value, 'restart', RESTART_KEYS, 'invalid-restart-policy');
   const maxRestarts = validateInteger(

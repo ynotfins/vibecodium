@@ -144,6 +144,54 @@ function renderProgress(progress) {
     '<progress max="' + escapeHtml(total) + '" value="' + escapeHtml(received) + '"></progress>';
 }
 
+function formatMilliseconds(value) {
+  if (!Number.isInteger(value) || value < 0) return null;
+  return value % 1000 === 0 ? String(value / 1000) + ' s' : String(value) + ' ms';
+}
+
+// The restart policy is display-only: the supervisor owns the behaviour. A missing, malformed or
+// accessor-backed policy is omitted rather than throwing, so the panel stays renderable.
+const RESTART_FIELDS = Object.freeze(['maxRestarts', 'baseDelayMs', 'maxDelayMs', 'stableMs']);
+
+function isRestartShape(value) {
+  if (!value || typeof value !== 'object') return false;
+  try {
+    if (types.isProxy(value) || Array.isArray(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return false;
+    const keys = Object.keys(value);
+    if (keys.length !== RESTART_FIELDS.length) return false;
+    return keys.every(function (key) { return RESTART_FIELDS.includes(key); });
+  } catch {
+    return false;
+  }
+}
+
+function renderRestart(restart) {
+  if (!isRestartShape(restart)) return '';
+  const maxRestarts = summaryField(restart, 'maxRestarts', null);
+  const baseDelayMs = summaryField(restart, 'baseDelayMs', null);
+  const maxDelayMs = summaryField(restart, 'maxDelayMs', null);
+  const stableMs = summaryField(restart, 'stableMs', null);
+  if (!Number.isInteger(maxRestarts) || maxRestarts < 1 || maxRestarts > 10) return '';
+  if (!Number.isInteger(baseDelayMs) || baseDelayMs < 50 || baseDelayMs > 300000) return '';
+  if (!Number.isInteger(maxDelayMs) || maxDelayMs < 50 || maxDelayMs > 300000) return '';
+  if (maxDelayMs < baseDelayMs) return '';
+  if (!Number.isInteger(stableMs) || stableMs < 0 ||
+    (stableMs !== 0 && (stableMs < 1000 || stableMs > 600000))) return '';
+  const base = formatMilliseconds(baseDelayMs);
+  const cap = formatMilliseconds(maxDelayMs);
+  const stable = formatMilliseconds(stableMs);
+  if (base === null || cap === null || stable === null) return '';
+  const attempts = String(maxRestarts) + (maxRestarts === 1 ? ' time' : ' times');
+  const reset = stableMs === 0
+    ? 'a stable run never resets the count'
+    : 'a run stable for ' + stable + ' resets the count';
+  return '<p class="muted">Restarts automatically up to ' + escapeHtml(attempts) +
+    ' with back-off from ' + escapeHtml(base) + ' to ' + escapeHtml(cap) + '; ' +
+    escapeHtml(reset) + '.</p>';
+}
+
 function renderStart(start) {
   if (!start || typeof start !== 'object' || start.available !== true) {
     const reason = start && start.reason === 'runtime-not-bundled'
@@ -161,7 +209,8 @@ function renderStart(start) {
   return '<p>Chat model: <code>' + escapeHtml(text(start.modelPath, '-')) + '</code><br>' +
     'Context ' + escapeHtml(String(start.contextSize)) + ' tokens, ' +
     escapeHtml(String(start.threads)) + ' threads, ' +
-    escapeHtml(String(start.gpuLayers)) + ' GPU layers.</p>';
+    escapeHtml(String(start.gpuLayers)) + ' GPU layers.</p>' +
+    renderRestart(summaryField(start, 'restart', null));
 }
 
 function renderOllama(ollama, source) {
