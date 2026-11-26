@@ -10,27 +10,29 @@
 > [first-run-ollama.test.mjs](../../../tests/vibe/first-run-ollama.test.mjs) and
 > [first-run-restart.test.mjs](../../../tests/vibe/first-run-restart.test.mjs). It composes the delivered
 > probe ([m3-hardware-probe.md](m3-hardware-probe.md)), catalog and downloader
-> ([m3-model-downloader.md](m3-model-downloader.md)) and supervisor contract
-> ([m3-llama-server.md](m3-llama-server.md)).
+> ([m3-model-downloader.md](m3-model-downloader.md)), supervisor contract
+> ([m3-llama-server.md](m3-llama-server.md)) and pinned sidecar installer
+> ([m3-sidecar-binary.md](m3-sidecar-binary.md)).
 
 ## Scope
 
 This document covers M3's fourth runtime slice, the first-run wizard, plus the later wiring of Ollama
 detection and explicit daemon selection into it and of the supervisor's restart policy into the
-hand-off: one flow that tells a new install what this machine can run, which pinned weights are already
-present, downloads only the missing ones, and hands the caller the exact local B1 start plan and, for
-the pinned path, the exact `createLlamaServer` options. It ships no `llama-server` process and no
-binary: the supervisor still owns the process boundary, and the pinned start plan reports
-`runtime-not-bundled` until the llama.cpp binary is pinned and bundled in a later M3 slice. Node
-built-ins only.
+hand-off: one flow that tells a new install what this machine can run, which pinned weights are
+already present, downloads only the missing ones, and hands the caller the exact local B1 start
+plan and, for the pinned path, the exact `createLlamaServer` options. It ships no `llama-server`
+process and no binary: the supervisor still owns the process boundary, the pin and verified
+installer are the separate [m3-sidecar-binary.md](m3-sidecar-binary.md) slice, and the pinned
+start plan reports `runtime-not-bundled` until the installed executable is passed as `runtimePath`
+(wiring the installer into the start action remains later M3 work). Node built-ins only.
 
-Out of scope: spawning or supervising `llama-server`, bundling, downloading or signing the binary,
+Out of scope: spawning or supervising `llama-server`, bundling or signing the binary (the pin and
+download/install module are delivered separately in [m3-sidecar-binary.md](m3-sidecar-binary.md)),
 copying the catalog into a packaged application, changing the supervisor's restart behaviour,
 starting/installing/updating [PERSON_NAME], pulling [PERSON_NAME] models, switching the active B1 provider or writing
 provider config, provider calls, model-ladder changes and NVML/vendor GPU libraries. Ollama detection
 and the explicit selection of a discovered daemon as the local runtime are in scope; the wizard never
-starts, installs or updates the daemon and never writes provider configuration. The restart policy is
-in scope as validated data: the wizard chooses and carries it, the supervisor enforces it.
+starts, installs or updates the daemon and never writes provider configuration.
 
 ## Catalog projection
 
@@ -184,7 +186,7 @@ error is reported with a fixed message.
 The panel is unit-tested against the same fake `vscode` API as the provider setup panel. A real
 extension-host smoke of this panel and a rebuilt-app screenshot remain M6/M12 integration work; the
 built `Vibecodium.exe` cannot start under this host ACL, and a pinned start is blocked until the
-binary is bundled anyway.
+installed binary is passed as `runtimePath` anyway.
 
 ## Security boundary
 
@@ -260,8 +262,10 @@ covers the two new commands. The full acceptance uses `node vibe/tools/verify.mj
 
 ## Next steps
 
-Pin and bundle the `llama-server` binary, copy `vibe/models/catalog.json` into the packaged
-application, and start the embedding server from a second plan (with `--embedding --pooling last -ub
-8192` for the embedding weights). Offering the same discovered daemon in the B5 provider setup panel is M2
+Bundle the pinned `llama-server` binary (the pin and verified installer are delivered in
+[m3-sidecar-binary.md](m3-sidecar-binary.md)), copy `vibe/models/catalog.json` into the packaged
+application, wire `installSidecar` into the start action, and start the embedding server from a
+second plan (with `--embedding --pooling last -ub 8192` for the embedding weights). Offering the
+same discovered daemon in the B5 provider setup panel is M2
 work. A real extension-host smoke of the panel and a rebuilt-app screenshot remain M6/M12 integration
 work.

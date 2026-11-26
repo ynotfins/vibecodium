@@ -42,8 +42,9 @@ Ship `src/stable/runtime/llama-server.mjs` as a dependency-free supervisor for a
    and reports `failed` with `restarts-exhausted` once the budget is spent. Without the policy the
    supervisor keeps the earlier behaviour, where an exit is reported as `exited`.
 
-Bundling the llama.cpp release and pinning it in `vibe/sidecars.json` are later M3 slices; the model
-downloader and the Ollama discovery are separate modules delivered since. This ADR approves the
+Bundling the llama.cpp release is a later M3/M12 slice; the pin and its verified installer are
+delivered in `vibe/sidecars.json` and `src/stable/runtime/sidecar.mjs`, and the model downloader and
+the Ollama discovery are separate modules delivered since. This ADR approves the
 supervisor boundary, not a binary version.
 
 ## Consequences
