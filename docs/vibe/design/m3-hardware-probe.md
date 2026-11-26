@@ -160,5 +160,6 @@ The full acceptance uses `node vibe/tools/verify.mjs --strict` and
 
 The first-run wizard wires `probeHardware` and `recommendRuntime` to the download UI, the runtime
 wiring passes the plan to the supervisor (with `--embedding --pooling last -ub 8192` for the pinned
-embedding weights), and the `llama-server` binary is pinned and bundled. Restart/back-off and Ollama
-detection remain M3 work.
+embedding weights), and the `llama-server` binary is pinned and bundled. Ollama detection remains M3
+work; the supervisor's opt-in restart/back-off policy has since been delivered in
+`llama-server.mjs`.

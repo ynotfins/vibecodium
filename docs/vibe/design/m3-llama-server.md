@@ -1,6 +1,6 @@
 # M3 local llama-server supervisor
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-25
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-26
 >
 > The process supervisor for the local runtime. The module lives in
 > [llama-server.mjs](../../../src/stable/runtime/llama-server.mjs), its fake-server fixture in
@@ -10,18 +10,21 @@
 
 ## Scope
 
-This is M3's first slice: the local runtime boundary. It starts, health-checks and stops a direct
-`llama-server` child on loopback, and it proves that the delivered B1 `llama-cpp` preset serves chat,
-streaming, tool calls and embeddings through it. It does not bundle or download llama.cpp or any
-weights, probe the hardware, render the first-run wizard, proxy chat itself, restart a failed
-server or manage descendants. The model downloader is a sibling slice that supplies the weights; the
-wizard builds on this module in a later M3 slice, the hardware probe is a sibling module, and the binary pinning belongs
-with `vibe/sidecars.json`.
+This is M3's local runtime boundary. It starts, health-checks and stops a direct `llama-server` child
+on loopback, it proves that the delivered B1 `llama-cpp` preset serves chat, streaming, tool calls and
+embeddings through it, and it offers an opt-in bounded restart/back-off policy for a child that dies
+while serving. It does not bundle or download llama.cpp or any weights, probe the hardware, render the
+first-run wizard, proxy chat itself or manage descendants. The model downloader is a sibling slice that
+supplies the weights; the wizard will pass its start plan to this module in a later M3 slice, the
+hardware probe is a sibling module, and the binary pinning belongs with `vibe/sidecars.json`.
 
 ## Contract
 
 `createLlamaServer(options)` returns a frozen controller with `start()`, `stop()`, `health()`,
-`status()`, `describe()` and `config`. `describe()` and `status()` return the same frozen snapshot.
+`status()`, `describe()` and `config`. `describe()` and `status()` return the same frozen snapshot,
+which carries `state`, `port`, `baseUrl`, `pid`, `exitCode`, `signal`, `startedAt`, `restarts`
+(automatic attempts in the current streak, `0` without a policy) and `failure` (`null` unless the
+restart budget is exhausted, when it is `restarts-exhausted`).
 
 | Option | Meaning | Default |
 |---|---|---|
@@ -36,6 +39,7 @@ with `vibe/sidecars.json`.
 | `healthIntervalMs` | poll interval, 10 to 10,000 ms | 100 |
 | `stopTimeoutMs` | graceful-exit wait, 50 to 30,000 ms | 5,000 |
 | `env` | caller overrides merged over the allowlist | `{}` |
+| `restart` | optional restart policy: `maxRestarts` (required, 1-10), `baseDelayMs` (50-300,000 ms, default 1,000), `maxDelayMs` (default the larger of `baseDelayMs` and 30,000, must be at least `baseDelayMs` and at most 300,000) and `stableMs` (0, or 1,000-600,000 ms, default 60,000) | omitted: no automatic restart |
 | `fetch` | health-request implementation | `globalThis.fetch` |
 
 The server flags are exactly `--model <path> --host 127.0.0.1 --port <port>`, followed in order by
@@ -57,10 +61,37 @@ after a stop shows `state: stopped`, `pid: null`, `port: null` and `baseUrl: nul
 `exitCode`, `signal` and `startedAt` report the last child. A `start()` issued while a `stop()`
 is still tearing the old child down waits for that stop first, so a restart cannot be clobbered by a
 teardown that was already in flight. A child exit is reported as `exited` until the stop or the
-failed-start cleanup resets the controller to `stopped`, so a snapshot can briefly show `exited`.
+failed-start cleanup resets the controller to `stopped`, so a snapshot can briefly show `exited`. An
+exit during an explicit `start()` is never retried automatically; a failed automatic attempt still
+spends the budget and is retried until the budget is spent. An exit while `running` becomes
+`restarting` under a restart policy and stays `exited` without one.
 `health()` never throws and only probes while the controller is running: outside that state it
 reports `{ ok: false, status: 0 }`, so a released port cannot be mistaken for a healthy server. A
 reachable non-200 answer reports its HTTP status as `{ ok: false, status: <http status> }`.
+
+## Restart and back-off
+
+The policy is opt-in. Without `restart`, an unexpected exit keeps the previous behaviour: the state
+stays `exited`, `restarts` is `0` and nothing is spawned. With a policy, an exit observed while the
+controller was `running` and the budget is not yet spent sets the state to `restarting`, keeps the last
+port as the restart target, and schedules a fresh `start()` after `baseDelayMs * 2 ** attempts`,
+capped at `maxDelayMs` and never below `baseDelayMs`. The restart is a normal start: the executable
+and model paths are re-validated, readiness is health-gated again, and the child runs with the same
+validated arguments and environment. On success the state returns to `running` with a new pid,
+`restarts` counts the attempts in the current streak, and the same port is reused so a client's base
+URL does not change; a caller-supplied `port` keeps working as before. A restart attempt that fails
+to become ready counts against the budget and, while budget remains, schedules the next one.
+
+`restarts` counts automatic attempts since the last stable run or explicit start/stop. A run that
+stays healthy for `stableMs` clears the streak and the `failure` code, so an occasional crash can use
+the budget again; `stableMs` of `0` disables that reset. A non-zero window below 1,000 ms is
+refused, so a caller cannot configure a near-instant reset that would turn the policy into a tight
+respawn loop. Once `restarts` is at `maxRestarts` without a stable run, the next exit while `running`,
+or a failed automatic attempt, ends the controller as `failed` with `failure: 'restarts-exhausted'`,
+`port: null` and no child, and further exits schedule nothing. `health()` reports not-ready in
+`restarting` and `failed`. `stop()` cancels a pending back-off timer, clears the streak and leaves the
+controller `stopped` with no spawn; an explicit `start()` after a failure is allowed and clears the
+failure. Timers are `unref()`ed so a pending restart cannot keep the process alive.
 
 The child is spawned with `shell: false`, `windowsHide: true`, `detached: false`, and the executable
 directory as its working directory, so a workspace-relative file or DLL cannot be picked up through
@@ -109,6 +140,12 @@ overwritten by the supervisor's appended copy.
 - `invalid-host`: validator-only (`validateLoopbackHost`); it accepts only `127.0.0.1`, and the
    controller has no host option.
 - `runtime-unavailable`: the host has no `fetch` implementation.
+- `invalid-restart-policy`: the policy is not a plain object, an accessor, a reserved key or an
+   unknown key appeared, `maxRestarts` is missing, a field is not an integer or is out of range, or
+   `maxDelayMs` is below `baseDelayMs`.
+- `restarts-exhausted`: a reported `failure` code, not a thrown error. The restart budget was spent
+   without a stable run, so the controller reports `failed`, `failure: 'restarts-exhausted'` and no
+   port or child, and schedules nothing further.
 
 ## Security boundary
 
@@ -137,7 +174,10 @@ Residual risks:
    local process or a visited web page can reach the loopback port until client wiring restricts it.
 - `SIGKILL` terminates only the direct child on Windows, so a `llama-server` that spawns descendants
    would leave them; a parent crash also leaves the direct child running on loopback until killed.
-   There is no job object or parent-death signal yet, and no restart/back-off policy.
+   There is no job object or parent-death signal yet. The restart policy covers only an exit of the
+   direct child that the supervisor spawns; it is bounded to at most `maxRestarts` automatic restarts
+   per stable window (plus the initial explicit start), refuses a stable window below one second,
+   ends in `failed`, and a stop always wins over a pending restart.
 - The retained stdout/stderr tail is bounded in memory and never exposed; redaction is not
    implemented because nothing reads it yet.
 - `commandArgs` and `env` are a trusted caller surface. Only the named host/port, shared-port,
@@ -166,6 +206,20 @@ controller. The same test
 creates a real B1 `llama-cpp` client against the running server and verifies chat, streaming,
 streamed and non-streamed tool calls, embeddings and `/infill`; the first-run wizard will use the
 same client.
+
+The restart policy has its own cases in the same file, with the fixture counting boots through
+`FAKE_LLAMA_STARTS` and dying after readiness in `crash-once`, `crash-twice`, `crash-after` and
+`crash-once-then-exit` modes (the last fails its later starts before readiness):
+a bad policy (null, an array, a string, an empty object, a missing, unknown or out-of-range field, a
+cap below the base delay, an accessor, a revoked or trap-throwing Proxy or a reserved key) fails
+closed as `invalid-restart-policy` without a spawn; without a policy an unexpected exit stays
+`exited` with `restarts: 0`; with a policy the crash moves through `restarting` to `running` on the
+same port with a new pid, `restarts: 1` and a working B1 client; the first restart waits at least
+`baseDelayMs` and the second at least twice that; a child that keeps crashing ends as `failed` with
+`failure: 'restarts-exhausted'`, `port: null`, no pid and no further spawn; a run stable for `stableMs`
+resets the streak so a later crash restarts again, while `stableMs: 0` never resets; a `stop()` during
+the back-off cancels the pending restart and spawns nothing; and a crash during an explicit `start()`
+still rejects with `server-exited` and never auto-restarts.
 
 The full acceptance uses `node vibe/tools/verify.mjs --strict` and
 `node vibe/tools/docs-check.mjs --strict`.
