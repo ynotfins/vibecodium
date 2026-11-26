@@ -70,6 +70,8 @@ test('activate registers the graph, memory and provider panel commands without t
   const context = { subscriptions: [], extensionUri: { fsPath: 'x' } };
   const api = loaded.activate(context);
   assert.deepEqual(Object.keys(loaded.commands).sort(), [
+    'vibecodium.firstRun.open',
+    'vibecodium.firstRun.setWizard',
     'vibecodium.graph.open',
     'vibecodium.graph.setData',
     'vibecodium.memory.open',
@@ -77,7 +79,7 @@ test('activate registers the graph, memory and provider panel commands without t
     'vibecodium.providers.open',
     'vibecodium.providers.setSetup',
   ]);
-  assert.equal(context.subscriptions.length, 6);
+  assert.equal(context.subscriptions.length, 8);
   assert.equal(typeof api.open, 'function');
   assert.equal(typeof api.openMemory, 'function');
   api.setGraph({ projects: [{ id: 'api' }], nodes: [], edges: [] });
@@ -153,4 +155,41 @@ test('the provider setup panel opens after a setup service is supplied', async (
   assert.equal(loaded.opened(), 1);
   assert.match(api.getProviderPanelHtml(), /Providers/);
   assert.doesNotThrow(() => api.disposeProviders());
+});
+
+test('the first-run setup panel opens after a wizard is supplied', async () => {
+  const loaded = loadWithFakeVscode();
+  const context = { subscriptions: [], extensionUri: { fsPath: 'x' } };
+  const api = loaded.activate(context);
+  assert.equal(api.setFirstRunWizard(null), undefined);
+  const view = {
+    version: 1,
+    phase: 'needs-download',
+    verdict: 'tight',
+    acceleration: 'cpu',
+    notices: [],
+    hardware: null,
+    models: [],
+    downloadBytes: 1024,
+    plan: null,
+    progress: null,
+    error: null,
+    start: { available: false, reason: 'not-ready' },
+    steps: [{ id: 'check', status: 'done' }],
+    disposed: false,
+  };
+  const wizard = {
+    view: () => view,
+    refresh: async () => view,
+    install: async () => ({ ok: true, installed: 0, reason: 'already-installed' }),
+    startPlan: () => ({ available: false, reason: 'not-ready' }),
+  };
+  api.setFirstRunWizard(wizard);
+  const opened = await api.openFirstRun();
+  assert.equal(opened.opened, true);
+  assert.equal(loaded.opened(), 1);
+  assert.match(api.getFirstRunPanelHtml(), /Vibecodium Setup/);
+  const message = await api.handleFirstRunMessage({ type: 'install' });
+  assert.equal(message.kind, 'install');
+  assert.doesNotThrow(() => api.disposeFirstRun());
 });
