@@ -78,6 +78,8 @@ test('the built-in extension activates and registers graph and memory commands',
   const context = { subscriptions: [], extensionUri: { fsPath: 'extension' } };
   const api = loaded.api.activate(context);
   assert.deepEqual(Object.keys(loaded.commands).sort(), [
+    'vibecodium.firstRun.open',
+    'vibecodium.firstRun.setWizard',
     'vibecodium.graph.open',
     'vibecodium.graph.setData',
     'vibecodium.memory.open',
@@ -85,7 +87,7 @@ test('the built-in extension activates and registers graph and memory commands',
     'vibecodium.providers.open',
     'vibecodium.providers.setSetup',
   ]);
-  assert.equal(context.subscriptions.length, 6);
+  assert.equal(context.subscriptions.length, 8);
 
   await loaded.commands['vibecodium.memory.open']();
   assert.equal(loaded.panels.length, 0);

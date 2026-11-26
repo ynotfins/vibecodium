@@ -4,11 +4,13 @@ const vscode = require('vscode');
 const { createGraphPanelController } = require('./graph-panel.cjs');
 const { createMemoryReviewController } = require('./memory-review.cjs');
 const { createProviderSetupController } = require('./provider-setup.cjs');
+const { createFirstRunController } = require('./first-run.cjs');
 
 function activate(context) {
   let currentGraph = null;
   let currentStore = null;
   let currentProviderSetup = null;
+  let currentFirstRun = null;
 
   const graph = createGraphPanelController({
     vscode,
@@ -24,6 +26,11 @@ function activate(context) {
     vscode,
     extensionUri: context.extensionUri,
     setupProvider: () => currentProviderSetup,
+  });
+  const firstRun = createFirstRunController({
+    vscode,
+    extensionUri: context.extensionUri,
+    wizardProvider: () => currentFirstRun,
   });
 
   context.subscriptions.push(vscode.commands.registerCommand('vibecodium.graph.open', () => graph.open()));
@@ -55,6 +62,18 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand('vibecodium.providers.open', () => providers.open()));
   context.subscriptions.push(vscode.commands.registerCommand('vibecodium.providers.setSetup', applySetup));
 
+  function applyFirstRun(wizard) {
+    if (!wizard || typeof wizard.view !== 'function') {
+      vscode.window.showWarningMessage('Vibe Setup: the supplied first-run wizard is not valid.');
+      return undefined;
+    }
+    currentFirstRun = wizard;
+    return firstRun.view();
+  }
+
+  context.subscriptions.push(vscode.commands.registerCommand('vibecodium.firstRun.open', () => firstRun.open()));
+  context.subscriptions.push(vscode.commands.registerCommand('vibecodium.firstRun.setWizard', applyFirstRun));
+
   return {
     open: () => graph.open(),
     setGraph: (data) => {
@@ -77,6 +96,12 @@ function activate(context) {
     getProviderPanelHtml: () => providers.html(),
     handleProviderMessage: (message) => providers.handleMessage(message),
     disposeProviders: () => providers.dispose(),
+    openFirstRun: () => firstRun.open(),
+    setFirstRunWizard: applyFirstRun,
+    getFirstRunView: () => firstRun.view(),
+    getFirstRunPanelHtml: () => firstRun.html(),
+    handleFirstRunMessage: (message) => firstRun.handleMessage(message),
+    disposeFirstRun: () => firstRun.dispose(),
   };
 }
 
