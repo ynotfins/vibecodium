@@ -467,3 +467,178 @@ test('a huge notice list and a nested Proxy array are bounded without running a 
   assert.deepEqual(hugeSummary.notices, ['ollama-unreachable']);
   assert.equal(hugeSummary.modelCount, 0);
 });
+
+test('useOllama selects a discovered daemon and usePinned restores the pinned phase', async (t) => {
+  let downloads = 0;
+  const instance = wizard(t, {
+    options: {
+      discoverOllama: async () => availableResult(),
+      downloadModel: async () => { downloads += 1; return { verified: true }; },
+    },
+  });
+  assert.deepEqual(instance.useOllama(), { ok: false, reason: 'not-ready' });
+  const view = await instance.refresh();
+  assert.equal(view.phase, 'needs-download');
+  assert.equal(view.source, 'pinned');
+  assert.deepEqual(instance.useOllama(), { ok: false, reason: 'not-checked' });
+
+  const summary = await instance.checkOllama();
+  assert.deepEqual(instance.useOllama(), { ok: true, source: 'ollama' });
+  const using = instance.view();
+  assert.equal(using.source, 'ollama');
+  assert.equal(using.phase, 'ready');
+  assert.deepEqual(using.start, {
+    available: true,
+    kind: 'ollama',
+    baseUrl: summary.baseUrl,
+    model: summary.chatModel,
+    embeddingModel: summary.embeddingModel,
+  });
+  assert.equal(Object.isFrozen(using.start), true);
+  assert.deepEqual(instance.startPlan(), using.start);
+  assert.deepEqual(await instance.install(), { ok: true, installed: 0, reason: 'ollama-selected' });
+  assert.equal(downloads, 0);
+
+  assert.deepEqual(instance.usePinned(), { ok: true, source: 'pinned' });
+  assert.equal(instance.view().source, 'pinned');
+  assert.equal(instance.view().phase, 'needs-download');
+  assert.deepEqual(instance.startPlan(), { available: false, reason: 'not-ready' });
+});
+
+test('a daemon selection makes an insufficient machine ready and is released when it disappears', async (t) => {
+  let result = availableResult();
+  const instance = wizard(t, {
+    options: {
+      probe: async () => ({
+        hardware: hardware({ totalMemoryBytes: 4 * GIB, freeMemoryBytes: 2 * GIB }),
+        notices: [],
+      }),
+      discoverOllama: async () => result,
+    },
+  });
+  const view = await instance.refresh();
+  assert.equal(view.verdict, 'insufficient');
+  await instance.checkOllama();
+  assert.deepEqual(instance.useOllama(), { ok: true, source: 'ollama' });
+  assert.equal(instance.view().phase, 'ready');
+  assert.deepEqual(await instance.install(), { ok: true, installed: 0, reason: 'ollama-selected' });
+
+  result = unavailableResult({ reason: 'unreachable', notices: ['ollama-unreachable'] });
+  await instance.checkOllama();
+  const released = instance.view();
+  assert.equal(released.source, 'pinned');
+  assert.equal(released.phase, 'insufficient');
+  assert.deepEqual(instance.startPlan(), { available: false, reason: 'not-ready' });
+  assert.deepEqual(instance.useOllama(), { ok: false, reason: 'ollama-unavailable' });
+  assert.deepEqual(instance.usePinned(), { ok: true, source: 'pinned' });
+  assert.equal(instance.view().source, 'pinned');
+});
+
+test('the daemon controls refuse a chat-less daemon, a busy download and a disposed wizard', async (t) => {
+  const noChat = wizard(t, {
+    options: {
+      discoverOllama: async () => availableResult({
+        chatModel: null,
+        models: [localModel('nomic-embed-text:latest', { family: 'nomic-bert', embedding: true })],
+        embeddingModel: 'nomic-embed-text:latest',
+        notices: ['ollama-no-chat-model'],
+      }),
+    },
+  });
+  await noChat.refresh();
+  await noChat.checkOllama();
+  assert.deepEqual(noChat.useOllama(), { ok: false, reason: 'ollama-unavailable' });
+  assert.equal(noChat.view().source, 'pinned');
+
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const installed = new Set();
+  const busy = wizard(t, {
+    options: {
+      discoverOllama: async () => availableResult(),
+      downloadModel: async (entry) => {
+        await gate;
+        installed.add(entry.id);
+        return { verified: true };
+      },
+      verifyModel: async (entry) => ({ verified: installed.has(entry.id) }),
+    },
+  });
+  await busy.refresh();
+  await busy.checkOllama();
+  const running = busy.install();
+  assert.deepEqual(busy.useOllama(), { ok: false, reason: 'busy' });
+  assert.deepEqual(busy.usePinned(), { ok: false, reason: 'busy' });
+  release();
+  assert.deepEqual(await running, { ok: true, installed: 2 });
+  assert.equal(busy.view().source, 'pinned');
+
+  const disposed = wizard(t, { options: { discoverOllama: async () => availableResult() } });
+  await disposed.refresh();
+  await disposed.checkOllama();
+  disposed.dispose();
+  assert.deepEqual(disposed.useOllama(), { ok: false, reason: 'disposed' });
+  assert.deepEqual(disposed.usePinned(), { ok: false, reason: 'disposed' });
+});
+
+test('the daemon selection survives a refresh and returns after the daemon disappears', async (t) => {
+  let result = availableResult();
+  const instance = wizard(t, { options: { discoverOllama: async () => result } });
+  const first = await instance.refresh();
+  assert.equal(first.source, 'pinned');
+  await instance.checkOllama();
+  assert.deepEqual(instance.useOllama(), { ok: true, source: 'ollama' });
+
+  const refreshed = await instance.refresh();
+  assert.equal(refreshed.source, 'ollama');
+  assert.equal(refreshed.phase, 'ready');
+  assert.equal(refreshed.start.kind, 'ollama');
+  assert.deepEqual(instance.startPlan(), refreshed.start);
+
+  result = unavailableResult();
+  await instance.checkOllama();
+  assert.equal(instance.view().source, 'pinned');
+  assert.equal(instance.view().phase, 'needs-download');
+  assert.deepEqual(instance.useOllama(), { ok: false, reason: 'ollama-unavailable' });
+
+  result = availableResult();
+  await instance.checkOllama();
+  assert.deepEqual(instance.useOllama(), { ok: true, source: 'ollama' });
+  assert.equal(instance.view().source, 'ollama');
+  assert.equal(instance.view().phase, 'ready');
+});
+
+test('a forged or accessor-backed discovery answer is never selectable', async (t) => {
+  const forged = availableResult({ baseUrl: 'http://127.0.0.1:11435/v1' });
+  const withGetter = availableResult();
+  Object.defineProperty(withGetter, 'chatModel', { enumerable: true, get() { throw new Error('getter ran'); } });
+  for (const raw of [forged, withGetter]) {
+    const instance = wizard(t, { options: { discoverOllama: async () => raw } });
+    await instance.refresh();
+    const summary = await instance.checkOllama();
+    assert.equal(summary.providerOptions, null);
+    assert.deepEqual(instance.useOllama(), { ok: false, reason: 'ollama-unavailable' });
+    assert.equal(instance.view().source, 'pinned');
+  }
+});
+
+test('install does not claim the selected daemon after a failed refresh', async (t) => {
+  let fail = false;
+  const instance = wizard(t, {
+    options: {
+      probe: async () => {
+        if (fail) throw new Error('probe down');
+        return { hardware: hardware(), notices: [] };
+      },
+      discoverOllama: async () => availableResult(),
+    },
+  });
+  await instance.refresh();
+  await instance.checkOllama();
+  assert.deepEqual(instance.useOllama(), { ok: true, source: 'ollama' });
+  fail = true;
+  const failed = await instance.refresh();
+  assert.equal(failed.phase, 'failed');
+  assert.deepEqual(await instance.install(), { ok: false, reason: 'no-plan' });
+  assert.deepEqual(instance.startPlan(), { available: false, reason: 'not-ready' });
+});
