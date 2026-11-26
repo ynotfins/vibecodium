@@ -96,7 +96,8 @@ closed as `outside-workspace`.
 ## Bounds
 
 The walk is capped at 20,000 entries and 16 levels of depth, and a grep stops after 8 MiB of decoded
-file text; a grep is capped at 200 matching lines and 32 KiB of output; a glob is capped at 200 paths; `list_directory` is capped at 500 entries and 32 KiB; the repo-structure listing is capped
+file text; a grep is capped at 200 matching lines and 32 KiB of output; a glob is capped at 200 paths
+and the 32 KiB output budget; `list_directory` is capped at 500 entries and 32 KiB; the repo-structure listing is capped
 at 200 entries and 32 KiB; a read is capped at 400 lines
 and 32 KiB; a finish is capped at 32 files, 32 KiB per file and 256 KiB in total; and a loop is capped
 at 6 turns, 8 tool calls per turn and 24 tool calls in total. `grep_search` and `read` stop at their
@@ -104,7 +105,9 @@ caps while rendering and mark the tool output `(truncated)` (an empty result tha
 `no matches (truncated)`); a `finish` applies its file and total budgets while it selects lines and
 fails closed as `result-too-large` instead of building an oversized result first. Grep matches the literal
 string case-insensitively by default (a plain a-or-b alternation matches either word), and globs are matched with a linear segment walk, never a
-regular expression, so a model-supplied pattern or glob cannot backtrack catastrophically.
+regular expression, so a model-supplied pattern or glob cannot backtrack catastrophically. Every tool result and the repo-structure listing replace characters the B1 client
+refuses (format, bidi, C1 and line/paragraph separators) with U+FFFD, so one such file cannot abort the
+search.
 
 ## Input and error boundary
 
@@ -112,14 +115,16 @@ Options, input and finish arguments are read through own data descriptors; the `
 `read` arguments arrive as JSON text and are parsed and validated field by field. Unknown
 fields, missing fields, reserved keys, accessors, duplicate enumerations, non-string values and
 oversized strings fail closed without invoking a getter. Provider failures are reported as
-`provider-error` with only an integer HTTP status when the B1 client supplied the failure. Every other
+`provider-error` with only an integer HTTP status when the B1 client supplied the failure. A non-finish
+tool-call argument above 64 KiB fails closed as `invalid-response` before it is echoed into the next
+request; a `finish` argument is never echoed and its own parser bounds the file list. Every other
 failure uses a fixed `WarpGrepError` code (`invalid-input`, `invalid-options`, `outside-workspace`,
 `invalid-response`, `no-tool-calls`, `too-many-tool-calls`, `turn-limit`, `invalid-finish`,
 `result-too-large`).
 
 ## Verification
 
-`node --test tests/vibe/morph-warp-grep.test.mjs` runs 42 tests. They cover the immutable schema, loop
+`node --test tests/vibe/morph-warp-grep.test.mjs` runs 45 tests. They cover the immutable schema, loop
 tools and `describe()` surface; a real B1 client against a local mock endpoint running a scripted
 grep/read/finish loop with the finished spans, bounded content, aggregated usage and the request shape
 (no `tools` array, the model's tools are built in) with no stream; whole-file and line-range finishes; default

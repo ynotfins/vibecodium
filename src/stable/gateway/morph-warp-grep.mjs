@@ -35,6 +35,10 @@ export const MAX_GLOB_CHARS = 256;
 export const MAX_TOOL_ARGUMENT_CHARS = 65536;
 
 const CONTROL_OR_BIDI = /[\u0000-\u001F\u007F-\u009F\p{Cf}\p{Zl}\p{Zp}]/u;
+// Characters the B1 client refuses in a message. Workspace text can contain them, so every tool
+// result and the repo-structure listing replace them before the next request instead of aborting
+// the whole search with a provider validation error.
+const UNSAFE_MESSAGE_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\p{Cf}\p{Zl}\p{Zp}]/gu;
 const UNSAFE_ARGUMENT = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/u;
 const ENCODED_SEPARATOR = /%(?:2e|2f|5c)/i;
 const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
@@ -417,6 +421,12 @@ function splitLines(text) {
   return lines;
 }
 
+// A tool result or a listing can contain characters the B1 client refuses (format, bidi and C1
+// characters); replacing them keeps the search alive without echoing the unsafe sequence.
+function sanitizeToolText(text) {
+  return text.replace(UNSAFE_MESSAGE_CHARS, '\uFFFD');
+}
+
 // Win32 and the default macOS filesystem are case-insensitive, and Win32 also strips trailing dots
 // and spaces, so `.GIT`, `.git.` and `.Git ` all alias the excluded name. Normalise before comparing.
 function normalizedName(name) {
@@ -612,6 +622,7 @@ async function toolGlob(root, searchType, args) {
   }
   const collected = [];
   let entries = 0;
+  let totalChars = 0;
   let truncated = false;
   async function walk(directory, depth) {
     if (truncated || depth > MAX_WALK_DEPTH) return;
@@ -639,11 +650,13 @@ async function toolGlob(root, searchType, args) {
       if (!entry.isFile()) continue;
       const relativePath = toWorkspaceRelative(root, absolute);
       if (globMatches(pattern, relativePath) === false) continue;
-      if (collected.length >= MAX_GREP_LINES) {
+      if (collected.length >= MAX_GREP_LINES ||
+          totalChars + relativePath.length + 1 > MAX_TOOL_OUTPUT_CHARS - 16) {
         truncated = true;
         return;
       }
       collected.push(relativePath);
+      totalChars += relativePath.length + 1;
     }
   }
   await walk(root, 0);
@@ -651,7 +664,6 @@ async function toolGlob(root, searchType, args) {
   if (truncated) collected.push('(truncated)');
   return collected.join('\n');
 }
-
 async function toolListDirectory(root, searchType, args) {
   const value = args.path === undefined ? '.' : args.path;
   if (typeof value !== 'string') return 'error: list_directory path is invalid';
@@ -880,7 +892,7 @@ async function buildRepoStructure(root, searchType) {
       if (entry.isSymbolicLink() || excluded(entry.name, searchType)) continue;
       const absolute = resolve(directory, entry.name);
       const relativePath = toWorkspaceRelative(root, absolute);
-      const rendered = relativePath + (entry.isDirectory() ? '/' : '');
+      const rendered = sanitizeToolText(relativePath + (entry.isDirectory() ? '/' : ''));
       if (entries.length === 0 || entries[entries.length - 1] !== rendered) {
         if (entries.join('\n').length + rendered.length + 1 > MAX_TOOL_OUTPUT_CHARS) return;
         entries.push(rendered);
@@ -968,6 +980,12 @@ export function createMorphWarpGrepTool(options) {
               typeof args !== 'string' || args.length > 1000000) {
             fail('invalid-response', 'WarpGrep returned an invalid tool call');
           }
+          // A non-finish call is echoed back to the provider before it is executed, so an
+          // oversized one is refused here instead of being replayed into the next request. A
+          // finish call is never echoed and its own parser bounds the file list.
+          if (name !== 'finish' && args.length > MAX_TOOL_ARGUMENT_CHARS) {
+            fail('invalid-response', 'WarpGrep returned an oversized tool call');
+          }
           calls.push({ id, name, arguments: args });
         }
       } catch (error) {
@@ -1030,10 +1048,10 @@ async function runTool(root, searchType, call) {
   }
   if (!isPlainObject(args)) return 'error: tool arguments must be an object';
   try {
-    if (call.name === 'grep_search') return await toolGrep(root, searchType, args);
-    if (call.name === 'glob') return await toolGlob(root, searchType, args);
-    if (call.name === 'list_directory') return await toolListDirectory(root, searchType, args);
-    if (call.name === 'read') return await toolRead(root, args, searchType);
+    if (call.name === 'grep_search') return sanitizeToolText(await toolGrep(root, searchType, args));
+    if (call.name === 'glob') return sanitizeToolText(await toolGlob(root, searchType, args));
+    if (call.name === 'list_directory') return sanitizeToolText(await toolListDirectory(root, searchType, args));
+    if (call.name === 'read') return sanitizeToolText(await toolRead(root, args, searchType));
   } catch {
     return 'error: tool failed';
   }
