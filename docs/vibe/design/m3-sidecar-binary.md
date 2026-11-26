@@ -44,8 +44,9 @@ review date and the upgrade rule.
 The allowlist is the CPU runtime plus its license text: `llama-server.exe`,
 `llama-server-impl.dll`, `llama-common.dll`, `llama.dll`, `mtmd.dll`, `ggml.dll`, `ggml-base.dll`,
 the fourteen `ggml-cpu-*.dll` variants, `libomp.dll` and `LICENSE-LLVM-OpenMP`. The archive carries
-that OpenMP notice only and no llama.cpp `LICENSE` file, so the MIT notice must be taken from the
-llama.cpp source tree when the notices file is written. The archive's other
+that OpenMP notice only and no llama.cpp `LICENSE` file, so the MIT notice was taken from the
+llama.cpp source tree at the pinned tag and is now shipped in `vibe/licenses/mit.txt` (see
+[m3-third-party-notices.md](m3-third-party-notices.md)). The archive's other
 executables, benchmark tools and RPC helper are not installed. The CPU package still
 needs the Microsoft Visual C++ 2015-2022 x64 runtime (`MSVCP140.dll`, `VCRUNTIME140.dll`,
 `VCRUNTIME140_1.dll`); it is not in `vibe/sidecars.json`, is not pinned yet, and the installer must
@@ -221,7 +222,8 @@ The full acceptance uses `node vibe/tools/verify.mjs --strict` and
 ## Next steps
 
 Copy the installed files and `vibe/models/catalog.json` into the packaged application, sign the
-manifest, add a third-party notices file covering llama.cpp's MIT text and the LLVM/OpenMP notice, add the
+manifest, place the generated third-party notice beside the installed files and the application (see
+[m3-third-party-notices.md](m3-third-party-notices.md)), add the
 Microsoft VC++ 2015-2022 x64 redistributable to the radar and pin it,
 supply the Microsoft VC++ runtime, and run one live install/start smoke on a clean Windows machine.
 The first-run start action now calls `installSidecar` when no host-supplied `runtimePath` exists (see
