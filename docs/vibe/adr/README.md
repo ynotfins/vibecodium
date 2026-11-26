@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-24
+> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-25
 
 One file per decision: `NNNN-<slug>.md`. Status is one of `proposed`, `accepted`, `superseded by NNNN`. Proposed alternatives live on `vibe/alt/<slug>` branches.
 
@@ -15,3 +15,4 @@ One file per decision: `NNNN-<slug>.md`. Status is one of `proposed`, `accepted`
 | [0007](0007-build-on-our-own-models-with-opencode.md) | Build on our own models with OpenCode | superseded by 0008 |
 | [0008](0008-codex-byok-primary-opencode-fallback.md) | Codex BYOK on OmniRoute primary; OpenCode fallback | accepted |
 | [0009](0009-docs-mcp-local-first.md) | Docs MCP: local-first now, upstream web scraper later | accepted |
+| [0010](0010-local-runtime-llama-server-supervisor.md) | Local models run under a caller-supplied llama-server supervisor | accepted |
