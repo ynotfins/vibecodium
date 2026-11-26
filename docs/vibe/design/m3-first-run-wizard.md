@@ -101,8 +101,7 @@ While the daemon is the selected runtime, `install()` returns
 `startPlan()` returns frozen data only when the phase is `ready`. The two shapes are:
 
 ```
-{ available: true, kind: 'llama-server', executablePath, modelPath, embeddingModelPath,
-  contextSize, threads, gpuLayers }
+{ available: true, kind: 'llama-server', executablePath, modelPath, embeddingModelPath, contextSize, threads, gpuLayers }
 { available: true, kind: 'ollama', baseUrl, model, embeddingModel }
 ```
 
