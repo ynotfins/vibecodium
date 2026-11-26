@@ -17,6 +17,10 @@ import {
   verifyInstalledModel,
 } from './model-downloader.mjs';
 import { validateLlamaExecutablePath } from './llama-server.mjs';
+import {
+  discoverOllama as defaultDiscoverOllama,
+  toOllamaProviderOptions,
+} from './ollama.mjs';
 
 export const FIRST_RUN_VERSION = 1;
 export const WIZARD_PHASES = Object.freeze([
@@ -32,9 +36,20 @@ const CONTROL_OR_BIDI = /[\u0000-\u001F\u007F-\u009F\p{Cf}\p{Zl}\p{Zp}]/u;
 const NOTICE_CODE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const OPTION_KEYS = new Set([
   'catalog', 'destinationDir', 'probe', 'downloadModel', 'verifyModel', 'runtimePath', 'onChange',
+  'discoverOllama',
 ]);
 const INSTALL_OPTION_KEYS = new Set(['signal']);
 const PROBE_RESULT_KEYS = new Set(['version', 'hardware', 'notices']);
+
+// The bounded vocabulary the panel may show for an Ollama answer. A value outside it is replaced,
+// so an injected effect cannot put arbitrary text in the view.
+const OLLAMA_REASONS = new Set([
+  'unreachable', 'timeout', 'http-error', 'invalid-response', 'policy-denied',
+  'no-chat-model', 'invalid-result', 'check-failed', 'disposed',
+]);
+const MAX_OLLAMA_NOTICES = 8;
+const MAX_OLLAMA_MODEL_CHARS = 200;
+const MAX_OLLAMA_MODELS = 256;
 
 const PROBE_NOTICES = Object.freeze([
   'gpu-probe-failed', 'gpu-probe-invalid', 'gpu-probe-unavailable', 'gpu-probe-empty',
@@ -148,6 +163,155 @@ function safeMessage(value, fallback) {
   return CONTROL_OR_BIDI.test(value) ? fallback : value;
 }
 
+// Reads one own data property without running an accessor, so a hostile discovery answer cannot
+// execute code or hide behind a getter.
+function readDataField(value, key) {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor) return { ok: true, value: undefined };
+    if ('get' in descriptor || 'set' in descriptor) return { ok: false, value: undefined };
+    return { ok: true, value: descriptor.value };
+  } catch {
+    return { ok: false, value: undefined };
+  }
+}
+
+function boundedCodeList(value, maximum) {
+  if (types.isProxy(value) || !Array.isArray(value)) return Object.freeze([]);
+  let length;
+  try {
+    length = value.length;
+  } catch {
+    return Object.freeze([]);
+  }
+  if (!Number.isInteger(length) || length < 0) return Object.freeze([]);
+  const out = [];
+  // The cap bounds the work even when a hostile list declares a huge length and no valid code.
+  const limit = Math.min(length, maximum * 4);
+  for (let index = 0; index < limit && out.length < maximum; index += 1) {
+    let descriptor;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    } catch {
+      continue;
+    }
+    if (!descriptor || !('value' in descriptor)) continue;
+    const code = descriptor.value;
+    if (typeof code !== 'string' || !NOTICE_CODE.test(code) || out.includes(code)) continue;
+    out.push(code);
+  }
+  return Object.freeze(out);
+}
+
+function freezeOllamaSummary(summary) {
+  return Object.freeze({
+    checked: summary.checked,
+    available: summary.available,
+    reason: summary.reason,
+    baseUrl: summary.baseUrl,
+    chatModel: summary.chatModel,
+    embeddingModel: summary.embeddingModel,
+    modelCount: summary.modelCount,
+    notices: summary.notices,
+    providerOptions: summary.providerOptions,
+  });
+}
+
+function failedOllamaSummary(reason, notice) {
+  return freezeOllamaSummary({
+    checked: true,
+    available: false,
+    reason,
+    baseUrl: null,
+    chatModel: null,
+    embeddingModel: null,
+    modelCount: 0,
+    notices: Object.freeze([notice]),
+    providerOptions: null,
+  });
+}
+
+// Turns an untrusted discovery answer into a frozen, display-safe summary. The provider overrides are
+// produced only by the reviewed `toOllamaProviderOptions`, which re-validates the whole answer, so a
+// forged, stale, remote or wrong-base answer can never point the B1 preset anywhere.
+function summarizeOllamaResult(raw) {
+  if (types.isProxy(raw) || raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return failedOllamaSummary('invalid-result', 'ollama-invalid-response');
+  }
+  const availableField = readDataField(raw, 'available');
+  const chatField = readDataField(raw, 'chatModel');
+  const embeddingField = readDataField(raw, 'embeddingModel');
+  if (!availableField.ok || !chatField.ok || !embeddingField.ok) {
+    return failedOllamaSummary('invalid-result', 'ollama-invalid-response');
+  }
+  const available = availableField.value === true;
+  let providerOptions = null;
+  if (available) {
+    try {
+      providerOptions = toOllamaProviderOptions(raw);
+    } catch {
+      providerOptions = null;
+    }
+  }
+  const modelsField = readDataField(raw, 'models');
+  let modelCount = 0;
+  if (modelsField.ok && !types.isProxy(modelsField.value) && Array.isArray(modelsField.value)) {
+    try {
+      const length = modelsField.value.length;
+      modelCount = Number.isInteger(length) && length > 0 ? Math.min(length, MAX_OLLAMA_MODELS) : 0;
+    } catch {
+      modelCount = 0;
+    }
+  }
+  const noticesField = readDataField(raw, 'notices');
+  let notices = noticesField.ok ? boundedCodeList(noticesField.value, MAX_OLLAMA_NOTICES) : Object.freeze([]);
+  let reason = null;
+  if (available) {
+    if (providerOptions === null) {
+      reason = chatField.value === null || chatField.value === undefined ? 'no-chat-model' : 'invalid-result';
+    }
+  } else {
+    const reasonField = readDataField(raw, 'reason');
+    reason = reasonField.ok && typeof reasonField.value === 'string' && OLLAMA_REASONS.has(reasonField.value)
+      ? reasonField.value
+      : 'invalid-result';
+  }
+  if (!available && notices.length === 0) {
+    notices = Object.freeze([reason === 'invalid-result' ? 'ollama-invalid-response' : 'ollama-unreachable']);
+  }
+  const embedded = typeof embeddingField.value === 'string' &&
+    embeddingField.value.length >= 1 &&
+    embeddingField.value.length <= MAX_OLLAMA_MODEL_CHARS &&
+    !CONTROL_OR_BIDI.test(embeddingField.value)
+    ? embeddingField.value
+    : null;
+  return freezeOllamaSummary({
+    checked: true,
+    available,
+    reason,
+    baseUrl: providerOptions === null ? null : providerOptions.baseUrl,
+    chatModel: providerOptions === null ? null : providerOptions.model,
+    embeddingModel: available && reason !== 'invalid-result' ? embedded : null,
+    modelCount,
+    notices,
+    providerOptions,
+  });
+}
+
+function disposedOllamaSummary() {
+  return freezeOllamaSummary({
+    checked: false,
+    available: false,
+    reason: 'disposed',
+    baseUrl: null,
+    chatModel: null,
+    embeddingModel: null,
+    modelCount: 0,
+    notices: Object.freeze([]),
+    providerOptions: null,
+  });
+}
+
 function freezeModel(model) {
   return Object.freeze({
     id: model.id,
@@ -252,6 +416,8 @@ export function createFirstRunWizard(options) {
   if (onChange !== undefined && typeof onChange !== 'function') {
     fail('invalid-options', 'onChange must be a function');
   }
+  const discoverOllama = own.discoverOllama === undefined ? defaultDiscoverOllama : own.discoverOllama;
+  if (typeof discoverOllama !== 'function') fail('invalid-options', 'discoverOllama must be a function');
   let runtimePath = null;
   if (own.runtimePath !== undefined) {
     try {
@@ -281,8 +447,10 @@ export function createFirstRunWizard(options) {
     models: [],
     progress: null,
     error: null,
+    ollama: null,
   };
   let installing = null;
+  let ollamaCheck = null;
   let revision = 0;
   let disposed = false;
 
@@ -352,6 +520,32 @@ export function createFirstRunWizard(options) {
     });
   }
 
+  // `checkOllama` is a read-only detection: it never changes the pinned plan, never downloads and
+  // never adopts the daemon. The effect is the delivered discovery by default; a call in flight is
+  // shared so a double click cannot make two loopback requests.
+  async function runOllamaCheck() {
+    let summary;
+    try {
+      summary = summarizeOllamaResult(await discoverOllama());
+    } catch {
+      summary = failedOllamaSummary('check-failed', 'ollama-check-failed');
+    }
+    if (!disposed) {
+      state.ollama = summary;
+      emit();
+    }
+    return summary;
+  }
+
+  function checkOllama() {
+    if (disposed) return Promise.resolve(disposedOllamaSummary());
+    if (ollamaCheck !== null) return ollamaCheck;
+    ollamaCheck = Promise.resolve().then(runOllamaCheck).finally(function () {
+      ollamaCheck = null;
+    });
+    return ollamaCheck;
+  }
+
   function buildSteps() {
     const modelsDone = state.models.length > 0 && state.models.every(function (model) {
       return model.installed;
@@ -413,6 +607,7 @@ export function createFirstRunWizard(options) {
       error: state.error === null ? null : Object.freeze(Object.assign({}, state.error)),
       start: startPlan(),
       steps: buildSteps(),
+      ollama: state.ollama,
       disposed: disposed,
     });
   }
@@ -582,6 +777,7 @@ export function createFirstRunWizard(options) {
     refresh: refresh,
     install: install,
     startPlan: startPlan,
+    checkOllama: checkOllama,
     view: view,
     dispose: dispose,
   });

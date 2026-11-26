@@ -17,10 +17,11 @@ which models it can serve, pick a local chat model and an optional local embeddi
 caller the two exact overrides the B1 `ollama` preset takes (`baseUrl`, `model`). It never starts,
 installs, stops or updates Ollama, never pulls a model, and never writes a file. Node built-ins only.
 
-Out of scope: wiring the result into the first-run wizard or the provider setup panel (the next M3
-slice), the `/api/embeddings` endpoint, the Responses transport, capability discovery beyond the
-name/family heuristic, starting or supervising Ollama, the llama.cpp binary bundle, restart/back-off
-and any dependency change.
+Out of scope: switching the active B1 provider or writing provider config (the B5 provider setup panel
+is M2 work), activating a discovered daemon automatically, the `/api/embeddings` endpoint, the
+Responses transport, capability discovery beyond the name/family heuristic, starting or supervising
+Ollama, the llama.cpp binary bundle, restart/back-off and any dependency change. The first-run wizard
+wiring is delivered in [m3-first-run-wizard.md](m3-first-run-wizard.md).
 
 ## Live facts (verified 2026-11-26)
 
@@ -159,6 +160,16 @@ through the discovered base URL against the same loopback mock server for plain 
 tool calls (plain and streamed) and embeddings, and asserts that no request carries an authorization
 header.
 
+## Wizard wiring
+
+`createFirstRunWizard` imports this module as its default `discoverOllama` effect and exposes
+`checkOllama()`, which the first-run panel calls once on open and from its **Check for Ollama** button.
+The wizard re-reads the answer through own data descriptors and only exposes provider overrides that
+`toOllamaProviderOptions` re-validated, so a forged, stale, remote or wrong-base result yields no
+overrides. The daemon is reported beside the pinned plan and is never adopted automatically; the
+first-run panel notes that the daemon is reported for provider setup and that activation is not wired yet. See
+[m3-first-run-wizard.md](m3-first-run-wizard.md).
+
 ## Security boundary
 
 - The probe is loopback-only and read-only; the host cannot be overridden and the path is fixed.
@@ -207,8 +218,9 @@ authorization header.
 
 ## Follow-ups
 
-- Wire `discoverOllama` and `toOllamaProviderOptions` into the first-run wizard and the provider
-   setup panel, with the cloud/remote label visible.
+- Wire the same discovery into the B5 provider setup panel (M2 lane) so a discovered daemon can be
+   activated without typing a URL, and render the bounded cloud/remote notice there; the first-run
+   wizard wiring is delivered, but its panel does not show the notice yet.
 - Live smoke on a machine with Ollama, including the `tool_choice` question and one embedding model.
 - Use `POST /api/show` (one request per model, a `capabilities` array that includes `embedding` and
    `tools`, `omitempty` so absence means unknown) to replace the embedding heuristic once a live
