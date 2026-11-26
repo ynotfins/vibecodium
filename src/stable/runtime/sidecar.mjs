@@ -274,7 +274,6 @@ function isInternalHost(hostname) {
     const low = parseInt(hexMapped[2], 16);
     if (isV4Internal(high >> 8, high & 0xff) || isV4Internal(low >> 8, low & 0xff)) return true;
   }
-  if (host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) return true;
   return false;
 }
 

@@ -20,7 +20,8 @@ installs, stops or updates Ollama, never pulls a model, and never writes a file.
 Out of scope: switching the active B1 provider or writing provider config (the B5 provider setup panel
 is M2 work), activating a discovered daemon automatically, the `/api/embeddings` endpoint, the
 Responses transport, capability discovery beyond the name/family heuristic, starting or supervising
-Ollama, the llama.cpp binary bundle, restart/back-off and any dependency change. The first-run wizard
+Ollama, the llama.cpp binary bundle (the pin and verified installer are delivered separately in
+[m3-sidecar-binary.md](m3-sidecar-binary.md)), restart/back-off and any dependency change. The first-run wizard
 wiring is delivered in [m3-first-run-wizard.md](m3-first-run-wizard.md).
 
 ## Live facts (verified 2026-11-26)

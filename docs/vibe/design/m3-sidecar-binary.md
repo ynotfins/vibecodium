@@ -46,7 +46,8 @@ The allowlist is the CPU runtime plus its license text: `llama-server.exe`,
 the fourteen `ggml-cpu-*.dll` variants, `libomp.dll` and `LICENSE-LLVM-OpenMP`. The archive's other
 executables, benchmark tools and RPC helper are not installed. The CPU package still
 needs the Microsoft Visual C++ 2015-2022 x64 runtime (`MSVCP140.dll`, `VCRUNTIME140.dll`,
-`VCRUNTIME140_1.dll`); the installer must supply it in M12, and this slice only records the dependency.
+`VCRUNTIME140_1.dll`); it is not in `vibe/sidecars.json`, is not pinned yet, and the installer must
+supply it in M12, so this slice only records the dependency.
 
 ## Manifest schema
 
@@ -126,7 +127,7 @@ method (`invalid-archive`). Only names that exactly match an allowlisted file ar
 entries and unlisted files are ignored. An allowlisted name missing from the archive is
 `missing-entry`; an entry above the file cap is `entry-too-large`. Stored and deflated entries are
 inflated with a hard output bound, checked for the pinned size and then hashed: a size mismatch is
-`entry-size`, a digest mismatch `entry-checksum`. CRC-32 is not the gate; the pinned [ADDRESS] is
+`entry-size`, a digest mismatch `entry-checksum`. CRC-32 is not the gate; the pinned digest is
 strictly stronger.
 
 All allowlisted files are extracted and verified in memory before the first write, so a bad archive
@@ -165,8 +166,11 @@ The manifest is the trust anchor: a file is installed only when the archive and 
 match a pinned size and digest. The URL carries no credential and the format has no header or token
 field, so the pin file cannot smuggle a presigned secret; no caller header is forwarded, an intermediate redirect host sees only the runtime's transport
 headers, and a final URL whose literal host is loopback, private, link-local, metadata or
-`localhost` is refused when the pin was not loopback. A DNS name is not resolved before the
-check, so a redirect target that resolves internally is a documented residual. Every archive name is either
+`localhost` is refused when the pin was not loopback. The literal check expands an IPv6 host into
+eight groups and also refuses IPv4-compatible `::a.b.c.d`, IPv4-mapped/SIIT `::ffff:*`, NAT64
+`64:ff9b::/96` and `64:ff9b:1::/48`, and 6to4 `2002::/16` when the embedded IPv4 address is internal,
+plus `fe80::/10`, `fc00::/7` and `ff00::/8`. A DNS name is not resolved before the check, so a
+redirect target that resolves internally is a documented residual. Every archive name is either
 exactly one pinned relative path or ignored, and every write is built from that pinned path, so a
 zip-slip, absolute, drive-letter or backslash entry cannot leave the target directory. All files are
 verified before the first write, so a malicious archive leaves no partial install. The installer never runs the
@@ -190,7 +194,8 @@ installed, but the read is not bound to the file that was hashed.
 manifest field and path class, accessor and Proxy behaviour, the empty, sized and checksummed install,
 the symlink refusal, a complete install against a loopback server and against an injected fetch,
 idempotent skip with no request, archive and entry digest/size failures, a missing entry, HTTP status,
-insecure redirect, an internal literal final host, a symlinked target or nested parent, ZIP64,
+insecure redirect, an internal literal final host (including the embedded-IPv4 IPv6 forms and the
+`fe80::/10`, `fc00::/7` and `ff00::/8` ranges), a symlinked target or nested parent, ZIP64,
 multi-disk, encrypted and unsafe archive names, missing body, stall, total timeout, caller abort, the busy guard, invalid options,
 traversal/absolute/backslash/symlink archive entries, duplicate entries, an unsupported method, a
 truncated and a non-ZIP archive, an oversized entry, ignored directory and unlisted entries, bounded
