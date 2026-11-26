@@ -96,8 +96,7 @@ closed as `outside-workspace`.
 ## Bounds
 
 The walk is capped at 20,000 entries and 16 levels of depth, and a grep stops after 8 MiB of decoded
-file text; a grep is capped at 200 matching lines and 32 KiB of output; a glob is capped at 200 paths
-and 32 KiB; `list_directory` is capped at 500 entries and 32 KiB; the repo-structure listing is capped
+file text; a grep is capped at 200 matching lines and 32 KiB of output; a glob is capped at 200 paths; `list_directory` is capped at 500 entries and 32 KiB; the repo-structure listing is capped
 at 200 entries and 32 KiB; a read is capped at 400 lines
 and 32 KiB; a finish is capped at 32 files, 32 KiB per file and 256 KiB in total; and a loop is capped
 at 6 turns, 8 tool calls per turn and 24 tool calls in total. `grep_search` and `read` stop at their
