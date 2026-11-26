@@ -1,6 +1,6 @@
 # Vibecodium Documentation
 
-> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-25
+> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-26
 
 Vibecodium is a standalone, Windows-first AI IDE built on VSCodium. This folder is the product's documentation suite. The upstream VSCodium docs in `docs/` (outside `docs/vibe/`) describe the base build and are left unchanged.
 
@@ -35,6 +35,7 @@ Vibecodium is a standalone, Windows-first AI IDE built on VSCodium. This folder 
 | [design/m2-fast-apply.md](design/m2-fast-apply.md) | M2 B6 bounded Fast Apply `edit_file` agent tool and its workspace, write and error boundaries |
 | [design/m3-llama-server.md](design/m3-llama-server.md) | M3 local `llama-server` supervisor: loopback process boundary, health gating, environment allowlist and failure model |
 | [design/m3-model-downloader.md](design/m3-model-downloader.md) | M3 model catalog, resumable digest-verified downloader and free-space check |
+| [design/m3-hardware-probe.md](design/m3-hardware-probe.md) | M3 bounded hardware probe and the RAM/GPU-to-runtime recommendation policy |
 | [CHANGELOG.md](CHANGELOG.md) | User-visible changes per release |
 | [SECURITY.md](SECURITY.md) | Security model and how to report issues |
 | [adr/README.md](adr/README.md) | Architecture decision records |
