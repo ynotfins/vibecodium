@@ -55,23 +55,23 @@ supply it in M12, so this slice only records the dependency.
 
 ```json
 {
-  "version": 1,
-  "sidecars": [{
-    "id": "llama-server",
-    "version": "b12426",
-    "licenses": ["mit", "apache-2.0-with-llvm-exception"],
-    "publishedAt": "2026-11-15",
-    "source": "ggml-org/llama.cpp",
-    "targets": {
-      "win32-x64": {
-        "url": "https://github.com/.../llama-b12426-bin-win-cpu-x64.zip",
-        "sha256": "<64 hex>",
-        "sizeBytes": 25209516,
-        "executable": "llama-server.exe",
-        "files": [{ "path": "llama-server.exe", "sha256": "<64 hex>", "sizeBytes": 9728 }]
+   "version": 1,
+   "sidecars": [{
+      "id": "llama-server",
+      "version": "b12426",
+      "licenses": ["mit", "apache-2.0-with-llvm-exception"],
+      "publishedAt": "2026-11-15",
+      "source": "ggml-org/llama.cpp",
+      "targets": {
+         "win32-x64": {
+            "url": "https://github.com/.../llama-b12426-bin-win-cpu-x64.zip",
+            "sha256": "<64 hex>",
+            "sizeBytes": 25209516,
+            "executable": "llama-server.exe",
+            "files": [{ "path": "llama-server.exe", "sha256": "<64 hex>", "sizeBytes": 9728 }]
+         }
       }
-    }
-  }]
+   }]
 }
 ```
 
