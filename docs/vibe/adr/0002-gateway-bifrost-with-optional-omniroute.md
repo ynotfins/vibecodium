@@ -32,7 +32,7 @@ The owner uses Morph through OmniRoute today and wants it available directly whe
 - Fast Apply (`morph-v3-fast`, `morph-v3-large`) merges lazy edit snippets into files; used for agent edits (A4).
 - WarpGrep (`morph-warp-grep-v2.1`) searches a repository in its own context and returns file/line spans; complements the local index for agent search (C5).
 - Compact (`morph-compactor`) drops irrelevant lines from history while keeping every surviving line byte-identical; a candidate backend for the Vibe Context Engine (ADR-0003, D2).
-- Router (`/v1/router/multimodel`, ~$0.005 per request) returns the model tier a prompt needs; an option next to Bifrost's own routing rules (B3).
+- Router (`/v1/router/classify`, a small per-request price) returns the prompt's difficulty, which B3 maps to a model tier; `/v1/router/multimodel` is a separate option that returns a model directly, next to Bifrost's own routing rules (B3).
 - Morph-hosted open models (Kimi K3.1, GLM-5.3, DeepSeek V4.1 Flash, and an approval-gated abliterated DeepSeek variant) on an OpenAI-compatible API.
 
 Morph is a hosted service; the product talks to it with the user's key and the MIT `@morphllm/morphmcp` tools. PRODUCT_SPEC B6.
