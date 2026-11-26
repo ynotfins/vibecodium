@@ -47,7 +47,14 @@ export const MAX_TOTAL_TIMEOUT_MS = 3_600_000;
 export const DEFAULT_TOTAL_TIMEOUT_MS = 600_000;
 export const HASH_CHUNK_BYTES = 1024 * 1024;
 export const MAX_ZIP_ENTRIES = 4096;
-export const ALLOWED_LICENSES = Object.freeze(['mit', 'apache-2.0', 'bsd-2-clause', 'bsd-3-clause', 'isc']);
+export const ALLOWED_LICENSES = Object.freeze([
+  'mit',
+  'apache-2.0',
+  'apache-2.0-with-llvm-exception',
+  'bsd-2-clause',
+  'bsd-3-clause',
+  'isc',
+]);
 export const TARGET_PLATFORMS = Object.freeze(['win32', 'linux', 'darwin']);
 export const TARGET_ARCHES = Object.freeze(['x64', 'arm64']);
 
@@ -64,7 +71,7 @@ const RESERVED_DEVICE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 const LOOPBACK_HOSTS = Object.freeze([['127', '0', '0', '1'].join('.'), '[::1]']);
 
 const MANIFEST_KEYS = new Set(['version', 'sidecars']);
-const SIDECAR_KEYS = new Set(['id', 'version', 'license', 'publishedAt', 'source', 'targets']);
+const SIDECAR_KEYS = new Set(['id', 'version', 'licenses', 'publishedAt', 'source', 'targets']);
 const TARGET_KEYS = new Set(['url', 'sha256', 'sizeBytes', 'executable', 'files']);
 const FILE_KEYS = new Set(['path', 'sha256', 'sizeBytes']);
 const INSTALL_OPTION_KEYS = new Set([
@@ -196,6 +203,55 @@ function isV4Internal(a, b) {
   return false;
 }
 
+function expandV6(host) {
+  if (typeof host !== 'string' || !host.includes(':') || !/^[0-9a-f:.]+$/.test(host)) return null;
+  const halves = host.split('::');
+  if (halves.length > 2) return null;
+  const parse = (text) => {
+    const out = [];
+    if (text === '') return out;
+    for (const group of text.split(':')) {
+      if (!/^[0-9a-f]{1,4}$/.test(group)) return null;
+      out.push(parseInt(group, 16));
+    }
+    return out;
+  };
+  const head = parse(halves[0]);
+  if (head === null) return null;
+  if (halves.length === 1) return head.length === 8 ? head : null;
+  const tail = parse(halves[1]);
+  if (tail === null) return null;
+  const fill = 8 - head.length - tail.length;
+  if (fill < 1) return null;
+  return head.concat(new Array(fill).fill(0), tail);
+}
+
+// Embedded-IPv4 and reserved-range check for a literal IPv6 host. The literal forms below reach an
+// IPv4 service through a v6 address, so the dotted and half-hex checks in the isInternalHost helper
+// alone would let a redirect to an internal endpoint through.
+function isEmbeddedInternalV6(host) {
+  const groups = expandV6(host);
+  if (groups === null) return false;
+  const zeroPrefix = (count) => {
+    for (let i = 0; i < count; i += 1) if (groups[i] !== 0) return false;
+    return true;
+  };
+  const embedded = (high, low) => isV4Internal(high >> 8, high & 0xff) || isV4Internal(low >> 8, low & 0xff);
+  if ((groups[0] & 0xffc0) === 0xfe80) return true;
+  if ((groups[0] & 0xfe00) === 0xfc00) return true;
+  if ((groups[0] & 0xff00) === 0xff00) return true;
+  if (zeroPrefix(5)) return embedded(groups[6], groups[7]);
+  if (zeroPrefix(4) && groups[4] === 0xffff && groups[5] === 0) return embedded(groups[6], groups[7]);
+  if (groups[0] === 0x64 && groups[1] === 0xff9b) {
+    if (groups[2] === 0 && groups[3] === 0 && groups[4] === 0 && groups[5] === 0) {
+      return embedded(groups[6], groups[7]);
+    }
+    if (groups[2] === 1) return true;
+  }
+  if (groups[0] === 0x2002) return embedded(groups[1], groups[2]);
+  return false;
+}
+
 function isInternalHost(hostname) {
   if (typeof hostname !== 'string') return true;
   let host = hostname.toLowerCase();
@@ -203,6 +259,7 @@ function isInternalHost(hostname) {
   if (host.endsWith('.')) host = host.slice(0, -1);
   if (host === 'localhost' || host.endsWith('.localhost')) return true;
   if (host === '::1' || host === '::' || host === '0:0:0:0:0:0:0:1') return true;
+  if (isEmbeddedInternalV6(host)) return true;
   const mapped = /^::ffff:(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   const dotted = mapped
     ? mapped.slice(1).join('.')
@@ -316,9 +373,16 @@ function validateSidecar(value) {
   if (!ID.test(own.id)) fail('invalid-manifest', 'id must be a lowercase slug');
   requireText(own.version, 'version', MAX_VERSION_CHARS);
   if (!VERSION.test(own.version)) fail('invalid-manifest', 'version must be a bounded tag');
-  if (typeof own.license !== 'string' || !ALLOWED_LICENSES.includes(own.license)) {
-    fail('invalid-manifest', 'license must be a permissive license in the allowed set');
+  const licenseList = readOwnArray(own.licenses, 'licenses', 4);
+  const seenLicenses = new Set();
+  for (const license of licenseList) {
+    if (typeof license !== 'string' || !ALLOWED_LICENSES.includes(license)) {
+      fail('invalid-manifest', 'licenses must be permissive licenses in the allowed set');
+    }
+    if (seenLicenses.has(license)) fail('invalid-manifest', 'licenses must be unique');
+    seenLicenses.add(license);
   }
+  const licenses = Object.freeze(licenseList.slice());
   if (typeof own.publishedAt !== 'string' || !DATE.test(own.publishedAt)) {
     fail('invalid-manifest', 'publishedAt must be a YYYY-MM-DD date');
   }
@@ -339,7 +403,7 @@ function validateSidecar(value) {
   return Object.freeze({
     id: own.id,
     version: own.version,
-    license: own.license,
+    licenses: licenses,
     publishedAt: own.publishedAt,
     source: own.source,
     targets: Object.freeze(targets),

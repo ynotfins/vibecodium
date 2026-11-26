@@ -121,7 +121,7 @@ function makeSidecar({ url, archive, files, executable = 'llama-server.exe', ove
     sidecars: [{
       id: 'llama-server',
       version: 'b12426',
-      license: 'mit',
+      licenses: ['mit', 'apache-2.0-with-llvm-exception'],
       publishedAt: '2026-11-15',
       source: 'ggml-org/llama.cpp',
       targets: {
@@ -174,7 +174,7 @@ function plainSidecar(overrides = {}) {
   return {
     id: 'llama-server',
     version: 'b12426',
-    license: 'mit',
+    licenses: ['mit', 'apache-2.0-with-llvm-exception'],
     publishedAt: '2026-11-15',
     source: 'ggml-org/llama.cpp',
     targets: { 'win32-x64': plainTarget() },
@@ -212,7 +212,7 @@ test('the shipped manifest pins the llama-server archive and its allowlisted fil
   const sidecar = manifest.sidecars[0];
   assert.equal(sidecar.id, 'llama-server');
   assert.equal(sidecar.version, 'b12426');
-  assert.equal(sidecar.license, 'mit');
+  assert.deepEqual(sidecar.licenses, ['mit', 'apache-2.0-with-llvm-exception']);
   assert.equal(sidecar.publishedAt, '2026-11-15');
   assert.equal(sidecar.source, 'ggml-org/llama.cpp');
   const target = sidecar.targets['win32-x64'];
@@ -309,8 +309,13 @@ test('sidecar fields, licenses, dates and sources are validated', () => {
   rejects(plainManifest(plainSidecar({ id: '..' })), 'relative id');
   rejects(plainManifest(plainSidecar({ version: '' })), 'empty version');
   rejects(plainManifest(plainSidecar({ version: 'b12426 extra' })), 'spaced version');
-  rejects(plainManifest(plainSidecar({ license: 'cc-by-nc-4.0' })), 'non-permissive license');
-  rejects(plainManifest(plainSidecar({ license: 'MPL-2.0' })), 'weak-copyleft license');
+  rejects(plainManifest(plainSidecar({ licenses: ['cc-by-nc-4.0'] })), 'non-permissive license');
+  rejects(plainManifest(plainSidecar({ licenses: ['MPL-2.0'] })), 'weak-copyleft license');
+  rejects(plainManifest(plainSidecar({ licenses: [] })), 'empty licenses');
+  rejects(plainManifest(plainSidecar({ licenses: ['mit', 'mit'] })), 'duplicate licenses');
+  rejects(plainManifest(plainSidecar({ licenses: ['mit', 'mit', 'isc', 'bsd-2-clause', 'bsd-3-clause'] })), 'too many licenses');
+  rejects(plainManifest(plainSidecar({ licenses: ["mit"].map(() => 'MIT') })), 'uppercase license');
+  rejects(plainManifest(plainSidecar({ licenses: ['mit'], license: 'mit' })), 'removed license field');
   rejects(plainManifest(plainSidecar({ publishedAt: '2026-02-30' })), 'impossible date');
   rejects(plainManifest(plainSidecar({ publishedAt: '2026-1-1' })), 'short date');
   rejects(plainManifest(plainSidecar({ source: 'llama.cpp' })), 'source without owner');
@@ -970,6 +975,15 @@ test('a final URL on an internal literal host is refused when the pin was not lo
     'https://localhost./llama.zip',
     'https://[::1]/llama.zip',
     'https://[::ffff:7f00:1]/llama.zip',
+    'https://[::7f00:1]/llama.zip',
+    'https://[::ffff:0:7f00:1]/llama.zip',
+    'https://[64:ff9b::7f00:1]/llama.zip',
+    'https://[64:ff9b:1::a00:1]/llama.zip',
+    'https://[2002:7f00:1::]/llama.zip',
+    'https://[fe80::1]/llama.zip',
+    'https://[febf::1]/llama.zip',
+    'https://[fd00::1]/llama.zip',
+    'https://[ff02::1]/llama.zip',
     'https://' + ['100', '64', '0', '1'].join('.') + '/llama.zip',
     'https://' + ['198', '18', '0', '1'].join('.') + '/llama.zip',
     'https://' + ['240', '0', '0', '1'].join('.') + '/llama.zip',
@@ -1351,4 +1365,59 @@ test('findSidecar and resolveSidecarTarget read their inputs without invoking a 
   });
   assert.equal(findSidecar({ sidecars }, 'llama-server').id, 'llama-server');
   assert.equal(hits, 0);
+});
+
+test('a successful install removes the archive and leaves no temporary file', async (t) => {
+  const entries = runtimeFiles('clean');
+  const archive = makeZip(entries);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const dir = path.join(tempDir(t), 'runtime');
+  const result = await installSidecar(sidecar, {
+    targetDir: dir,
+    fetchImpl: async () => archiveResponse(archive),
+  });
+  assert.equal(result.installed, true);
+  assert.deepEqual(readdirSync(dir).sort(), entries.map((entry) => entry.name).sort());
+  assert.ok(!readdirSync(dir).some((name) => name.endsWith('.zip.part') || name.startsWith('.install-')));
+});
+
+test('a failed rename leaves no temporary file and no unverified file; the skip path reports the partial install', async (t) => {
+  const entries = runtimeFiles('rename');
+  const archive = makeZip(entries);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const dir = path.join(tempDir(t), 'runtime');
+  mkdirSync(path.join(dir, 'llama.dll'), { recursive: true });
+  await expectFailure(installSidecar(sidecar, {
+    targetDir: dir,
+    fetchImpl: async () => archiveResponse(archive),
+  }), 'install-failed');
+  assert.deepEqual(readdirSync(dir).sort(), ['llama-server.exe', 'llama.dll'].sort());
+  assert.ok(lstatSync(path.join(dir, 'llama.dll')).isDirectory());
+  assert.deepEqual(readFileSync(path.join(dir, 'llama-server.exe')), Buffer.from(entries[0].data));
+  const result = await verifySidecarInstall(sidecar, { targetDir: dir });
+  assert.equal(result.verified, false);
+  assert.equal(result.reason, 'unsafe-path');
+});
+
+test('an unsafe archive entry name is not echoed in the error', async (t) => {
+  const entries = runtimeFiles('echo');
+  const archive = makeZip([...entries, { name: '/secret/evil.dll', data: 'x' }]);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: 'https://example.com/secret-path/llama.zip', archive, files });
+  const dir = path.join(tempDir(t), 'runtime');
+  let message = '';
+  await assert.rejects(installSidecar(sidecar, {
+    targetDir: dir,
+    fetchImpl: async () => archiveResponse(archive),
+  }), (error) => {
+    message = error && error.message ? error.message : '';
+    assert.equal(error.code, 'unsafe-entry');
+    return true;
+  });
+  assert.ok(!message.includes('secret'));
+  assert.ok(!message.includes('evil.dll'));
+  assert.ok(!message.includes('example.com'));
+  assertNoInstalledFiles(dir);
 });

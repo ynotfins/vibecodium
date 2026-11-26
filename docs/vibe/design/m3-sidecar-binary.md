@@ -22,11 +22,11 @@ Out of scope: copying the installed files or `vibe/models/catalog.json` into a p
 signing the manifest, installing the Microsoft VC++ runtime, a live start, the CUDA/ROCm/SYCL/OpenVINO
 targets (their archives exceed the 64 MiB cap, while the Vulkan x64 and OpenCL arm64 archives fit, so
 a GPU backend is a scope decision rather than a size limit), resuming an interrupted archive download,
-a UI and any dependency. Node built-ins only.
+a UI and no third-party dependency: Node built-ins plus the repo-local supervisor validator only.
 
 ## The pin
 
-`vibe/sidecars.json` pins one sidecar, `llama-server`, to the llama.cpp nightly `b12426`, MIT,
+`vibe/sidecars.json` pins one sidecar, `llama-server`, to the llama.cpp nightly `b12426` under its MIT license plus the Apache-2.0 WITH LLVM-exception license of the bundled `libomp.dll` and `LICENSE-LLVM-OpenMP`,
 published 2026-11-15 by `ggml-org/llama.cpp`. Its `win32-x64` CPU archive is
 `llama-b12426-bin-win-cpu-x64.zip`, 25,209,516 bytes, SHA-256
 `61145645c26cf8d7b3ed76435812192ae42f51c4c51e895936adc61dc1eb0410`. The archive and digest were read
@@ -35,7 +35,7 @@ archive.
 
 The stable `v1.0.0` and `v1.1.0` tags carry no binary assets (each ships only a `nightly-tag.txt`
 pointer); only the nightly builds publish Windows archives. The seven-day rule therefore selects an
-older nightly: `b12426` has been public since 2026-11-15T21:08Z (10 days 19 hours, 11 calendar days)
+older nightly: `b12426` has been public since 2026-11-15T21:08Z (11 calendar days)
 on 2026-11-26, while the current nightly was published the same day and cannot be adopted yet. The
 next pin candidate is `b12774`, the nightly `v1.1.0` names, adoptable on 2026-12-03.
 The pin is a supply-chain record, not a claim that nightlies are stable; `TECH_RADAR.md` carries the
@@ -56,7 +56,7 @@ needs the Microsoft Visual C++ 2015-2022 x64 runtime (`MSVCP140.dll`, `VCRUNTIME
   "sidecars": [{
     "id": "llama-server",
     "version": "b12426",
-    "license": "mit",
+    "licenses": ["mit", "apache-2.0-with-llvm-exception"],
     "publishedAt": "2026-11-15",
     "source": "ggml-org/llama.cpp",
     "targets": {
@@ -77,7 +77,7 @@ needs the Microsoft Visual C++ 2015-2022 x64 runtime (`MSVCP140.dll`, `VCRUNTIME
 | `sidecars` | 1-16 entries with unique ids |
 | `id` | lowercase slug, at most 64 characters |
 | `version` | bounded tag, at most 64 characters |
-| `license` | one of `mit`, `apache-2.0`, `bsd-2-clause`, `bsd-3-clause`, `isc` |
+| `licenses` | 1-4 unique values from `mit`, `apache-2.0`, `apache-2.0-with-llvm-exception`, `bsd-2-clause`, `bsd-3-clause`, `isc` |
 | `publishedAt` | real `YYYY-MM-DD` calendar date |
 | `source` | `owner/name`, at most 96 characters |
 | `targets` | 1-6 keys shaped `<platform>-<arch>` for win32/linux/darwin and x64/arm64 |
@@ -170,7 +170,7 @@ check, so a redirect target that resolves internally is a documented residual. E
 exactly one pinned relative path or ignored, and every write is built from that pinned path, so a
 zip-slip, absolute, drive-letter or backslash entry cannot leave the target directory. All files are
 verified before the first write, so a malicious archive leaves no partial install. The installer never runs the
-executable, the archive is deleted after the install, and the returned path is re-checked by the supervisor's own validator.
+executable, the archive is deleted after the install, and after a fresh install the returned path is re-checked by the supervisor's own validator. A renamed install is per file, not transactional: a rename failure leaves the earlier, fully verified files in place, and the skip path trusts the offline inspection without calling the validator again.
 
 Residual risks: the pin names a nightly build, because the stable llama.cpp tags publish no binary
 assets; the digest authenticates that exact archive but there is no code signature yet. The Visual C++

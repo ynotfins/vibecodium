@@ -4,7 +4,7 @@
     {
       "id": "llama-server",
       "version": "b12426",
-      "license": "mit",
+      "licenses": ["mit", "apache-2.0-with-llvm-exception"],
       "publishedAt": "2026-11-15",
       "source": "ggml-org/llama.cpp",
       "targets": {
