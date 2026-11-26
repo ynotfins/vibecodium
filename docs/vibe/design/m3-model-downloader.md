@@ -174,6 +174,6 @@ The full acceptance uses `node vibe/tools/verify.mjs --strict` and
 
 ## Next steps
 
-The hardware probe maps GPU and RAM to the model ladder, the wizard drives `downloadModel` with a
+The hardware probe maps GPU and RAM to the runtime start plan, the wizard drives `downloadModel` with a
 progress bar, and `vibe/sidecars.json` pins and signs the `llama-server` binary itself. Bundling a
 binary, pinning it by digest and detecting Ollama remain M3 work.

@@ -15,7 +15,7 @@ This is M3's first slice: the local runtime boundary. It starts, health-checks a
 streaming, tool calls and embeddings through it. It does not bundle or download llama.cpp or any
 weights, probe the hardware, render the first-run wizard, proxy chat itself, restart a failed
 server or manage descendants. The model downloader is a sibling slice that supplies the weights; the
-hardware probe and the wizard build on this module in later M3 slices, and the binary pinning belongs
+wizard builds on this module in a later M3 slice, the hardware probe is a sibling module, and the binary pinning belongs
 with `vibe/sidecars.json`.
 
 ## Contract
