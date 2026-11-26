@@ -35,7 +35,7 @@ archive.
 
 The stable `v1.0.0` and `v1.1.0` tags carry no binary assets (each ships only a `nightly-tag.txt`
 pointer); only the nightly builds publish Windows archives. The seven-day rule therefore selects an
-older nightly: `b12426` has been public since 2026-11-15T21:08Z (11 calendar days)
+older nightly: `b12426` was published 2026-11-15T21:05Z (11 calendar days)
 on 2026-11-26, while the current nightly was published the same day and cannot be adopted yet. The
 next pin candidate is `b12774`, the nightly `v1.1.0` names, adoptable on 2026-12-03.
 The pin is a supply-chain record, not a claim that nightlies are stable; `TECH_RADAR.md` carries the
@@ -43,7 +43,9 @@ review date and the upgrade rule.
 
 The allowlist is the CPU runtime plus its license text: `llama-server.exe`,
 `llama-server-impl.dll`, `llama-common.dll`, `llama.dll`, `mtmd.dll`, `ggml.dll`, `ggml-base.dll`,
-the fourteen `ggml-cpu-*.dll` variants, `libomp.dll` and `LICENSE-LLVM-OpenMP`. The archive's other
+the fourteen `ggml-cpu-*.dll` variants, `libomp.dll` and `LICENSE-LLVM-OpenMP`. The archive carries
+that OpenMP notice only and no llama.cpp `LICENSE` file, so the MIT notice must be taken from the
+llama.cpp source tree when the notices file is written. The archive's other
 executables, benchmark tools and RPC helper are not installed. The CPU package still
 needs the Microsoft Visual C++ 2015-2022 x64 runtime (`MSVCP140.dll`, `VCRUNTIME140.dll`,
 `VCRUNTIME140_1.dll`); it is not in `vibe/sidecars.json`, is not pinned yet, and the installer must
@@ -114,7 +116,8 @@ GitHub's release CDN signs it); anything else fails as `insecure-redirect`. Only
 size, the stream is counted against that size, and the finished 64 MiB-bounded file must hash to the
 pin (`size-mismatch`, `checksum-mismatch`). An idle gap, the total deadline and a caller abort fail as
 `stalled`, `timeout` and `aborted`; the partial file is removed rather than left for a resume that
-this version does not implement. One install per target directory may run at a time (`busy`).
+this version does not implement. One install per target directory may run at a time within this
+process (`busy`); a concurrent install from another process is not serialized.
 
 ## Archive extraction
 
@@ -186,7 +189,18 @@ installer at anything; signing and an authenticated update path belong to the pa
 recursive `mkdir` runs before the realpath check, so a pre-planted junction could create empty
 directories outside the target before the write is refused. The part file is read by path, so a local
 writer could swap it before the read; the same buffer is hashed and parsed, so nothing unverified is
-installed, but the read is not bound to the file that was hashed.
+installed, but the read is not bound to the file that was hashed. The `busy` guard is process-local, so
+two application instances are not serialized and one can unlink the other's part file (every byte is
+re-verified, so integrity holds). `publishedAt` is format-checked only: the seven-day adoption rule is a
+process control (radar review), not enforced at load. `source` is recorded but not tied to the URL host.
+`targetDir` is a trusted caller surface (any absolute local directory, including a drive root) and
+`verifySidecarInstall` resolves it through the same helper, which creates the directory. On POSIX the
+executable `chmod` runs after the re-hash and follows a symlink; the Windows target is unaffected.
+
+The gates before enabling the installer by default or bundling the binary: an authenticated manifest
+(or a `source`-to-URL binding plus an enforced seven-day rule) because the digest protects only the
+pinned URL; an installer-owned `targetDir` under the application data root, never a webview-supplied
+path; and, for multi-process or POSIX use, a cross-process lock and a descriptor-bound part-file read.
 
 ## Verification
 
