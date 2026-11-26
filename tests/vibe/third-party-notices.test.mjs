@@ -422,6 +422,14 @@ test('each used license is rendered exactly once and none is dropped', () => {
   }
 });
 
+test('the review date is checked against the real current date', () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  assert.equal(validateNoticesLedger(ledgerJson({ reviewed: today })).reviewed, today);
+  expectCode(() => validateNoticesLedger(ledgerJson({ reviewed: tomorrow })), 'invalid-ledger');
+  expectCode(() => validateNoticesLedger(ledgerJson({ reviewed: '2999-12-31' })), 'invalid-ledger');
+});
+
 test('the tool fails when a shipped pin license has no ledger row', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'vibe-notices-coverage-'));
   try {
