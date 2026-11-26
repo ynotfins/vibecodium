@@ -105,8 +105,8 @@ caps while rendering and mark the tool output `(truncated)` (an empty result tha
 `no matches (truncated)`); a `finish` applies its file and total budgets while it selects lines and
 fails closed as `result-too-large` instead of building an oversized result first. Grep matches the literal
 string case-insensitively by default (a plain a-or-b alternation matches either word), and globs are matched with a linear segment walk, never a
-regular expression, so a model-supplied pattern or glob cannot backtrack catastrophically. Every tool result and the repo-structure listing replace characters the B1 client
-refuses (format, bidi, C1 and line/paragraph separators) with U+FFFD, so one such file cannot abort the
+regular expression, so a model-supplied pattern or glob cannot backtrack catastrophically. Every tool result, the repo-structure listing and the model's reasoning text replace characters the B1 client
+refuses (format, bidi, C1 and line/paragraph separators) with U+FFFD before the next request, so one such file cannot abort the
 search.
 
 ## Input and error boundary
@@ -142,5 +142,6 @@ without ending the loop; a file whose own name is an excluded folder name; repea
 the finish budget; a provider answer with a throwing accessor; a grep that stops after 8 MiB of decoded
 text and marks the output truncated; a grep that stops before any match and reports
 `no matches (truncated)`; a read that renders within its 400-line cap and marks the output truncated; a
-read that returns the head of a single over-long line; and accessor non-invocation for options and
+read that returns the head of a single over-long line; a glob that respects the 32 KiB output budget; a
+bidi character in the model's reasoning text replaced before it is echoed; and accessor non-invocation for options and
 input.
