@@ -864,6 +864,10 @@ test('credential-shaped files are never searched, read or finished', async (t) =
 });
 
 test('a case-variant of an excluded name is excluded on a case-insensitive filesystem', async (t) => {
+  if (process.platform !== 'win32' && process.platform !== 'darwin') {
+    t.skip('case-insensitive name aliasing applies only to win32 and the default macOS filesystem');
+    return;
+  }
   const root = await workspace(t);
   await mkdir(path.join(root, '.GIT'), { recursive: true });
   await writeFile(path.join(root, '.GIT', 'config'), 'needle REMOTETOKEN\n', 'utf8');
