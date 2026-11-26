@@ -754,3 +754,91 @@ test('the panel reports the daemon start status and each selection refusal', asy
     assert.deepEqual(controller.view().status, { message: null, error: message });
   }
 });
+
+function runtimeState(overrides = {}) {
+  return { configured: true, installed: false, version: null, progress: null, ...overrides };
+}
+
+test('a configured sidecar keeps the start button usable and explains the install', () => {
+  const ready = baseView({
+    installed: true,
+    phase: 'ready',
+    runtime: runtimeState(),
+    start: { available: false, reason: 'runtime-not-bundled' },
+  });
+  const html = renderFirstRunHtml(ready);
+  assert.match(html, /data-action="start">Start local runtime/);
+  assert.match(html, /will be downloaded and verified when you start/);
+
+  const unconfigured = baseView({
+    installed: true,
+    phase: 'ready',
+    runtime: runtimeState({ configured: false }),
+    start: { available: false, reason: 'runtime-not-bundled' },
+  });
+  assert.match(renderFirstRunHtml(unconfigured), /data-action="start" disabled>Start local runtime/);
+  assert.match(renderFirstRunHtml(unconfigured), /binary is not bundled yet/);
+});
+
+test('the panel renders the bounded runtime install progress and ignores a hostile accessor', () => {
+  const view = baseView({
+    installed: true,
+    phase: 'ready',
+    runtime: runtimeState({ progress: { received: 1024, total: 2048, fraction: 0.5 } }),
+  });
+  const html = renderFirstRunHtml(view);
+  assert.match(html, /Downloading the local runtime/);
+  assert.match(html, /max="2048"/);
+  assert.match(html, /value="1024"/);
+
+  let invoked = false;
+  const hostile = { configured: true };
+  Object.defineProperty(hostile, 'progress', {
+    enumerable: true,
+    get() {
+      invoked = true;
+      throw new Error('getter');
+    },
+  });
+  const hostileView = baseView({ installed: true, phase: 'ready', runtime: hostile });
+  const hostileHtml = renderFirstRunHtml(hostileView);
+  assert.equal(invoked, false);
+  assert.doesNotMatch(hostileHtml, /Downloading the local runtime/);
+});
+
+test('the panel calls the wizard start action and reports its outcome', async (t) => {
+  const ready = baseView({
+    installed: true,
+    phase: 'ready',
+    runtime: runtimeState(),
+    start: { available: false, reason: 'runtime-not-bundled' },
+  });
+  const { controller, wizard } = fixture(t, ready);
+  let calls = 0;
+  wizard.start = async () => {
+    calls += 1;
+    return {
+      available: true,
+      kind: 'llama-server',
+      modelPath: 'C:/models/chat.gguf',
+      contextSize: 8192,
+      threads: 6,
+      gpuLayers: 0,
+    };
+  };
+  await controller.open();
+  const started = await controller.handleMessage({ type: 'start' });
+  assert.equal(started.kind, 'start');
+  assert.equal(started.ok, true);
+  assert.equal(calls, 1);
+  assert.match(controller.html(), /ready to start/);
+
+  wizard.start = async () => {
+    calls += 1;
+    return { available: false, reason: 'runtime-install-failed', code: 'checksum-mismatch' };
+  };
+  const failed = await controller.handleMessage({ type: 'start' });
+  assert.equal(failed.ok, false);
+  assert.equal(calls, 2);
+  assert.match(controller.html(), /could not be installed/);
+});

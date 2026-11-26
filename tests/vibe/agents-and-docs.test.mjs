@@ -84,6 +84,14 @@ test('missing header, unknown owner and broken link are errors', () => {
   assert.ok(errors.some((e) => /README.md does not link to LINK.md/.test(e)));
 });
 
+test('an unmerged conflict marker is an error', () => {
+  minimalDocs();
+  write('docs/vibe/STATUS.md',
+    `# Status\n${HDR('living')}\nGoal state: active\n<<<<<<< HEAD\nGoal state: blocked\n=======\nGoal state: active\n>>>>>>> origin/vibe/main\n`);
+  const { errors } = checkDocs(root);
+  assert.ok(errors.some((e) => /STATUS.md: contains an unmerged conflict marker/.test(e)));
+});
+
 test('ascii separator passes docs header', () => {
   minimalDocs();
   write('docs/vibe/ASCII.md', `# x\n${HDR('living').replace(/·/g, '-')}\n`);

@@ -15,6 +15,10 @@ import { isMain, parseArgs, readText, report, rootFrom, today, toPosix, walk } f
 
 const HEADER = /^> Doc class: (locked|living|generated|archive) [-·] Owner: ([a-z][a-z-]*) [-·] Last reviewed: (\d{4}-\d{2}-\d{2})\s*$/m;
 
+// A merge that left conflict markers behind must never pass the docs check: the text is not a
+// document any more, and every reader (including a later agent) would inherit both sides.
+const CONFLICT_MARKER = /^(?:<<<<<<< |>>>>>>> )/m;
+
 function stripCode(text) {
   return text.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
 }
@@ -34,6 +38,7 @@ export function checkDocs(root, { strict = false } = {}) {
   for (const file of docs) {
     const rel = toPosix(path.relative(root, file));
     const text = readText(file);
+    if (CONFLICT_MARKER.test(text)) errors.push(`${rel}: contains an unmerged conflict marker`);
     const head = text.split('\n').slice(0, 6).join('\n');
     const m = HEADER.exec(head);
     if (!m) { errors.push(`${rel}: missing header "> Doc class: <class> [-·] Owner: <agent> [-·] Last reviewed: <YYYY-MM-DD>"`); continue; }

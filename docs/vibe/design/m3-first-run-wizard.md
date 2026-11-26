@@ -7,8 +7,9 @@
 > [first-run.cjs](../../../src/stable/extensions/vibecodium-ai/src/first-run.cjs), and the acceptance
 > tests in [first-run.test.mjs](../../../tests/vibe/first-run.test.mjs),
 > [first-run-panel.test.mjs](../../../tests/vibe/first-run-panel.test.mjs) and
-> [first-run-ollama.test.mjs](../../../tests/vibe/first-run-ollama.test.mjs) and
-> [first-run-restart.test.mjs](../../../tests/vibe/first-run-restart.test.mjs). It composes the delivered
+> [first-run-ollama.test.mjs](../../../tests/vibe/first-run-ollama.test.mjs),
+> [first-run-restart.test.mjs](../../../tests/vibe/first-run-restart.test.mjs) and
+> [first-run-sidecar.test.mjs](../../../tests/vibe/first-run-sidecar.test.mjs). It composes the delivered
 > probe ([m3-hardware-probe.md](m3-hardware-probe.md)), catalog and downloader
 > ([m3-model-downloader.md](m3-model-downloader.md)), supervisor contract
 > ([m3-llama-server.md](m3-llama-server.md)) and pinned sidecar installer
@@ -21,15 +22,16 @@ detection and explicit daemon selection into it and of the supervisor's restart 
 hand-off: one flow that tells a new install what this machine can run, which pinned weights are
 already present, downloads only the missing ones, and hands the caller the exact local B1 start
 plan and, for the pinned path, the exact `createLlamaServer` options. It ships no `llama-server`
-process and no binary: the supervisor still owns the process boundary, the pin and verified
-installer are the separate [m3-sidecar-binary.md](m3-sidecar-binary.md) slice, and the pinned
-start plan reports `runtime-not-bundled` until the installed executable is passed as `runtimePath`
-(wiring the installer into the start action remains later M3 work). Node built-ins only.
+process: the supervisor still owns the process boundary, and the pin and verified installer are the
+separate [m3-sidecar-binary.md](m3-sidecar-binary.md) slice. The start action now installs that
+pinned sidecar when no host-supplied `runtimePath` exists, adopting an already installed runtime
+offline and validating the returned executable with the supervisor's own path check before the plan
+is exposed. Node built-ins only.
 
 Out of scope: spawning or supervising `llama-server`, bundling or signing the binary (the pin and
 download/install module are delivered separately in [m3-sidecar-binary.md](m3-sidecar-binary.md)),
 copying the catalog into a packaged application, changing the supervisor's restart behaviour,
-starting/installing/updating [PERSON_NAME], pulling [PERSON_NAME] models, switching the active B1 provider or writing
+starting/installing/updating Ollama, pulling Ollama models, switching the active B1 provider or writing
 provider config, provider calls, model-ladder changes and NVML/vendor GPU libraries. Ollama detection
 and the explicit selection of a discovered daemon as the local runtime are in scope; the wizard never
 starts, installs or updates the daemon and never writes provider configuration.
@@ -49,8 +51,8 @@ entry fails closed as `no-chat-model` or `no-embedding-model`; a malformed catal
 
 ## The controller
 
-`createFirstRunWizard({ catalog, destinationDir, probe?, downloadModel?, verifyModel?, runtimePath?, onChange?, discoverOllama?, restart? })`
-returns a frozen controller with `refresh()`, `install()`, `startPlan()`, `runtimeOptions()`,
+`createFirstRunWizard({ catalog, destinationDir, probe?, downloadModel?, verifyModel?, runtimePath?, onChange?, discoverOllama?, restart?, sidecar?, installSidecar?, verifySidecar? })`
+returns a frozen controller with `refresh()`, `install()`, `start()`, `startPlan()`, `runtimeOptions()`,
 `checkOllama()`, `useOllama()`, `usePinned()`, `view()` and `dispose()`.
 
 | Option | Meaning |
@@ -60,15 +62,20 @@ returns a frozen controller with `refresh()`, `install()`, `startPlan()`, `runti
 | `probe` | Optional probe function, default `probeHardware`. Tests inject one; the product leaves it unset. |
 | `downloadModel` | Optional downloader, default `downloadModel`. The panel leaves it unset; tests inject a local fake so no network is used. |
 | `verifyModel` | Optional verifier, default `verifyInstalledModel`. It hashes an installed file and never touches the network. |
-| `runtimePath` | Optional packaged `llama-server` executable. It is validated with the supervisor's `validateLlamaExecutablePath` at construction; without it the pinned `startPlan()` reports `runtime-not-bundled` (a selected daemon still yields the daemon plan). |
+| `runtimePath` | Optional packaged `llama-server` executable. It is validated with the supervisor's `validateLlamaExecutablePath` at construction; without it the pinned `startPlan()` reports `runtime-not-bundled` until `start()` installs a configured sidecar (a selected daemon still yields the daemon plan). |
 | `onChange` | Optional display callback, invoked with the current view after a phase or progress change. A throwing callback is ignored. |
 | `discoverOllama` | Optional discovery effect, default the delivered `discoverOllama`. Tests inject a local fake so no socket is opened; the product leaves it unset. |
 | `restart` | Optional restart policy handed to the supervisor. It is validated with the supervisor's exported `validateRestart` at construction; omitted uses the frozen conservative default `{ maxRestarts: 3, baseDelayMs: 1000, maxDelayMs: 30000, stableMs: 60000 }`. |
+| `sidecar` | Optional pinned-runtime settings, owned by the host and never by the webview: `{ manifest, id?, targetDir?, platformKey? }`. The manifest is validated with the installer's `validateSidecarManifest`, `id` defaults to the sole entry, `targetDir` defaults to `<destinationDir>/runtime`, and the platform must have a pinned target. A malformed bag fails closed as `invalid-sidecar`. |
+| `installSidecar` | Optional installer effect, default the delivered `installSidecar`. It is called only by `start()`; tests inject a local fake so no network is used. |
+| `verifySidecar` | Optional offline verifier, default the delivered `verifySidecarInstall`. `refresh()` uses it to adopt a runtime that is already on disk; it never touches the network. |
 
-Options, the probe result and the install options are read through own data descriptors. A Proxy, an
-accessor, an unknown or reserved key, a relative, UNC or traversal destination, a missing catalog, an
-invalid executable path and an invalid restart policy fail closed as `invalid-options` or
-`invalid-catalog` without invoking a getter and before the probe runs.
+Options, the probe result, the install options, the sidecar bag and the installer result are read
+through own data descriptors. A Proxy, an accessor, an unknown or reserved key, a relative, UNC or
+traversal destination, a missing catalog, an invalid executable path, an invalid restart policy, an
+invalid sidecar manifest, an unknown sidecar id or an unsupported platform fail closed as
+`invalid-options`, `invalid-catalog` or `invalid-sidecar` without invoking a getter and before the
+probe runs.
 
 ### Phases
 
@@ -103,6 +110,24 @@ the remaining models; a call on a ready machine returns `{ ok: true, installed: 
 While the daemon is the selected runtime, `install()` returns
 `{ ok: true, installed: 0, reason: 'ollama-selected' }` and performs no download.
 
+### Start action
+
+`start({ signal? })` is the install-then-start preparation and is single-flight. It returns the same
+plan shape as `startPlan()`: a frozen pinned plan, the daemon plan, or `{ available: false, reason }`
+with `not-ready`, `insufficient`, `runtime-not-bundled`, `busy` or `disposed`. It never spawns a
+process.
+
+With a validated `sidecar` and no host-supplied `runtimePath`, a ready machine calls `installSidecar`
+once, forwards `{ received, total, fraction }` progress clamped to the pinned archive size, and
+validates the returned `executablePath` with the supervisor's `validateLlamaExecutablePath` before
+publishing it. A missing `sidecar` keeps `runtime-not-bundled`; an installer failure, abort, unverified
+result or hostile (accessor, Proxy, non-string) result returns
+`{ available: false, reason: 'runtime-install-failed', code }` with a bounded code and leaves the plan
+unchanged, so a retry can run. A second start reuses the validated executable and does not call the
+installer again. `refresh()` adopts an existing runtime through the injected offline `verifySidecar`
+without a download; a failed or hostile check is advisory. The default `targetDir` is
+`<destinationDir>/runtime`; the host, not the webview, owns it.
+
 ### Start plan and runtime options
 
 `startPlan()` returns frozen data only when the phase is `ready`. The two shapes are:
@@ -116,8 +141,10 @@ The daemon shape is returned while the discovered daemon is the selected runtime
 still carries validated `providerOptions`; its `baseUrl` and `model` are exactly the overrides the
 B1 `ollama` preset takes, and `embeddingModel` is the discovered optional embedding model. Otherwise
 the pinned shape is returned when a validated `runtimePath` exists; without it the result is
-`{ available: false, reason: 'runtime-not-bundled' }`. Before a successful refresh, or when the phase
-is not `ready`, it is `{ available: false, reason: 'not-ready' }`. The caller passes a pinned plan to
+`{ available: false, reason: 'runtime-not-bundled' }` until `start()` installs the configured sidecar.
+`view().runtime` reports `{ configured, installed, version, progress }` so the panel can offer the
+start action before the runtime exists. Before a successful refresh, or when the phase is not
+`ready`, `startPlan()` is `{ available: false, reason: 'not-ready' }`. The caller passes a pinned plan to
 the supervisor, which still validates the executable, the model path and every flag. `restart` is the
 effective policy (`DEFAULT_FIRST_RUN_RESTART_POLICY` or the validated caller policy), the same frozen
 object the supervisor will receive. The wizard never spawns the process.
@@ -162,11 +189,15 @@ is `'pinned'` until a selection succeeds.
 `createFirstRunController({ vscode, extensionUri, wizardProvider })` registers
 `vibecodium.firstRun.open` and `vibecodium.firstRun.setWizard`. The webview renders the phase, verdict,
 acceleration, the four steps (hardware check, pinned models, model download, local runtime), the model
-rows and sizes, the notice codes, a progress element during a download, an Ollama section, and five or
-six buttons: **Check again**, **Download models**, **Start local runtime**, **Check for Ollama**,
-**Use Ollama** and, while the daemon is selected, **Use pinned models**. The buttons post `refresh`,
-`install`, `start`, `ollama`, `use-ollama` and `use-pinned`; `open()` performs one automatic Ollama
-check after the first refresh. **Use Ollama** is enabled only when the summary is available and
+rows and sizes, the notice codes, a progress element during a download, a pinned-runtime progress
+line while the start action installs it, an Ollama section, and five or six buttons: **Check again**,
+**Download models**, **Start local runtime**, **Check for Ollama**, **Use Ollama** and, while the
+daemon is selected, **Use pinned models**. The buttons post `refresh`, `install`, `start`, `ollama`,
+`use-ollama` and `use-pinned`; `open()` performs one automatic Ollama check after the first refresh.
+**Start local runtime** is enabled when the pinned plan is available, and also when a sidecar is
+configured and the phase is ready although the plan still says `runtime-not-bundled`; the section
+then says the runtime will be downloaded and verified on start and the button calls `start()`
+(falling back to `startPlan()` for a wizard that does not expose it). **Use Ollama** is enabled only when the summary is available and
 carries `providerOptions`. The Ollama section shows the not-checked, available (base URL, chat and
 embedding model, and whether the daemon is in use) and unavailable (bounded reason) states with every
 value escaped. When the pinned start plan is available, the local-runtime section also shows the
@@ -185,16 +216,21 @@ error is reported with a fixed message.
 
 The panel is unit-tested against the same fake `vscode` API as the provider setup panel. A real
 extension-host smoke of this panel and a rebuilt-app screenshot remain M6/M12 integration work; the
-built `Vibecodium.exe` cannot start under this host ACL, and a pinned start is blocked until the
-installed binary is passed as `runtimePath` anyway.
+built `Vibecodium.exe` cannot start under this host ACL. The start action can now install the pinned
+runtime, but a real download and start are still a manual smoke because the tests inject the
+installer.
 
 ## Security boundary
 
 The controller owns no child process and reads no model file, and it performs no I/O of its own. The
-one network effect this slice adds is the injected `discoverOllama`, whose product default is the
-reviewed loopback probe: one credential-free `GET` to
-`http://127.0.0.1:<port>/api/tags`, gated by the M1 endpoint policy before the request and bounded
-by its own deadline and body cap. The probe, the verifier and the downloader are injected, and the
+network effects this slice adds are the injected `discoverOllama`, whose product default is the
+reviewed loopback probe (one credential-free `GET` to `http://127.0.0.1:<port>/api/tags`, gated by
+the M1 endpoint policy before the request and bounded by its own deadline and body cap), and the
+injected `installSidecar`, whose product default is the reviewed pinned installer (a credential-free
+bounded transfer that verifies the archive and every extracted file before writing). The wizard
+validates the manifest, the sole id, the host-owned absolute `targetDir` and the platform target at
+construction, and validates the returned executable path with the supervisor's own check before the
+plan uses it. The probe, both sidecar effects, the verifier and the downloader are injected, and the
 product uses the reviewed modules. The catalog is validated before any entry is projected; the
 recommendation validates the hardware and model descriptors again; the downloader validates the URL,
 the destination and the bytes; `toOllamaProviderOptions` re-validates the whole daemon answer before a
@@ -211,13 +247,17 @@ configuration; a daemon start plan exposes only the validated loopback base URL,
 optional embedding model. The panel escapes every dynamic value, caps each message `type` at 64 KiB
 of UTF-8, and uses the same nonce in `style-src`, `script-src`, the `<style>` tag and the `<script>` tag.
 
-Residual risks: the wizard trusts its injected `probe`, `downloadModel`, `verifyModel`, `discoverOllama`
-and `runtimePath` exactly as the supervisor trusts a caller-supplied binary; the product wiring leaves
-them at their reviewed defaults. Any loopback service that answers `/api/tags` with a valid shape is
-reported as [PERSON_NAME], though the only effect is a displayed base URL and the overrides offered to that
-same endpoint, with no secret and no write. The start action and `runtimeOptions()` only assemble data,
-so a bug there cannot start a process with unexpected flags or an unbounded restart loop, but the
-eventual caller must still pass the options through the supervisor rather than building a child itself.
+Residual risks: the wizard trusts its injected `probe`, `downloadModel`, `verifyModel`, `discoverOllama`,
+`installSidecar`, `verifySidecar` and `runtimePath` exactly as the supervisor trusts a caller-supplied
+binary; the product wiring leaves them at their reviewed defaults. The sidecar `targetDir` is
+host-owned and must be an absolute local path the application data root controls, never a webview
+value; a caller that passes a writable, attacker-controlled directory can still be redirected by a
+filesystem junction the installer already rejects. Any loopback service that answers `/api/tags` with a
+valid shape is reported as Ollama, though the only effect is a displayed base URL and the overrides
+offered to that same endpoint, with no secret and no write. The start action installs the pinned
+runtime but still only assembles data, so a bug there cannot start a process with unexpected flags or
+an unbounded restart loop; the eventual caller must still pass the options through the supervisor
+rather than building a child itself.
 
 ## Verification
 
@@ -244,6 +284,18 @@ extra key, a non-integer, or a cap below the base delay), and proves an accessor
 `restart` value is never invoked. A bounds-alignment test imports the supervisor's `MIN_`/`MAX_`
 restart constants so a change there fails the panel test instead of silently drifting.
 
+`node --test tests/vibe/first-run-sidecar.test.mjs` covers the start action: `runtime-not-bundled`
+without a sidecar, one install then a cached plan, the default `<destinationDir>/runtime` target, a
+bounded failure with a retry, an unverified/relative/missing/Proxy installer result, an
+accessor-backed result that is never invoked, the not-ready and insufficient refusals, adoption of an
+already installed runtime through the offline verifier, a throwing or hostile verifier that never
+breaks refresh, clamped progress, busy while a model download runs, disposal, the daemon plan with no
+install, and construction validation (Proxy, accessor, unknown key, malformed manifest, unknown id,
+unsupported platform, relative or traversal target directory, non-function effects) with no getter
+invoked. The panel tests add the enabled **Start local runtime** button for a configured sidecar, the
+explanatory text, the bounded runtime progress line, an accessor-backed runtime that is never
+invoked, and the `start()` call with its success and bounded failure statuses.
+
 `node --test tests/vibe/first-run.test.mjs tests/vibe/first-run-panel.test.mjs` covers the projection,
 both required roles, the ready, needs-download, insufficient and failed phases, merged notices, the
 download order and progress, idempotence, single-flight, abort, retry after a failure, safe error
@@ -258,14 +310,16 @@ the automatic check on open, the bounded `ollama` message and the rejection of a
 options, the daemon start plan rendering, the two control messages, the precise `ollama-selected`
 install status and the unknown-message answer when a wizard lacks the optional methods. `node --test src/stable/extensions/vibecodium-ai/src/extension-contract.test.cjs`
 covers the two new commands. The full acceptance uses `node vibe/tools/verify.mjs --strict` and
-`node vibe/tools/docs-check.mjs --strict`.
+`node vibe/tools/docs-check.mjs --strict`; the docs check also rejects an unmerged conflict marker in
+any `docs/vibe` Markdown file, because the #78 merge had left one in `ROADMAP.md` and `CHANGELOG.md`
+without failing a check.
 
 ## Next steps
 
-Bundle the pinned `llama-server` binary (the pin and verified installer are delivered in
-[m3-sidecar-binary.md](m3-sidecar-binary.md)), copy `vibe/models/catalog.json` into the packaged
-application, wire `installSidecar` into the start action, and start the embedding server from a
-second plan (with `--embedding --pooling last -ub 8192` for the embedding weights). Offering the
-same discovered daemon in the B5 provider setup panel is M2
-work. A real extension-host smoke of the panel and a rebuilt-app screenshot remain M6/M12 integration
-work.
+Copy the installed files and `vibe/models/catalog.json` into the packaged application (the pin,
+verified installer and start-action wiring are delivered in
+[m3-sidecar-binary.md](m3-sidecar-binary.md)), add the third-party notices and the Microsoft VC++
+2015-2022 x64 runtime, run one live install/start smoke on a clean Windows machine, and start the
+embedding server from a second plan (with `--embedding --pooling last -ub 8192` for the embedding
+weights). Offering the same discovered daemon in the B5 provider setup panel is M2 work. A real
+extension-host smoke of the panel and a rebuilt-app screenshot remain M6/M12 integration work.
