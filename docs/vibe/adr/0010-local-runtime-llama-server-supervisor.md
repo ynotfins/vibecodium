@@ -1,6 +1,6 @@
 # ADR-0010: Local models run under a caller-supplied llama-server supervisor
 
-> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-25
+> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-25
 
 - Status: accepted
 - Date: 2026-11-25
