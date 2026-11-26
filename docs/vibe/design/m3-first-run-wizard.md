@@ -198,6 +198,6 @@ covers the two new commands. The full acceptance uses `node vibe/tools/verify.mj
 
 Pin and bundle the `llama-server` binary, copy `vibe/models/catalog.json` into the packaged
 application, and pass the start plan to the supervisor (with `--embedding --pooling last -ub 8192` for
-the embedding weights). Then add restart/back-off. Activating the discovered Ollama daemon from the B5
+the embedding weights). Activating the discovered Ollama daemon from the B5
 provider setup panel is M2 work. A real extension-host smoke of the panel and a rebuilt-app screenshot
 remain M6/M12 integration work.

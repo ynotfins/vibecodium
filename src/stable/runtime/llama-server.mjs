@@ -6,6 +6,10 @@
 // the port and the runtime limits are bounded, and the child environment is a small allowlist
 // instead of the full process environment. The module performs one health request and otherwise
 // keeps no network state; chat, embeddings and infill calls go through `provider-client.mjs`.
+// A caller may opt into a bounded restart/back-off policy: an unexpected exit while serving is
+// retried on the same port with exponential back-off, a small budget and a stability reset, and the
+// controller ends in a bounded `failed` state once the budget is spent. Without a policy an exit
+// stays reported as `exited`, exactly as before.
 
 import { spawn } from 'node:child_process';
 import { lstatSync, realpathSync, statSync } from 'node:fs';
@@ -38,6 +42,15 @@ export const DEFAULT_HEALTH_INTERVAL_MS = 100;
 export const DEFAULT_STOP_TIMEOUT_MS = 5_000;
 export const HEALTH_TIMEOUT_MS = 2_000;
 export const MAX_CHILD_OUTPUT_CHARS = 16_384;
+export const MIN_RESTARTS = 1;
+export const MAX_RESTARTS = 10;
+export const MIN_RESTART_DELAY_MS = 50;
+export const MAX_RESTART_DELAY_MS = 300_000;
+export const MIN_RESTART_STABLE_MS = 1_000;
+export const MAX_RESTART_STABLE_MS = 600_000;
+export const DEFAULT_RESTART_DELAY_MS = 1_000;
+export const DEFAULT_RESTART_MAX_DELAY_MS = 30_000;
+export const DEFAULT_RESTART_STABLE_MS = 60_000;
 
 const RESERVED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const CONTROL_OR_BIDI = /[\u0000-\u001F\u007F-\u009F\p{Cf}\p{Zl}\p{Zp}]/u;
@@ -45,9 +58,10 @@ const RESERVED_SERVER_ARGS = new Set(['--host', '--port']);
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const OPTION_KEYS = new Set([
   'executablePath', 'commandArgs', 'modelPath', 'port', 'contextSize', 'threads', 'gpuLayers',
-  'startupTimeoutMs', 'healthIntervalMs', 'stopTimeoutMs', 'env', 'fetch',
+  'startupTimeoutMs', 'healthIntervalMs', 'stopTimeoutMs', 'env', 'fetch', 'restart',
 ]);
 const ARG_KEYS = new Set(['modelPath', 'port', 'contextSize', 'threads', 'gpuLayers']);
+const RESTART_KEYS = new Set(['maxRestarts', 'baseDelayMs', 'maxDelayMs', 'stableMs']);
 const COPIED_ENV_KEYS = Object.freeze(
   process.platform === 'win32'
     ? ['SystemRoot', 'TEMP', 'TMP']
@@ -94,27 +108,27 @@ function isPlainObject(value) {
 
 // Reads own data descriptors once so an accessor is rejected without being invoked and a polluted
 // prototype cannot contribute a key.
-function readOwnData(value, label, allowed) {
-  if (!isPlainObject(value)) fail('invalid-options', label + ' must be a plain object');
+function readOwnData(value, label, allowed, code = 'invalid-options') {
+  if (!isPlainObject(value)) fail(code, label + ' must be a plain object');
   let keys;
   try {
     keys = Object.keys(value);
   } catch {
-    fail('invalid-options', label + ' cannot be enumerated');
+    fail(code, label + ' cannot be enumerated');
   }
-  if (keys.length > allowed.size) fail('invalid-options', label + ' has too many keys');
+  if (keys.length > allowed.size) fail(code, label + ' has too many keys');
   const out = Object.create(null);
   for (const key of keys) {
-    if (RESERVED_KEYS.has(key)) fail('invalid-options', label + ' has a reserved key');
-    if (!allowed.has(key)) fail('invalid-options', label + ' has an unknown key');
+    if (RESERVED_KEYS.has(key)) fail(code, label + ' has a reserved key');
+    if (!allowed.has(key)) fail(code, label + ' has an unknown key');
     let descriptor;
     try {
       descriptor = Object.getOwnPropertyDescriptor(value, key);
     } catch {
-      fail('invalid-options', label + ' has an unsafe property');
+      fail(code, label + ' has an unsafe property');
     }
     if (!descriptor || 'get' in descriptor || 'set' in descriptor) {
-      fail('invalid-options', label + ' must contain data properties only');
+      fail(code, label + ' must contain data properties only');
     }
     out[key] = descriptor.value;
   }
@@ -290,6 +304,40 @@ function validateEnv(value) {
   return out;
 }
 
+// The restart policy is optional. When it is present every field is bounded, the exponential delay
+// cannot start above its cap, and the whole object is read through own data descriptors.
+function validateRestart(value) {
+  if (value === undefined) return null;
+  const own = readOwnData(value, 'restart', RESTART_KEYS, 'invalid-restart-policy');
+  const maxRestarts = validateInteger(
+    own.maxRestarts, 'restart.maxRestarts', MIN_RESTARTS, MAX_RESTARTS, 'invalid-restart-policy',
+  );
+  const baseDelayMs = own.baseDelayMs === undefined
+    ? DEFAULT_RESTART_DELAY_MS
+    : validateInteger(
+      own.baseDelayMs, 'restart.baseDelayMs', MIN_RESTART_DELAY_MS, MAX_RESTART_DELAY_MS,
+      'invalid-restart-policy',
+    );
+  const maxDelayMs = own.maxDelayMs === undefined
+    ? Math.max(baseDelayMs, DEFAULT_RESTART_MAX_DELAY_MS)
+    : validateInteger(
+      own.maxDelayMs, 'restart.maxDelayMs', MIN_RESTART_DELAY_MS, MAX_RESTART_DELAY_MS,
+      'invalid-restart-policy',
+    );
+  if (maxDelayMs < baseDelayMs) {
+    fail('invalid-restart-policy', 'restart.maxDelayMs must be at least restart.baseDelayMs');
+  }
+  const stableMs = own.stableMs === undefined
+    ? DEFAULT_RESTART_STABLE_MS
+    : own.stableMs === 0
+      ? 0
+      : validateInteger(
+        own.stableMs, 'restart.stableMs', MIN_RESTART_STABLE_MS, MAX_RESTART_STABLE_MS,
+        'invalid-restart-policy',
+      );
+  return Object.freeze({ maxRestarts, baseDelayMs, maxDelayMs, stableMs });
+}
+
 function childEnvironment(overrides) {
   // Windows synthesises a system/user PATH for a child whose environment block omits it, which
   // would reintroduce user-writable search directories. Pin it to empty instead; a caller that
@@ -394,6 +442,7 @@ function validateOptions(options) {
   const stopTimeoutMs = own.stopTimeoutMs === undefined
     ? DEFAULT_STOP_TIMEOUT_MS
     : validateInteger(own.stopTimeoutMs, 'stopTimeoutMs', MIN_STOP_TIMEOUT_MS, MAX_STOP_TIMEOUT_MS, 'invalid-timeout');
+  const restart = validateRestart(own.restart);
   if (own.fetch !== undefined && typeof own.fetch !== 'function') fail('invalid-options', 'fetch must be a function');
   const fetchImpl = own.fetch ?? globalThis.fetch;
   if (typeof fetchImpl !== 'function') fail('runtime-unavailable', 'this runtime has no fetch implementation');
@@ -409,6 +458,7 @@ function validateOptions(options) {
     healthIntervalMs,
     stopTimeoutMs,
     env: childEnvironment(validateEnv(own.env)),
+    restart,
     fetch: fetchImpl,
   });
 }
@@ -426,15 +476,20 @@ export function createLlamaServer(options) {
     exitCode: null,
     signal: null,
     startedAt: null,
+    restarts: 0,
+    failure: null,
     stdout: '',
     stderr: '',
   };
   let child = null;
   let exitPromise = null;
-  let resolveExit = null;
   let startPromise = null;
   let stopPromise = null;
   let stopRequested = false;
+  let autoRestartFlow = false;
+  let restartPort = null;
+  let restartTimer = null;
+  let stabilityTimer = null;
 
   function snapshot() {
     return Object.freeze({
@@ -445,7 +500,105 @@ export function createLlamaServer(options) {
       exitCode: state.exitCode,
       signal: state.signal,
       startedAt: state.startedAt,
+      restarts: state.restarts,
+      failure: state.failure,
     });
+  }
+
+  function cancelStability() {
+    if (stabilityTimer !== null) {
+      clearTimeout(stabilityTimer);
+      stabilityTimer = null;
+    }
+  }
+
+  function cancelRestart() {
+    if (restartTimer !== null) {
+      clearTimeout(restartTimer);
+      restartTimer = null;
+    }
+    restartPort = null;
+  }
+
+  // A stable run earns a fresh budget: only a child that keeps serving for `stableMs` clears the
+  // streak, so a crash loop cannot reset itself between crashes.
+  function armStability() {
+    cancelStability();
+    if (!config.restart || config.restart.stableMs <= 0) return;
+    stabilityTimer = setTimeout(() => {
+      stabilityTimer = null;
+      if (state.state === 'running') {
+        state.restarts = 0;
+        state.failure = null;
+      }
+    }, config.restart.stableMs);
+    stabilityTimer.unref?.();
+  }
+
+  function failRestarts() {
+    cancelRestart();
+    cancelStability();
+    state.state = 'failed';
+    state.failure = 'restarts-exhausted';
+    state.port = null;
+    state.pid = null;
+    child = null;
+  }
+
+  function scheduleRestart(targetPort) {
+    cancelRestart();
+    cancelStability();
+    // The delay doubles per attempt already made, starts at the base delay and never exceeds the cap.
+    const delay = Math.min(
+      config.restart.maxDelayMs,
+      config.restart.baseDelayMs * 2 ** state.restarts,
+    );
+    restartPort = typeof targetPort === 'number' ? targetPort : null;
+    state.state = 'restarting';
+    state.failure = null;
+    restartTimer = setTimeout(() => {
+      restartTimer = null;
+      void runRestart().catch(() => failRestarts());
+    }, delay);
+    restartTimer.unref?.();
+  }
+
+  async function runRestart() {
+    if (stopRequested) return;
+    const targetPort = restartPort;
+    state.restarts += 1;
+    autoRestartFlow = true;
+    let failed = null;
+    try {
+      await start();
+    } catch (error) {
+      failed = error;
+    } finally {
+      autoRestartFlow = false;
+    }
+    if (stopRequested) return;
+    if (failed === null) {
+      if (state.state !== 'running') {
+        // The joined start had already finished; try again while the budget allows.
+        if (state.restarts < config.restart.maxRestarts) scheduleRestart(targetPort);
+        else failRestarts();
+      }
+      return;
+    }
+    if (state.restarts >= config.restart.maxRestarts) {
+      failRestarts();
+      return;
+    }
+    scheduleRestart(targetPort);
+  }
+
+  function handleUnexpectedExit() {
+    if (stopRequested || !config.restart) return;
+    if (state.restarts >= config.restart.maxRestarts) {
+      failRestarts();
+      return;
+    }
+    scheduleRestart(state.port);
   }
 
   function appendOutput(kind, chunk) {
@@ -480,6 +633,14 @@ export function createLlamaServer(options) {
     if (startPromise) return startPromise;
     if (state.state === 'starting') fail('already-starting', 'the server is already starting');
     stopRequested = false;
+    if (!autoRestartFlow) {
+      // An explicit start is a fresh intent: it drops a pending restart and clears the streak. An
+      // automatic restart keeps the streak so the back-off can exhaust.
+      cancelRestart();
+      cancelStability();
+      state.restarts = 0;
+      state.failure = null;
+    }
     state.state = 'starting';
     state.exitCode = null;
     state.signal = null;
@@ -488,8 +649,10 @@ export function createLlamaServer(options) {
     state.stderr = '';
     startPromise = (async () => {
       let port;
+      const targetPort = restartPort;
+      restartPort = null;
       try {
-        port = config.port ?? await reserveLoopbackPort();
+        port = config.port ?? targetPort ?? await reserveLoopbackPort();
       } catch {
         state.state = 'stopped';
         state.port = null;
@@ -536,23 +699,26 @@ export function createLlamaServer(options) {
       child = spawned;
       state.pid = spawned.pid ?? null;
       state.startedAt = new Date().toISOString();
+      let settleExit = null;
       exitPromise = new Promise((resolve) => {
-        resolveExit = resolve;
+        settleExit = resolve;
       });
       spawned.stdout?.on('data', (chunk) => appendOutput('stdout', chunk));
       spawned.stderr?.on('data', (chunk) => appendOutput('stderr', chunk));
-      spawned.once('error', () => {
-        if (state.state === 'running' || state.state === 'starting') state.state = 'exited';
-        state.pid = null;
-        resolveExit();
-      });
-      spawned.once('exit', (code, signal) => {
+      let settled = false;
+      const handleExit = (code, signal) => {
+        if (settled) return;
+        settled = true;
         state.exitCode = typeof code === 'number' ? code : null;
         state.signal = signal ?? null;
         state.pid = null;
+        const wasRunning = state.state === 'running';
         if (state.state === 'running' || state.state === 'starting') state.state = 'exited';
-        resolveExit();
-      });
+        settleExit();
+        if (wasRunning) handleUnexpectedExit();
+      };
+      spawned.once('error', () => handleExit(null, null));
+      spawned.once('exit', (code, signal) => handleExit(code, signal));
       const deadline = Date.now() + config.startupTimeoutMs;
       for (;;) {
         if (stopRequested) {
@@ -576,6 +742,8 @@ export function createLlamaServer(options) {
             fail('start-aborted', 'the start was stopped while the server was starting');
           }
           state.state = 'running';
+          if (autoRestartFlow) armStability();
+          else cancelStability();
           return snapshot();
         }
         if (Date.now() >= deadline) {
@@ -631,6 +799,10 @@ export function createLlamaServer(options) {
     if (stopPromise) return stopPromise;
     const pending = (async () => {
       stopRequested = true;
+      cancelRestart();
+      cancelStability();
+      state.restarts = 0;
+      state.failure = null;
       const pendingStart = startPromise;
       await shutdownChild();
       if (pendingStart) await pendingStart.catch(() => {});

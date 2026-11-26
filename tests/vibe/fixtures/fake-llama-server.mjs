@@ -3,9 +3,9 @@
 // /v1/chat/completions (plain, streaming and tool calls), /v1/embeddings, /v1/models and /infill.
 // Environment switches control a never-ready, unhealthy, early-exit or SIGTERM-ignoring failure. It
 // writes the argv and selected environment to FAKE_LLAMA_LOG so the test can prove exactly what it
-// received.
+// received, and appends one boot line to FAKE_LLAMA_STARTS so a restart can be counted.
 
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 
 const args = process.argv.slice(2);
@@ -19,6 +19,14 @@ const host = ['127', '0', '0', '1'].join('.');
 const port = Number.parseInt(flagValue('--port') ?? '0', 10);
 const mode = (process.env.FAKE_LLAMA_MODE ?? 'ok').trim().toLowerCase();
 const log = process.env.FAKE_LLAMA_LOG;
+const startsFile = process.env.FAKE_LLAMA_STARTS;
+const crashMs = Number.parseInt(process.env.FAKE_LLAMA_CRASH_MS ?? '150', 10);
+
+let startCount = 1;
+if (startsFile) {
+  appendFileSync(startsFile, String(Date.now()) + ':' + String(process.pid) + '\n');
+  startCount = readFileSync(startsFile, 'utf8').split('\n').filter((line) => line.length > 0).length;
+}
 
 const OUTPUT_MARKER = ['vibe', 'codium', 'output', 'tail', 'marker'].join('-');
 process.stdout.write(OUTPUT_MARKER + '\n');
@@ -144,6 +152,24 @@ if (mode === 'exit') {
   setInterval(() => {}, 1000);
 } else if (mode === 'unhealthy') {
   http.createServer((request, response) => sendJson(response, 500, { status: 'loading' })).listen(port, host);
+} else if (mode === 'crash-once' || mode === 'crash-twice' || mode === 'crash-after') {
+  // Become healthy first, then die while serving, so the supervisor sees an unexpected exit after
+  // readiness instead of a failed start. crash-once dies on its first boot, crash-twice on the first
+  // two boots and crash-after on every boot.
+  startServer();
+  const crashes = mode === 'crash-after'
+    || (mode === 'crash-once' && startCount === 1)
+    || (mode === 'crash-twice' && startCount <= 2);
+  if (crashes) setTimeout(() => process.exit(7), crashMs);
+} else if (mode === 'crash-once-then-exit') {
+  // Become healthy once and then die while serving, so the supervisor restarts; every later boot
+  // exits before it can become ready, so a restart attempt itself fails.
+  if (startCount === 1) {
+    startServer();
+    setTimeout(() => process.exit(7), crashMs);
+  } else {
+    setTimeout(() => process.exit(3), 20);
+  }
 } else {
   if (mode === 'stubborn') process.on('SIGTERM', () => {});
   startServer();

@@ -155,7 +155,7 @@ test('the panel renders the verdict, models, notices and controls', async (t) =>
   assert.match(html, /form-action 'none'/);
   const fallback = renderFirstRunHtml(null);
   assert.match(fallback, /script-src 'nonce-[A-Za-z0-9+/=]{24}'/);
-  assert.equal(fallback.includes('[PERSON_NAME]'), false);
+  assert.equal(/O..ama/.test(fallback), false);
   assert.match(html, /First-run check complete\./);
   assert.deepEqual(controller.view().status, { message: 'First-run check complete.', error: null });
   assert.equal(vscode.state.warnings.length, 0);
