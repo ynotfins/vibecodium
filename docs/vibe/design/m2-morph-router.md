@@ -92,25 +92,25 @@ them.
 ## Security boundary
 
 - The key is read once from an explicit value or the configured environment variable and only
-  becomes the `Authorization` header; it is not stored on the router object (`Object.keys` is
-  `classify,describe`), not in `describe()`, not in an error and not in a serialized result.
+   becomes the `Authorization` header; it is not stored on the router object (`Object.keys` is
+   `classify,describe`), not in `describe()`, not in an error and not in a serialized result.
 - Every request is gated by `assertAIEndpointAllowed()` before `fetch`. `https://api.morphllm.com`
-  is denied by default; `allowExternalProviders: true` is scoped to that exact host, and an
-  explicit `allowHosts` works without the switch. A Copilot, telemetry, GitHub or metadata host
-  keeps its own category switch or hard deny, and the hard-deny set is never bypassed.
+   is denied by default; `allowExternalProviders: true` is scoped to that exact host, and an
+   explicit `allowHosts` works without the switch. A Copilot, telemetry, GitHub or metadata host
+   keeps its own category switch or hard deny, and the hard-deny set is never bypassed.
 - Redirects are refused (`redirect: 'error'`), the deadline also covers the body read, and the body
-  is read as an async iterable under the cap; there is no unbounded `response.text()` fallback and
-  no unbounded JSON parse.
+   is read as an async iterable under the cap; there is no unbounded `response.text()` fallback and
+   no unbounded JSON parse.
 - The prompt is a non-empty, well-formed string without NUL, at most 32,768 characters and 128 KiB
-  of UTF-8; a rejected prompt never echoes its text. The options and call-options bags are read
-  through own data descriptors, so a revoked or throwing Proxy, an accessor-backed option or policy,
-  and an unknown or reserved key fail closed; a live Proxy is read only through descriptors, so a
-  get trap never runs. The `env` seam reads only the named variable once, which by design may invoke
-  an accessor on a Proxy environment. An injected transport's hostile response getters and a hostile
-  HTTP status map to bounded codes.
+   of UTF-8; a rejected prompt never echoes its text. The options and call-options bags are read
+   through own data descriptors, so a revoked or throwing Proxy, an accessor-backed option or policy,
+   and an unknown or reserved key fail closed; a live Proxy is read only through descriptors, so a
+   get trap never runs. The `env` seam reads only the named variable once, which by design may invoke
+   an accessor on a Proxy environment. An injected transport's hostile response getters and a hostile
+   HTTP status map to bounded codes.
 - The answer is validated through own data descriptors and exact ranges: an unknown label, a
-  non-finite or out-of-range confidence, a non-boolean threshold flag or a malformed shape degrades
-  to the default tier rather than being trusted.
+   non-finite or out-of-range confidence, a non-boolean threshold flag or a malformed shape degrades
+   to the default tier rather than being trusted.
 
 ## Verification
 
@@ -135,9 +135,9 @@ live provider call.
 ## Follow-ups
 
 - B3 wiring: map `cheap`, `standard` and `powerful` to provider/model routes per task class and
-  decide whether the Router hint may override a class's fixed route. The classify call costs
-  $0.005, so it should not run for every keystroke and its cost belongs in the budget model.
+   decide whether the Router hint may override a class's fixed route. The classify call costs
+   $0.005, so it should not run for every keystroke and its cost belongs in the budget model.
 - `/v1/router/multimodel` (a candidate model from a caller policy) arrives when a caller needs it.
 - A live smoke test against the direct provider remains M2 work, as it does for the other
-  direct-provider tools.
+   direct-provider tools.
 - The provider's `ambiguity` and `domain` classes may later refine B3 classes beyond difficulty.
