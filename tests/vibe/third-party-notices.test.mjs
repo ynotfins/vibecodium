@@ -154,6 +154,43 @@ test('a repeated license id is rendered once in the row', () => {
   assert.equal((document.match(/^### MIT License$/gm) || []).length, 1);
 });
 
+test('an HTML or link payload in a component cell is neutralised', () => {
+  const document = buildThirdPartyNotices({
+    ledger,
+    components: [{
+      name: '<script>alert(1)</script>',
+      kind: 'binary',
+      version: 'b1',
+      source: 'owner/repo',
+      licenses: ['mit'],
+    }],
+    texts: texts(),
+  });
+  assert.ok(!document.includes('<script>'));
+  const row = document.split('\n').find((line) => line.includes('script'));
+  assert.ok(row.includes('\\<script\\>alert(1)\\</script\\>'), row);
+  const name = buildThirdPartyNotices({
+    ledger,
+    components: [{
+      name: '](javascript:alert(1))',
+      kind: 'binary',
+      version: 'b1',
+      source: 'owner/repo',
+      licenses: ['mit'],
+    }],
+    texts: texts(),
+  }).split('\n').find((line) => line.includes('javascript'));
+  assert.ok(name.includes('\\](javascript:alert(1))'), name);
+});
+
+test('a ledger URL is serialized so it cannot break out of its autolink', () => {
+  const hostile = ledgerJson({ licenses: [{ ...ledger.licenses[0], url: 'https://a.test/x><img src=y>' }] });
+  const valid = validateNoticesLedger(hostile);
+  assert.ok(!valid.licenses[0].url.includes('>'));
+  assert.ok(!valid.licenses[0].url.includes('<'));
+  assert.ok(valid.licenses[0].url.startsWith('https://a.test/'));
+});
+
 test('checkNotices passes on the real repository root', () => {
   const { errors, document } = checkNotices(ROOT);
   assert.deepEqual(errors, []);
@@ -277,6 +314,24 @@ test('a license text that drifted fails the build', () => {
   const bodies = texts();
   bodies.mit = bodies.mit.replace('MIT License', 'MIT Licence');
   expectCode(() => buildThirdPartyNotices({ ledger, components, texts: bodies }), 'license-digest-mismatch');
+});
+
+test('an unused ledger row with a drifted text still fails the build', () => {
+  const unused = { id: 'isc', name: 'ISC License', url: 'https://example.com/isc', text: 'vibe/licenses/isc.txt', sha256: 'a'.repeat(64) };
+  const withUnused = validateNoticesLedger(ledgerJson({ licenses: [...ledger.licenses.map((entry) => ({ ...entry })), unused] }));
+  const components = [{ name: 'llama-server', kind: 'binary', version: 'b12426', source: 'ggml-org/llama.cpp', licenses: ['mit'] }];
+  expectCode(
+    () => buildThirdPartyNotices({ ledger: withUnused, components, texts: { ...texts(), isc: 'ISC License text' } }),
+    'license-digest-mismatch',
+  );
+});
+
+test('a body that carries the render fence fails the build', () => {
+  const components = [{ name: 'llama-server', kind: 'binary', version: 'b12426', source: 'ggml-org/llama.cpp', licenses: ['mit'] }];
+  expectCode(
+    () => buildThirdPartyNotices({ ledger, components, texts: { ...texts(), mit: 'MIT License\n```\n# Injected\n' } }),
+    'invalid-license-body',
+  );
 });
 
 test('a missing, empty, oversized or non-text body fails the build', () => {

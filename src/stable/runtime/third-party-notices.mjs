@@ -158,7 +158,9 @@ function validateLicenseUrl(value) {
   }
   if (url.protocol !== 'https:') fail('invalid-ledger', 'licenses[].url must use https');
   if (url.username || url.password) fail('invalid-ledger', 'licenses[].url must not carry credentials');
-  return text;
+  // The serialized form is what the document prints, so a `<`, `>` or space in the input cannot break
+  // out of the autolink or inject a tag.
+  return url.href;
 }
 
 export function digestLicenseText(text) {
@@ -299,13 +301,20 @@ function readTexts(texts) {
     if (typeof body !== 'string') fail('invalid-license-body', 'license text ' + key + ' must be a string');
     if (body.length === 0) fail('invalid-license-body', 'license text ' + key + ' is empty');
     if (Buffer.byteLength(body, 'utf8') > MAX_TEXT_BYTES) fail('invalid-license-body', 'license text ' + key + ' is too large');
+    if (body.includes(LEGAL_FENCE)) fail('invalid-license-body', 'license text ' + key + ' contains the render fence');
     out.set(key, body.replace(/\r\n/g, '\n'));
   }
   return out;
 }
 
 function cell(value) {
-  return String(value).replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
+  return String(value)
+    .replace(/\|/g, '\\|')
+    .replace(/</g, '\\<')
+    .replace(/>/g, '\\>')
+    .replace(/\[/g, '\\[')
+    .replace(/\]/g, '\\]')
+    .replace(/[\r\n]+/g, ' ');
 }
 
 // Deterministic by construction: the order comes from the sorted components and the ledger, and the
@@ -326,8 +335,13 @@ export function buildThirdPartyNotices({ ledger, components, texts } = {}) {
     const license = findLicense(valid, id);
     if (!license) fail('missing-license-text', 'license ' + id + ' is used by a pinned component but missing from the ledger');
     if (!bodies.has(id)) fail('missing-license-body', 'license ' + id + ' has no text');
-    const actual = digestLicenseText(bodies.get(id));
-    if (actual !== license.sha256) fail('license-digest-mismatch', 'license ' + id + ' text does not match the ledger digest');
+  }
+  // Every ledger row that carries a body is verified, used or not, so an unused row cannot hide a
+  // text that drifted.
+  for (const license of valid.licenses) {
+    if (!bodies.has(license.id)) continue;
+    const actual = digestLicenseText(bodies.get(license.id));
+    if (actual !== license.sha256) fail('license-digest-mismatch', 'license ' + license.id + ' text does not match the ledger digest');
   }
 
   const lines = [];

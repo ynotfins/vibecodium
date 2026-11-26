@@ -79,8 +79,10 @@ every pinned license, the digest cross-check against the sidecar pin, the compon
 rendered document and its determinism, every rejected ledger field (Proxy, accessor, unknown and
 reserved key, duplicate or malformed identifier, non-HTTPS or credential-bearing URL, absolute or
 traversing text path, missing and malformed digest, invalid and future review date, too many
-entries), a missing and a mismatched license text, an empty or oversized body, a malformed component
-list, table escaping, and the CLI in check and `--write` modes against a temporary root.
+entries), a missing and a mismatched license text, a body that carries the render fence, an empty or
+oversized body, a malformed component list, table escaping of `|`, `<`, `>`, `[` and `]`, a repeated
+license id, an unused ledger row whose text drifted, URL serialization that keeps a `<` or `>` out of
+the autolink, and the CLI in check and `--write` modes against a temporary root.
 
 The full acceptance uses `node vibe/tools/verify.mjs --strict`, which now runs the notices check as
 its own step, and `node vibe/tools/docs-check.mjs --strict`.
