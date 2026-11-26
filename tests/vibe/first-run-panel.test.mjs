@@ -5,6 +5,9 @@ import {
   createFirstRunController,
   renderFirstRunHtml,
 } from '../../src/stable/extensions/vibecodium-ai/src/first-run.cjs';
+import { buildOllamaBaseUrl } from '../../src/stable/runtime/ollama.mjs';
+
+const OLLAMA_BASE_URL = buildOllamaBaseUrl(11434);
 
 const chatId = 'qwen2.5-coder-1.5b-q4-k-m';
 const embeddingId = 'qwen3-embedding-0.6b-q8-0';
@@ -74,8 +77,10 @@ function baseView(overrides = {}) {
     plan: null,
     progress: null,
     error: null,
+    source: 'pinned',
+    ollama: null,
     start: installed
-      ? { available: true, modelPath: 'C:/models/chat.gguf', contextSize: 8192, threads: 6, gpuLayers: 0 }
+      ? { available: true, kind: 'llama-server', modelPath: 'C:/models/chat.gguf', contextSize: 8192, threads: 6, gpuLayers: 0 }
       : { available: false, reason: 'not-ready' },
     steps: [
       { id: 'check', status: 'done' },
@@ -89,13 +94,15 @@ function baseView(overrides = {}) {
 }
 
 function fakeWizard(view = baseView()) {
-  const calls = { refresh: 0, install: 0, start: 0 };
+  const calls = { refresh: 0, install: 0, start: 0, useOllama: 0, usePinned: 0 };
   return {
     calls,
     view: () => view,
     refresh: async () => { calls.refresh += 1; return view; },
     install: async () => { calls.install += 1; return { ok: true, installed: 2 }; },
     startPlan: () => { calls.start += 1; return view.start; },
+    useOllama: () => { calls.useOllama += 1; return { ok: true, source: 'ollama' }; },
+    usePinned: () => { calls.usePinned += 1; return { ok: true, source: 'pinned' }; },
   };
 }
 
@@ -227,6 +234,151 @@ test('the panel renders a bounded progress element and escapes its model id', as
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
 });
 
+function ollamaView(overrides = {}) {
+  return baseView({
+    source: 'pinned',
+    ollama: {
+      version: 1,
+      available: true,
+      reason: null,
+      status: 200,
+      port: 11434,
+      baseUrl: OLLAMA_BASE_URL,
+      chatModel: 'llama3.2:3b',
+      embeddingModel: 'nomic-embed-text:latest',
+      modelCount: 2,
+      notices: [],
+    },
+    ...overrides,
+  });
+}
+
+test('the panel offers a discovered local daemon and switches to it', async (t) => {
+  const { controller, wizard } = fixture(t, ollamaView());
+  await controller.open();
+  const html = controller.html();
+  assert.match(html, /Existing local models/);
+  assert.match(html, /Chat model: <code>llama3\.2:3b<\/code>/);
+  assert.match(html, /data-action="use-ollama">Use Ollama/);
+  assert.equal(html.includes('Use pinned models'), false);
+  assert.equal(wizard.calls.useOllama, 0);
+
+  const used = await controller.handleMessage({ type: 'use-ollama' });
+  assert.equal(used.kind, 'use-ollama');
+  assert.equal(used.ok, true);
+  assert.equal(wizard.calls.useOllama, 1);
+  assert.match(controller.html(), /existing Ollama models/);
+});
+
+test('the panel renders the Ollama start plan and a way back to the pinned models', async (t) => {
+  const view = ollamaView({
+    phase: 'ready',
+    source: 'ollama',
+    downloadBytes: 2048,
+    start: {
+      available: true,
+      kind: 'ollama',
+      baseUrl: OLLAMA_BASE_URL,
+      model: 'llama3.2:3b',
+      embeddingModel: 'nomic-embed-text:latest',
+    },
+  });
+  const { controller, wizard } = fixture(t, view);
+  await controller.open();
+  const html = controller.html();
+  assert.match(html, /Ollama at <code>/);
+  assert.match(html, /\(in use\)/);
+  assert.match(html, /data-action="use-ollama" disabled>Use Ollama/);
+  assert.match(html, /data-action="use-pinned">Use pinned models/);
+  assert.match(html, /data-action="start">Start local runtime/);
+
+  const started = await controller.handleMessage({ type: 'start' });
+  assert.equal(started.kind, 'start');
+  assert.equal(started.ok, true);
+  assert.match(controller.html(), /Ollama daemon/);
+
+  const pinned = await controller.handleMessage({ type: 'use-pinned' });
+  assert.equal(pinned.kind, 'use-pinned');
+  assert.equal(pinned.ok, true);
+  assert.equal(wizard.calls.usePinned, 1);
+  assert.match(controller.html(), /pinned llama\.cpp models/);
+});
+
+test('an unavailable daemon is explained safely and a missing control method fails closed', async (t) => {
+  const view = baseView({
+    ollama: {
+      version: 1,
+      available: false,
+      reason: 'timeout',
+      status: null,
+      port: 11434,
+      baseUrl: null,
+      chatModel: null,
+      embeddingModel: null,
+      modelCount: 0,
+      notices: [],
+    },
+  });
+  const { controller } = fixture(t, view);
+  await controller.open();
+  const html = controller.html();
+  assert.match(html, /The Ollama check timed out\./);
+  assert.match(html, /data-action="use-ollama" disabled>Use Ollama/);
+
+  const hostile = baseView({
+    ollama: {
+      version: 1,
+      available: false,
+      reason: '<img src=x onerror=alert(1)>',
+      notices: [],
+    },
+  });
+  const hostileFixture = fixture(t, hostile);
+  await hostileFixture.controller.open();
+  const hostileHtml = hostileFixture.controller.html();
+  assert.equal(hostileHtml.includes('<img src=x'), false);
+  assert.match(hostileHtml, /Ollama is not available\./);
+
+  const noMethod = fixture(t, ollamaView());
+  delete noMethod.wizard.useOllama;
+  await noMethod.controller.open();
+  assert.deepEqual(
+    await noMethod.controller.handleMessage({ type: 'use-ollama' }),
+    { handled: false, reason: 'unknown-message' },
+  );
+});
+
+test('a discovered model name is escaped in the daemon section and start plan', async (t) => {
+  const view = ollamaView({
+    phase: 'ready',
+    source: 'ollama',
+    ollama: {
+      version: 1,
+      available: true,
+      reason: null,
+      status: 200,
+      port: 11434,
+      baseUrl: OLLAMA_BASE_URL,
+      chatModel: '"><img src=x onerror=alert(1)>',
+      embeddingModel: null,
+      modelCount: 1,
+      notices: [],
+    },
+    start: {
+      available: true,
+      kind: 'ollama',
+      baseUrl: OLLAMA_BASE_URL,
+      model: '"><img src=x onerror=alert(1)>',
+      embeddingModel: null,
+    },
+  });
+  const { controller } = fixture(t, view);
+  await controller.open();
+  const html = controller.html();
+  assert.equal(html.includes('<img src=x'), false);
+  assert.match(html, /&quot;&gt;&lt;img src=x onerror=alert\(1\)&gt;/);
+});
+
 test('a missing wizard and malformed messages are reported safely', async (t) => {
   const vscode = createFakeVscode();
   const controller = createFirstRunController({
@@ -294,4 +446,15 @@ test('wizard errors never echo their text and disposing closes the panel', async
   const reopened = await controller.open();
   assert.equal(reopened.opened, true);
   assert.equal(vscode.state.panels.length, 2);
+});
+
+test('an install that reports the selected daemon is explained without a download claim', async (t) => {
+  const { controller, wizard } = fixture(t);
+  wizard.install = async () => ({ ok: true, installed: 0, reason: 'ollama-selected' });
+  await controller.open();
+  const result = await controller.handleMessage({ type: 'install' });
+  assert.equal(result.kind, 'install');
+  assert.equal(result.ok, true);
+  assert.match(controller.html(), /existing [A-Za-z]+ models/);
+  assert.equal(controller.html().includes('downloaded and verified'), false);
 });

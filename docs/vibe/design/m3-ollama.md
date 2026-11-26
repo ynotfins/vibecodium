@@ -17,10 +17,9 @@ which models it can serve, pick a local chat model and an optional local embeddi
 caller the two exact overrides the B1 `ollama` preset takes (`baseUrl`, `model`). It never starts,
 installs, stops or updates Ollama, never pulls a model, and never writes a file. Node built-ins only.
 
-Out of scope: wiring the result into the first-run wizard or the provider setup panel (the next M3
-slice), the `/api/embeddings` endpoint, the Responses transport, capability discovery beyond the
-name/family heuristic, starting or supervising Ollama, the llama.cpp binary bundle, restart/back-off
-and any dependency change.
+Out of scope: wiring the result into the provider setup panel (M2), the `/api/embeddings` endpoint,
+the Responses transport, capability discovery beyond the name/family heuristic, starting or
+supervising Ollama, the llama.cpp binary bundle, restart/back-off and any dependency change.
 
 ## Live facts (verified 2026-11-26)
 
@@ -201,14 +200,18 @@ followed, malformed options (including a host or URL override and a non-function
 never-invoked accessor, the M1 policy seam (a denial, a missing decision and a throwing evaluator
 return `policy-denied` with no request, and an allowed decision proceeds), the provider-option
 helper (default, explicit, unavailable, unknown, remote, embedding, accessor and forged-default
-cases), determinism and the absence of retained daemon fields, and the real B1 `ollama` preset
+cases), the display summary (`validateOllamaResult`) for available, unavailable, forged,
+absent-default-model, unknown-notice, non-loopback and accessor/Proxy results, determinism and the
+absence of retained daemon fields, and the real B1 `ollama` preset
 serving chat, streaming, tool calls and embeddings from the discovered base URL without an
 authorization header.
 
 ## Follow-ups
 
-- Wire `discoverOllama` and `toOllamaProviderOptions` into the first-run wizard and the provider
-   setup panel, with the cloud/remote label visible.
+- The first-run wizard now calls `discoverOllama` once per refresh and can select the daemon as the
+   local runtime; it consumes `validateOllamaResult`, which normalizes an available or unavailable
+   result into a frozen summary (port, loopback base URL, chat and embedding model, model count,
+   notices) for display. Offering the daemon in the M2 provider setup panel remains M2 work.
 - Live smoke on a machine with Ollama, including the `tool_choice` question and one embedding model.
 - Use `POST /api/show` (one request per model, a `capabilities` array that includes `embedding` and
    `tools`, `omitempty` so absence means unknown) to replace the embedding heuristic once a live

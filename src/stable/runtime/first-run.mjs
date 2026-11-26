@@ -3,8 +3,10 @@
 // Ties the delivered hardware probe, pinned model catalog and resumable downloader into one headless
 // controller the setup panel can drive: probe the machine, project the catalog to the recommendation
 // input, report which pinned weights are already on disk, download only the missing ones with
-// progress, and expose the local B1 start plan. It never spawns llama-server, never opens a socket
-// and never reads a secret: every effect is injected or delegated to the already-reviewed modules.
+// progress, and expose the local B1 start plan. It also reports an already running local Ollama
+// daemon and can route the local runtime through it instead of the pinned weights. It never spawns
+// llama-server, never opens a socket of its own and never reads a secret: every effect is injected or
+// delegated to the already-reviewed modules.
 
 import path from 'node:path';
 import { types } from 'node:util';
@@ -17,8 +19,13 @@ import {
   verifyInstalledModel,
 } from './model-downloader.mjs';
 import { validateLlamaExecutablePath } from './llama-server.mjs';
+import {
+  OLLAMA_MODULE_VERSION,
+  discoverOllama as defaultDiscoverOllama,
+  validateOllamaResult,
+} from './ollama.mjs';
 
-export const FIRST_RUN_VERSION = 1;
+export const FIRST_RUN_VERSION = 2;
 export const WIZARD_PHASES = Object.freeze([
   'idle', 'probing', 'needs-download', 'downloading', 'ready', 'insufficient', 'failed',
 ]);
@@ -32,6 +39,7 @@ const CONTROL_OR_BIDI = /[\u0000-\u001F\u007F-\u009F\p{Cf}\p{Zl}\p{Zp}]/u;
 const NOTICE_CODE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const OPTION_KEYS = new Set([
   'catalog', 'destinationDir', 'probe', 'downloadModel', 'verifyModel', 'runtimePath', 'onChange',
+  'discoverOllama', 'preferOllama',
 ]);
 const INSTALL_OPTION_KEYS = new Set(['signal']);
 const PROBE_RESULT_KEYS = new Set(['version', 'hardware', 'notices']);
@@ -157,6 +165,23 @@ function freezeModel(model) {
   });
 }
 
+// The wizard reports two wizard-level discovery failures that the Ollama module itself never
+// returns: an injected discovery function that throws, and one that returns a forged result.
+function unavailableOllama(reason) {
+  return Object.freeze({
+    version: OLLAMA_MODULE_VERSION,
+    available: false,
+    reason: reason,
+    status: null,
+    port: null,
+    baseUrl: null,
+    chatModel: null,
+    embeddingModel: null,
+    modelCount: 0,
+    notices: Object.freeze([]),
+  });
+}
+
 // The pinned catalog carries twelve fields; recommendRuntime accepts exactly four and rejects the
 // others, so the wizard is the one place that projects between them.
 export function projectCatalogModels(catalog) {
@@ -248,6 +273,10 @@ export function createFirstRunWizard(options) {
   if (typeof downloadModel !== 'function') fail('invalid-options', 'downloadModel must be a function');
   const verifyModel = own.verifyModel === undefined ? verifyInstalledModel : own.verifyModel;
   if (typeof verifyModel !== 'function') fail('invalid-options', 'verifyModel must be a function');
+  const discover = own.discoverOllama === undefined ? defaultDiscoverOllama : own.discoverOllama;
+  if (typeof discover !== 'function') fail('invalid-options', 'discoverOllama must be a function');
+  const preferOllama = own.preferOllama === undefined ? false : own.preferOllama;
+  if (typeof preferOllama !== 'boolean') fail('invalid-options', 'preferOllama must be a boolean');
   const onChange = own.onChange;
   if (onChange !== undefined && typeof onChange !== 'function') {
     fail('invalid-options', 'onChange must be a function');
@@ -260,6 +289,9 @@ export function createFirstRunWizard(options) {
       fail('invalid-options', 'runtimePath must name a readable llama-server executable');
     }
   }
+  // The user's local-runtime choice survives a refresh; an unavailable daemon falls back to the
+  // pinned weights until it answers again.
+  let selection = preferOllama ? 'ollama' : 'pinned';
 
   let catalog;
   try {
@@ -281,6 +313,7 @@ export function createFirstRunWizard(options) {
     models: [],
     progress: null,
     error: null,
+    ollama: null,
   };
   let installing = null;
   let revision = 0;
@@ -302,11 +335,35 @@ export function createFirstRunWizard(options) {
     state.notices = Object.freeze([]);
     state.models = [];
     state.progress = null;
+    state.ollama = null;
     state.error = Object.freeze({
       code: safeCode(code, 'failed'),
       message: safeMessage(message, 'The first-run check failed.'),
     });
     emit();
+  }
+
+  function effectiveSource() {
+    return selection === 'ollama'
+      && state.ollama !== null
+      && state.ollama.available === true
+      && state.ollama.chatModel !== null
+      ? 'ollama'
+      : 'pinned';
+  }
+
+  async function discoverOnce() {
+    let result;
+    try {
+      result = await discover();
+    } catch {
+      return unavailableOllama('discovery-failed');
+    }
+    try {
+      return validateOllamaResult(result);
+    } catch {
+      return unavailableOllama('invalid-result');
+    }
   }
 
   async function verifyAll() {
@@ -336,6 +393,16 @@ export function createFirstRunWizard(options) {
     if (state.phase !== 'ready' || state.plan === null) {
       return Object.freeze({ available: false, reason: 'not-ready' });
     }
+    if (effectiveSource() === 'ollama') {
+      const ollama = state.ollama;
+      return Object.freeze({
+        available: true,
+        kind: 'ollama',
+        baseUrl: ollama.baseUrl,
+        model: ollama.chatModel,
+        embeddingModel: ollama.embeddingModel,
+      });
+    }
     if (runtimePath === null) {
       return Object.freeze({ available: false, reason: 'runtime-not-bundled' });
     }
@@ -343,6 +410,7 @@ export function createFirstRunWizard(options) {
     const embedding = entries.find(function (item) { return item.projected.role === 'embedding'; });
     return Object.freeze({
       available: true,
+      kind: 'llama-server',
       executablePath: runtimePath,
       modelPath: path.join(destinationDir, chat.entry.file),
       embeddingModelPath: path.join(destinationDir, embedding.entry.file),
@@ -386,10 +454,12 @@ export function createFirstRunWizard(options) {
     return Object.freeze({
       version: FIRST_RUN_VERSION,
       phase: state.phase,
+      source: effectiveSource(),
       verdict: plan === null ? null : plan.verdict,
       acceleration: plan === null ? null : plan.acceleration,
       notices: state.notices,
       hardware: state.hardware === null ? null : Object.freeze(Object.assign({}, state.hardware)),
+      ollama: state.ollama === null ? null : Object.freeze(Object.assign({}, state.ollama)),
       models: Object.freeze(state.models.map(function (model) {
         return Object.freeze({
           id: model.id,
@@ -461,8 +531,11 @@ export function createFirstRunWizard(options) {
     }
     const verified = await verifyAll();
     if (mine !== revision) return view();
+    const ollama = await discoverOnce();
+    if (mine !== revision) return view();
     state.hardware = hardwareSummary(probedOwn.hardware);
     state.plan = plan;
+    state.ollama = ollama;
     state.notices = verified.verifyFailed
       ? mergeNotices(probeNotices, plan.notices, Object.freeze(['verify-failed']))
       : mergeNotices(probeNotices, plan.notices, null);
@@ -470,9 +543,11 @@ export function createFirstRunWizard(options) {
     state.progress = null;
     state.error = null;
     const allInstalled = verified.rows.every(function (row) { return row.installed; });
-    state.phase = plan.verdict === 'insufficient'
-      ? 'insufficient'
-      : allInstalled ? 'ready' : 'needs-download';
+    state.phase = effectiveSource() === 'ollama'
+      ? 'ready'
+      : plan.verdict === 'insufficient'
+        ? 'insufficient'
+        : allInstalled ? 'ready' : 'needs-download';
     emit();
     return view();
   }
@@ -554,6 +629,12 @@ export function createFirstRunWizard(options) {
     }
     if (state.phase === 'idle') await refresh();
     if (disposed) return { ok: false, reason: 'disposed' };
+    if (effectiveSource() === 'ollama') {
+      state.phase = 'ready';
+      state.error = null;
+      emit();
+      return { ok: true, installed: 0, reason: 'ollama-selected' };
+    }
     if (state.phase === 'insufficient') return { ok: false, reason: 'insufficient' };
     if (state.plan === null) return { ok: false, reason: 'no-plan' };
     const allInstalled = state.models.every(function (model) { return model.installed; });
@@ -572,6 +653,36 @@ export function createFirstRunWizard(options) {
     return installing;
   }
 
+  function useOllama() {
+    if (disposed) return { ok: false, reason: 'disposed' };
+    if (installing !== null) return { ok: false, reason: 'busy' };
+    if (state.plan === null) return { ok: false, reason: 'not-ready' };
+    if (state.ollama === null || state.ollama.available !== true || state.ollama.chatModel === null) {
+      return { ok: false, reason: 'ollama-unavailable' };
+    }
+    selection = 'ollama';
+    state.phase = 'ready';
+    state.error = null;
+    emit();
+    return { ok: true, source: 'ollama' };
+  }
+
+  function usePinned() {
+    if (disposed) return { ok: false, reason: 'disposed' };
+    if (installing !== null) return { ok: false, reason: 'busy' };
+    if (state.plan === null) return { ok: false, reason: 'not-ready' };
+    selection = 'pinned';
+    const allInstalled = state.models.length > 0 && state.models.every(function (model) {
+      return model.installed;
+    });
+    state.phase = state.plan.verdict === 'insufficient'
+      ? 'insufficient'
+      : allInstalled ? 'ready' : 'needs-download';
+    state.error = null;
+    emit();
+    return { ok: true, source: 'pinned' };
+  }
+
   function dispose() {
     disposed = true;
     installing = null;
@@ -582,6 +693,8 @@ export function createFirstRunWizard(options) {
     refresh: refresh,
     install: install,
     startPlan: startPlan,
+    useOllama: useOllama,
+    usePinned: usePinned,
     view: view,
     dispose: dispose,
   });

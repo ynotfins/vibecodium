@@ -14,6 +14,15 @@ const SAFE_CODE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const UNSAFE_TEXT = /[\p{Cc}\p{Cf}]/u;
 const PHASES = ['idle', 'probing', 'needs-download', 'downloading', 'ready', 'insufficient', 'failed'];
 const STEP_STATES = ['done', 'active', 'blocked', 'failed', 'pending', 'ready'];
+const OLLAMA_REASONS = new Map([
+  ['unreachable', 'No Ollama daemon answered on the loopback port.'],
+  ['timeout', 'The Ollama check timed out.'],
+  ['http-error', 'Ollama answered with an unexpected status.'],
+  ['invalid-response', 'Ollama answered with an invalid model list.'],
+  ['policy-denied', 'The endpoint policy denied the local Ollama check.'],
+  ['discovery-failed', 'The Ollama check could not be completed.'],
+  ['invalid-result', 'The Ollama check returned an invalid result.'],
+]);
 
 class FirstRunPanelError extends Error {
   constructor(message) {
@@ -131,12 +140,42 @@ function renderProgress(progress) {
     '<progress max="' + escapeHtml(total) + '" value="' + escapeHtml(received) + '"></progress>';
 }
 
+function renderOllama(ollama, source) {
+  let body;
+  if (!ollama || typeof ollama !== 'object') {
+    body = '<p class="muted">Ollama has not been checked yet.</p>';
+  } else if (ollama.available !== true) {
+    const reason = text(ollama.reason, 'unknown');
+    const line = OLLAMA_REASONS.get(reason) || 'Ollama is not available.';
+    body = '<p class="muted">' + escapeHtml(line) + ' <code>' + escapeHtml(reason) + '</code></p>';
+  } else if (typeof ollama.chatModel !== 'string' || ollama.chatModel.length === 0) {
+    body = '<p class="muted">Ollama is running but has no local chat model installed.</p>';
+  } else {
+    const chat = text(ollama.chatModel, '-');
+    const embedding = text(ollama.embeddingModel, null);
+    const count = Number.isSafeInteger(ollama.modelCount) && ollama.modelCount >= 0 ? ollama.modelCount : 0;
+    body = '<p>Ollama is running on <code>' + escapeHtml(text(ollama.baseUrl, '-')) + '</code> with ' +
+      escapeHtml(String(count)) + ' model' + (count === 1 ? '' : 's') + '.<br>' +
+      'Chat model: <code>' + escapeHtml(chat) + '</code>' +
+      (embedding === null ? '' : '<br>Embedding model: <code>' + escapeHtml(embedding) + '</code>') +
+      (source === 'ollama' ? ' <strong>(in use)</strong>' : '') + '</p>';
+  }
+  return '<h2>Existing local models</h2>\n' + body;
+}
+
 function renderStart(start) {
   if (!start || typeof start !== 'object' || start.available !== true) {
     const reason = start && start.reason === 'runtime-not-bundled'
       ? 'The llama.cpp binary is not bundled yet.'
       : 'Finish the setup steps before starting the local runtime.';
     return '<p class="muted">' + escapeHtml(reason) + '</p>';
+  }
+  if (start.kind === 'ollama') {
+    return '<p>Ollama at <code>' + escapeHtml(text(start.baseUrl, '-')) + '</code><br>' +
+      'Chat model: <code>' + escapeHtml(text(start.model, '-')) + '</code>' +
+      (typeof start.embeddingModel === 'string'
+        ? '<br>Embedding model: <code>' + escapeHtml(text(start.embeddingModel, '-')) + '</code>'
+        : '') + '</p>';
   }
   return '<p>Chat model: <code>' + escapeHtml(text(start.modelPath, '-')) + '</code><br>' +
     'Context ' + escapeHtml(String(start.contextSize)) + ' tokens, ' +
@@ -166,6 +205,9 @@ function renderFirstRunHtml(view, status) {
     ? '<p class="error" role="alert">' + escapeHtml(text(view.error.message, 'The first-run check failed.')) + '</p>'
     : '';
   const start = view.start && typeof view.start === 'object' ? view.start : { available: false };
+  const source = view.source === 'ollama' ? 'ollama' : 'pinned';
+  const ollamaReady = Boolean(view.ollama) && view.ollama.available === true &&
+    typeof view.ollama.chatModel === 'string' && view.ollama.chatModel.length > 0;
   const installDisabled = phase === 'downloading' || phase === 'ready' || phase === 'insufficient' ||
     !(Number.isFinite(view.downloadBytes) && view.downloadBytes > 0);
   const startDisabled = start.available !== true;
@@ -192,10 +234,16 @@ function renderFirstRunHtml(view, status) {
     renderProgress(view.progress) +
     '<h2>Models</h2>\n' + renderModels(view.models) +
     renderNotices(view.notices) +
+    renderOllama(view.ollama, source) +
     '<h2>Local runtime</h2>\n' + renderStart(start) +
     '<div class="actions">\n' +
     '<button type="button" data-action="refresh">Check again</button>\n' +
     '<button type="button" data-action="install"' + (installDisabled ? ' disabled' : '') + '>Download models</button>\n' +
+    '<button type="button" data-action="use-ollama"' + (ollamaReady && source !== 'ollama' ? '' : ' disabled') +
+    '>Use Ollama</button>\n' +
+    (source === 'ollama'
+      ? '<button type="button" data-action="use-pinned">Use pinned models</button>\n'
+      : '') +
     '<button type="button" data-action="start"' + (startDisabled ? ' disabled' : '') + '>Start local runtime</button>\n' +
     '</div>\n<script nonce="' + nonce + '">\n' +
     '(function () {\n' +
@@ -305,9 +353,11 @@ function createFirstRunController(input) {
         const result = await wizard().install();
         if (result && result.ok === true) {
           status = {
-            message: result.reason === 'already-installed'
-              ? 'The pinned models are already installed.'
-              : 'The pinned models were downloaded and verified.',
+            message: result.reason === 'ollama-selected'
+              ? 'The local runtime will use your existing Ollama models.'
+              : result.reason === 'already-installed'
+                ? 'The pinned models are already installed.'
+                : 'The pinned models were downloaded and verified.',
             error: null,
           };
         } else if (result && result.reason === 'insufficient') {
@@ -323,7 +373,12 @@ function createFirstRunController(input) {
       if (type === 'start') {
         const plan = wizard().startPlan();
         if (plan && plan.available === true) {
-          status = { message: 'The local runtime is ready to start.', error: null };
+          status = {
+            message: plan.kind === 'ollama'
+              ? 'The local runtime will use the Ollama daemon.'
+              : 'The local runtime is ready to start.',
+            error: null,
+          };
         } else if (plan && plan.reason === 'runtime-not-bundled') {
           status = { message: null, error: 'The llama.cpp binary is not bundled yet.' };
         } else {
@@ -331,6 +386,30 @@ function createFirstRunController(input) {
         }
         render();
         return { handled: true, kind: 'start', ok: Boolean(plan && plan.available === true) };
+      }
+      if (type === 'use-ollama' || type === 'use-pinned') {
+        const method = type === 'use-ollama' ? 'useOllama' : 'usePinned';
+        const active = wizard();
+        if (typeof active[method] !== 'function') {
+          return { handled: false, reason: 'unknown-message' };
+        }
+        const result = active[method]();
+        if (result && result.ok === true) {
+          status = {
+            message: type === 'use-ollama'
+              ? 'The local runtime will use your existing Ollama models.'
+              : 'The setup will use the pinned llama.cpp models.',
+            error: null,
+          };
+        } else if (result && result.reason === 'ollama-unavailable') {
+          status = { message: null, error: 'No local Ollama chat model is available.' };
+        } else if (result && result.reason === 'busy') {
+          status = { message: null, error: 'A download is already running.' };
+        } else {
+          status = { message: null, error: publicError(result) };
+        }
+        render();
+        return { handled: true, kind: type, ok: Boolean(result && result.ok === true) };
       }
       return { handled: false, reason: 'unknown-message' };
     } catch (error) {

@@ -47,6 +47,10 @@ const SUCCESS_NOTICES = Object.freeze([
 ]);
 const NOTICE_ORDER = Object.freeze(ERROR_NOTICES.concat(SUCCESS_NOTICES));
 const NOTICE_RANK = new Map(NOTICE_ORDER.map(function (code, index) { return [code, index]; }));
+const MAX_NOTICES = NOTICE_ORDER.length;
+const UNAVAILABLE_REASONS = new Set([
+  'unreachable', 'timeout', 'http-error', 'invalid-response', 'policy-denied',
+]);
 
 const UNREACHABLE_NOTICE = 'ollama-unreachable';
 const TIMEOUT_NOTICE = 'ollama-timeout';
@@ -272,6 +276,42 @@ function orderedNotices(notices) {
     if (leftRank !== rightRank) return leftRank - rightRank;
     return left < right ? -1 : left > right ? 1 : 0;
   }));
+}
+
+// A consumed result may come from an injected discovery function, so its notices are read one
+// descriptor at a time and must belong to the fixed notice vocabulary.
+function readResultNotices(value) {
+  let length;
+  try {
+    if (!Array.isArray(value)) {
+      length = -1;
+    } else {
+      const descriptor = Object.getOwnPropertyDescriptor(value, 'length');
+      length = descriptor && 'value' in descriptor && typeof descriptor.value === 'number'
+        ? descriptor.value
+        : -1;
+    }
+  } catch {
+    fail('invalid-result', 'the result notices are unsafe');
+  }
+  if (!Number.isInteger(length) || length < 0 || length > MAX_NOTICES) {
+    fail('invalid-result', 'the result notices are invalid');
+  }
+  const notices = [];
+  for (let index = 0; index < length; index += 1) {
+    let descriptor;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    } catch {
+      fail('invalid-result', 'the result notices are unsafe');
+    }
+    if (!descriptor || !('value' in descriptor)) fail('invalid-result', 'the result must contain data only');
+    if (typeof descriptor.value !== 'string' || !NOTICE_RANK.has(descriptor.value)) {
+      fail('invalid-result', 'the result notice is invalid');
+    }
+    notices.push(descriptor.value);
+  }
+  return Object.freeze(notices);
 }
 
 function unavailable(port, reason, notice, status) {
@@ -523,8 +563,14 @@ function readDiscoveryResult(result) {
   }
   let length;
   try {
-    if (!Array.isArray(own.models)) length = -1;
-    else length = own.models.length;
+    if (!Array.isArray(own.models)) {
+      length = -1;
+    } else {
+      const descriptor = Object.getOwnPropertyDescriptor(own.models, 'length');
+      length = descriptor && 'value' in descriptor && typeof descriptor.value === 'number'
+        ? descriptor.value
+        : -1;
+    }
   } catch {
     fail('invalid-result', 'the result model list is invalid');
   }
@@ -556,7 +602,64 @@ function readDiscoveryResult(result) {
   if (own.embeddingModel !== null && !hasLocal(own.embeddingModel, true)) {
     fail('invalid-result', 'the result embedding model is not a local embedding model');
   }
-  return { port, baseUrl, chatModel: own.chatModel, models };
+  const notices = readResultNotices(own.notices);
+  return { port, baseUrl, chatModel: own.chatModel, embeddingModel: own.embeddingModel, models, notices };
+}
+
+// One frozen, display-safe summary of a discovery result. The first-run wizard consumes this instead
+// of the raw result, so an injected discovery function cannot hand it a Proxy, an accessor, an
+// unknown notice or a model that is absent from the list it claims to describe.
+export function validateOllamaResult(result) {
+  const own = readOwnData(result, 'result', RESULT_KEYS, 'invalid-result');
+  if (own.version !== OLLAMA_MODULE_VERSION) fail('invalid-result', 'the result version is not supported');
+  if (typeof own.available !== 'boolean') fail('invalid-result', 'the result availability flag is invalid');
+  const port = validateInteger(own.port, 'port', MIN_PORT, MAX_PORT, 'invalid-result');
+  if (own.available === false) {
+    if (typeof own.reason !== 'string' || !UNAVAILABLE_REASONS.has(own.reason)) {
+      fail('invalid-result', 'the result reason is invalid');
+    }
+    if (own.status !== null && !(typeof own.status === 'number'
+      && Number.isInteger(own.status) && own.status >= 100 && own.status <= 599)) {
+      fail('invalid-result', 'the result status is invalid');
+    }
+    if (own.baseUrl !== null || own.chatModel !== null || own.embeddingModel !== null) {
+      fail('invalid-result', 'an unavailable result must not carry a base URL or a model');
+    }
+    let modelCount;
+    try {
+      if (!Array.isArray(own.models)) modelCount = -1;
+      else modelCount = own.models.length;
+    } catch {
+      fail('invalid-result', 'an unavailable result has an unsafe model list');
+    }
+    if (modelCount !== 0) fail('invalid-result', 'an unavailable result must not carry models');
+    const notices = readResultNotices(own.notices);
+    return Object.freeze({
+      version: OLLAMA_MODULE_VERSION,
+      available: false,
+      reason: own.reason,
+      status: own.status,
+      port,
+      baseUrl: null,
+      chatModel: null,
+      embeddingModel: null,
+      modelCount: 0,
+      notices,
+    });
+  }
+  const parsed = readDiscoveryResult(result);
+  return Object.freeze({
+    version: OLLAMA_MODULE_VERSION,
+    available: true,
+    reason: null,
+    status: 200,
+    port: parsed.port,
+    baseUrl: parsed.baseUrl,
+    chatModel: parsed.chatModel,
+    embeddingModel: parsed.embeddingModel,
+    modelCount: parsed.models.length,
+    notices: parsed.notices,
+  });
 }
 
 export function toOllamaProviderOptions(result, options) {
