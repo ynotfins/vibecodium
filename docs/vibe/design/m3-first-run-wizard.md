@@ -109,7 +109,7 @@ again**, **Download models** and **Start local runtime**. The buttons post `refr
 data `type` property; a Proxy or revoked Proxy, an array, an unknown key, an accessor, a non-object and
 a non-string `type` are rejected as `invalid-message`, and a `type` above 64 KiB of UTF-8 is
 `message-too-large`; any other string is `unknown-message`. The page sets one fresh 24-character base64
-CSP nonce in `default-src 'none'; style-src 'nonce-…'; script-src 'nonce-…'; base-uri 'none';
+CSP nonce in `default-src 'none'; style-src 'nonce-...'; script-src 'nonce-...'; base-uri 'none';
 form-action 'none'` and on the matching `<style>` and `<script>` tags, and the fallback page carries a
 valid nonce too. It escapes every dynamic value, and never includes a file path from a model row unless
 it came from the validated wizard view. A missing wizard or a wizard error is reported with a fixed
