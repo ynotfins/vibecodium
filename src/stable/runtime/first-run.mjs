@@ -472,6 +472,9 @@ export function createFirstRunWizard(options) {
   let ollamaCheck = null;
   let revision = 0;
   let disposed = false;
+  // The local-runtime choice survives a refresh; the daemon is only used while its summary still
+  // carries validated provider overrides.
+  let source = 'pinned';
 
   function emit() {
     if (onChange === undefined) return;
@@ -523,6 +526,16 @@ export function createFirstRunWizard(options) {
     if (state.phase !== 'ready' || state.plan === null) {
       return Object.freeze({ available: false, reason: 'not-ready' });
     }
+    if (effectiveSource() === 'ollama') {
+      const options = state.ollama.providerOptions;
+      return Object.freeze({
+        available: true,
+        kind: 'ollama',
+        baseUrl: options.baseUrl,
+        model: options.model,
+        embeddingModel: state.ollama.embeddingModel,
+      });
+    }
     if (runtimePath === null) {
       return Object.freeze({ available: false, reason: 'runtime-not-bundled' });
     }
@@ -540,6 +553,7 @@ export function createFirstRunWizard(options) {
     const embedding = findRole('embedding');
     return Object.freeze({
       available: true,
+      kind: 'llama-server',
       executablePath: runtimePath,
       modelPath: path.join(destinationDir, chat.entry.file),
       embeddingModelPath: path.join(destinationDir, embedding.entry.file),
@@ -570,6 +584,25 @@ export function createFirstRunWizard(options) {
     });
   }
 
+  function ollamaUsable() {
+    return state.ollama !== null
+      && state.ollama.available === true
+      && state.ollama.providerOptions !== null;
+  }
+
+  function effectiveSource() {
+    return source === 'ollama' && ollamaUsable() ? 'ollama' : 'pinned';
+  }
+
+  function pinnedPhase() {
+    if (state.plan === null) return 'idle';
+    const allInstalled = state.models.length > 0 && state.models.every(function (model) {
+      return model.installed;
+    });
+    if (state.plan.verdict === 'insufficient') return 'insufficient';
+    return allInstalled ? 'ready' : 'needs-download';
+  }
+
   // `checkOllama` is a read-only detection: it never changes the pinned plan, never downloads and
   // never adopts the daemon. The effect is the delivered discovery by default; a call in flight is
   // shared so a double click cannot make two loopback requests.
@@ -582,6 +615,10 @@ export function createFirstRunWizard(options) {
     }
     if (!disposed) {
       state.ollama = summary;
+      if (source === 'ollama' && !ollamaUsable()) {
+        source = 'pinned';
+        state.phase = pinnedPhase();
+      }
       emit();
     }
     return summary;
@@ -630,6 +667,7 @@ export function createFirstRunWizard(options) {
     return Object.freeze({
       version: FIRST_RUN_VERSION,
       phase: state.phase,
+      source: effectiveSource(),
       verdict: plan === null ? null : plan.verdict,
       acceleration: plan === null ? null : plan.acceleration,
       notices: state.notices,
@@ -715,9 +753,11 @@ export function createFirstRunWizard(options) {
     state.progress = null;
     state.error = null;
     const allInstalled = verified.rows.every(function (row) { return row.installed; });
-    state.phase = plan.verdict === 'insufficient'
-      ? 'insufficient'
-      : allInstalled ? 'ready' : 'needs-download';
+    state.phase = effectiveSource() === 'ollama'
+      ? 'ready'
+      : plan.verdict === 'insufficient'
+        ? 'insufficient'
+        : allInstalled ? 'ready' : 'needs-download';
     emit();
     return view();
   }
@@ -799,6 +839,12 @@ export function createFirstRunWizard(options) {
     }
     if (state.phase === 'idle') await refresh();
     if (disposed) return { ok: false, reason: 'disposed' };
+    if (effectiveSource() === 'ollama' && state.plan !== null) {
+      state.phase = 'ready';
+      state.error = null;
+      emit();
+      return { ok: true, installed: 0, reason: 'ollama-selected' };
+    }
     if (state.phase === 'insufficient') return { ok: false, reason: 'insufficient' };
     if (state.plan === null) return { ok: false, reason: 'no-plan' };
     const allInstalled = state.models.every(function (model) { return model.installed; });
@@ -822,6 +868,32 @@ export function createFirstRunWizard(options) {
     installing = null;
   }
 
+  // Selecting a discovered daemon is an explicit action; `checkOllama` itself stays read-only.
+  function useOllama() {
+    if (disposed) return { ok: false, reason: 'disposed' };
+    if (installing !== null) return { ok: false, reason: 'busy' };
+    if (state.plan === null) return { ok: false, reason: 'not-ready' };
+    if (!ollamaUsable()) {
+      return { ok: false, reason: state.ollama === null ? 'not-checked' : 'ollama-unavailable' };
+    }
+    source = 'ollama';
+    state.phase = 'ready';
+    state.error = null;
+    emit();
+    return { ok: true, source: 'ollama' };
+  }
+
+  function usePinned() {
+    if (disposed) return { ok: false, reason: 'disposed' };
+    if (installing !== null) return { ok: false, reason: 'busy' };
+    if (state.plan === null) return { ok: false, reason: 'not-ready' };
+    source = 'pinned';
+    state.phase = pinnedPhase();
+    state.error = null;
+    emit();
+    return { ok: true, source: 'pinned' };
+  }
+
   return Object.freeze({
     version: FIRST_RUN_VERSION,
     refresh: refresh,
@@ -829,6 +901,8 @@ export function createFirstRunWizard(options) {
     startPlan: startPlan,
     runtimeOptions: runtimeOptions,
     checkOllama: checkOllama,
+    useOllama: useOllama,
+    usePinned: usePinned,
     view: view,
     dispose: dispose,
   });
