@@ -166,8 +166,10 @@ header.
 `checkOllama()`, which the first-run panel calls once on open and from its **Check for Ollama** button.
 The wizard re-reads the answer through own data descriptors and only exposes provider overrides that
 `toOllamaProviderOptions` re-validated, so a forged, stale, remote or wrong-base result yields no
-overrides. The daemon is reported beside the pinned plan and is never adopted automatically; the
-first-run panel notes that the daemon is reported for provider setup and that activation is not wired yet. See
+overrides. The daemon is reported beside the pinned plan and is never adopted automatically by
+`checkOllama()`: an explicit `useOllama()` selects it only while those validated overrides exist
+(`usePinned()` switches back), and a re-check that loses the daemon releases the selection. The
+first-run panel shows the daemon start plan and the bounded selection controls. See
 [m3-first-run-wizard.md](m3-first-run-wizard.md).
 
 ## Security boundary
@@ -220,7 +222,8 @@ authorization header.
 
 - Wire the same discovery into the B5 provider setup panel (M2 lane) so a discovered daemon can be
    activated without typing a URL, and render the bounded cloud/remote notice there; the first-run
-   wizard wiring is delivered, but its panel does not show the notice yet.
+   wizard detects the daemon and can now select it as the local runtime (`useOllama`/`usePinned`), and
+   its panel does not show the bounded notice yet.
 - Live smoke on a machine with Ollama, including the `tool_choice` question and one embedding model.
 - Use `POST /api/show` (one request per model, a `capabilities` array that includes `embedding` and
    `tools`, `omitempty` so absence means unknown) to replace the embedding heuristic once a live
