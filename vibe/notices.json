@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "reviewed": "2026-11-26",
+  "licenses": [
+    {
+      "id": "mit",
+      "name": "MIT License",
+      "url": "https://github.com/ggml-org/llama.cpp/blob/b12426/LICENSE",
+      "text": "vibe/licenses/mit.txt",
+      "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+    },
+    {
+      "id": "apache-2.0",
+      "name": "Apache License 2.0",
+      "url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "text": "vibe/licenses/apache-2.0.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "id": "apache-2.0-with-llvm-exception",
+      "name": "Apache License 2.0 with LLVM Exceptions",
+      "url": "https://llvm.org/LICENSE.txt",
+      "text": "vibe/licenses/apache-2.0-with-llvm-exception.txt",
+      "sha256": "fdad1758a9e1f9d5a81e18879b3406772115edc92c24bfa36b70c654f325e8e4"
+    }
+  ]
+}

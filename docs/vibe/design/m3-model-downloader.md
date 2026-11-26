@@ -177,4 +177,5 @@ The full acceptance uses `node vibe/tools/verify.mjs --strict` and
 The hardware probe, the first-run wizard, Ollama detection and the pin plus verified installer
 (`vibe/sidecars.json`, `src/stable/runtime/sidecar.mjs`) are delivered in their own design notes.
 Bundling the binary, signing the manifest and copying the catalog into the packaged application remain
-M3/M12 work.
+M3/M12 work. The Apache-2.0 text these models carry is delivered with the sidecar notice in
+[m3-third-party-notices.md](m3-third-party-notices.md).

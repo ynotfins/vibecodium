@@ -41,6 +41,8 @@ Vibecodium is a standalone, Windows-first AI IDE built on VSCodium. This folder 
 | [design/m3-first-run-wizard.md](design/m3-first-run-wizard.md) | M3 first-run wizard: catalog projection, install state, resumable download flow, pinned and local-daemon start plans, the pinned sidecar install in the start action, supervisor runtime options with the bounded restart policy, Ollama detection and selection, and the setup panel |
 | [design/m3-ollama.md](design/m3-ollama.md) | M3 local Ollama discovery: loopback /api/tags probe, bounded model projection, local chat and embedding selection, and the B1 preset overrides |
 | [design/m3-sidecar-binary.md](design/m3-sidecar-binary.md) | M3 pinned llama.cpp sidecar: the `vibe/sidecars.json` pin, digest-verified archive fetch, allowlisted ZIP extraction and idempotent executable install |
+| [design/m3-third-party-notices.md](design/m3-third-party-notices.md) | M3 third-party notices: the `vibe/notices.json` license ledger, verbatim texts pinned by SHA-256, and the generated notice document checked by `verify` |
+| [legal/THIRD-PARTY-NOTICES.md](legal/THIRD-PARTY-NOTICES.md) | Generated third-party notices for the pinned runtime components and models |
 | [CHANGELOG.md](CHANGELOG.md) | User-visible changes per release |
 | [SECURITY.md](SECURITY.md) | Security model and how to report issues |
 | [adr/README.md](adr/README.md) | Architecture decision records |

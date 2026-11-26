@@ -14,6 +14,7 @@ const steps = [
   ['governance', [path.join(tools, 'governance.mjs'), 'check']],
   ['agents', [path.join(tools, 'sync-agents.mjs'), '--check']],
   ['docs', [path.join(tools, 'docs-check.mjs'), ...(strict ? ['--strict'] : [])]],
+  ['notices', [path.join(tools, 'notices.mjs')]],
   ['tests', ['--test', ...tests]],
 ];
 
