@@ -20,3 +20,9 @@ docs/vibe/research/**
 # Vendored tree-sitter WASM runtime and grammars: third-party artifacts whose
 # formatting is pinned by size and checksum in the vendor README.
 src/stable/index-engine/vendor/tree-sitter/**
+
+# Third-party licence texts and the notice generated from them: verbatim upstream
+# bytes pinned by SHA-256 in vibe/notices.json, so their indentation must not be
+# reformatted (reformatting would change the digest and the licence text).
+vibe/licenses/**
+docs/vibe/legal/**
