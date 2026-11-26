@@ -46,13 +46,22 @@ review decide the pin instead.
    packaging slice must ship the llama.cpp MIT text from the source tree plus that OpenMP notice.
 5. Record the Microsoft Visual C++ 2015-2022 x64 runtime as a separate dependency (the CPU package
    needs `MSVCP140.dll`, `VCRUNTIME140.dll`, `VCRUNTIME140_1.dll`). It is not part of the llama.cpp
-   pin and must be pinned and supplied in M12 with its own license review.
+   pin, and it is proprietary Microsoft software, not a permissive open-source license: it does not
+   satisfy `ARCHITECTURE.md` principle 8 and must not be treated as if it does. Shipping it needs an
+   explicit owner decision under `GOVERNANCE.md` section 5, a proposal amending principle 8 under
+   `GOVERNANCE.md` section 3 (an owner note alone cannot change a locked doc), a `TECH_RADAR.md` row and
+   its own pin in M12; the license review records that decision.
 6. Re-pin only at a review, never automatically: a new nightly means a new tag, new digests, a fresh
    seven-day wait and a `TECH_RADAR.md` row update. No in-product self-update of the binary.
-7. Before the binary is bundled into a signed installer, the remaining gates apply: the signing route
-   stays owner-parked, the notices file ships, and the installer places the runtime in a product-owned
-   directory under the application-data root, never a path the webview supplies. An enforced seven-day
-   check in the loader and an authenticated manifest are later hardening, not part of this decision.
+7. The gates in `../design/m3-sidecar-binary.md` remain in force before the installer is enabled by
+   default or the binary is bundled: an authenticated manifest, or a `source`-to-URL binding plus an
+   enforced seven-day rule; an installer-owned `targetDir` under the application-data root, never a
+   webview-supplied path; and, for multi-process or POSIX use, a cross-process lock and a
+   descriptor-bound part-file read. This decision relaxes and defers none of them. The loader-side
+   seven-day enforcement and the chosen manifest-authentication route (an authenticated manifest, or the
+   binding plus its enforced check) are hardening that must land before either the installer is enabled by
+   default or the binary is bundled; the signing route stays owner-parked, the notices file ships, and the
+   installer-owned directory remains a gate.
 
 ## Alternatives considered
 
@@ -73,11 +82,13 @@ review decide the pin instead.
 - The product can verify and install a local runtime today without a bundler, and the intake rule is
    data plus a documented review, not a build-time guess.
 - Residual risks accepted: the tag is an upstream prerelease build with no upstream code signature
-   (the digest and the reviewed manifest are the trust anchor), and the extracted
+   (the review-time digest and the reviewed manifest are the current trust anchor, and the manifest is
+   not authenticated until the authenticated-manifest gate lands), and the extracted
    directory must be product-owned because a local writer could replace the binary after adoption.
 - The ADR does not approve a binary version; `vibe/sidecars.json` and `TECH_RADAR.md` do. The next
    review is 2026-12-03, when the `v1.1.0` build (`b12774`) becomes eligible if its digests verify; the
    review must also confirm that the radar row still carries the seven-day evidence, because the loader
    does not check it.
-- The signing route, the notices file, the Microsoft runtime pin and the installer-owned directory
+- The signing route, the manifest-authentication route, the notices file, the Microsoft runtime pin,
+   the installer-owned directory and the cross-process lock with its descriptor-bound part-file read
    remain open M3/M12 work, with the signing route parked for the owner.
