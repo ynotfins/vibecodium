@@ -15,9 +15,9 @@
 
 This is M3's licensing slice. It records which licenses the pinned runtime components carry, keeps
 the verbatim upstream license texts in the repository, and generates one notice document from those
-inputs. The generator fails closed when a pinned component's license has no ledger entry, when a text
-no longer matches its pinned digest, or when the checked-in document differs from the generator
-output, so a new pin cannot silently ship without a notice.
+inputs. The generator fails closed when a pinned component's license has no ledger entry or when a
+text no longer matches its pinned digest, and the notices check fails when the checked-in document
+differs from the generator output, so a new pin cannot silently ship without a notice.
 
 Out of scope: copying the installed files or the catalog into a packaged application, signing the
 manifest, installing the Microsoft VC++ runtime, the installer and portable zip notices placement
@@ -76,13 +76,14 @@ the document is missing or stale.
 
 `node --test tests/vibe/third-party-notices.test.mjs` covers the shipped ledger and its coverage of
 every pinned license, the digest cross-check against the sidecar pin, the component projection, the
-rendered document and its determinism, every rejected ledger field (Proxy, accessor, unknown and
-reserved key, duplicate or malformed identifier, non-HTTPS or credential-bearing URL, absolute or
-traversing text path, missing and malformed digest, invalid and future review date, too many
-entries), a missing and a mismatched license text, a body that carries the render fence, an empty or
-oversized body, a malformed component list, table escaping of `|`, `<`, `>`, `[` and `]`, a repeated
-license id, an unused ledger row whose text drifted, URL serialization that keeps a `<` or `>` out of
-the autolink, and the CLI in check and `--write` modes against a temporary root.
+rendered document and its determinism, every rejected ledger field (a trap-throwing or revoked
+Proxy, an accessor, an unknown or reserved key, a duplicate or malformed identifier, a non-HTTPS or
+credential-bearing URL, an absolute or traversing text path, a missing or malformed digest, an
+invalid or future review date, too many entries), a missing and a mismatched license text, a body
+that carries the render fence, an empty or oversized body, a malformed component list, table escaping
+of `|`, `<`, `>`, `[` and `]`, a repeated license id, an unused ledger row whose text drifted, URL
+serialization that keeps a `<` or `>` out of the autolink, and the CLI in check and `--write` modes
+against a temporary root.
 
 The full acceptance uses `node vibe/tools/verify.mjs --strict`, which now runs the notices check as
 its own step, and `node vibe/tools/docs-check.mjs --strict`.

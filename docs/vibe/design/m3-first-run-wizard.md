@@ -318,8 +318,10 @@ without failing a check.
 
 Copy the installed files and `vibe/models/catalog.json` into the packaged application (the pin,
 verified installer and start-action wiring are delivered in
-[m3-sidecar-binary.md](m3-sidecar-binary.md)), add the third-party notices and the Microsoft VC++
-2015-2022 x64 runtime, run one live install/start smoke on a clean Windows machine, and start the
-embedding server from a second plan (with `--embedding --pooling last -ub 8192` for the embedding
-weights). Offering the same discovered daemon in the B5 provider setup panel is M2 work. A real
-extension-host smoke of the panel and a rebuilt-app screenshot remain M6/M12 integration work.
+[m3-sidecar-binary.md](m3-sidecar-binary.md)), place the generated third-party notice beside the
+installed files and the application (see [m3-third-party-notices.md](m3-third-party-notices.md)),
+supply the Microsoft VC++ 2015-2022 x64 runtime, run one live install/start smoke on a clean Windows
+machine, and start the embedding server from a second plan (with `--embedding --pooling last -ub 8192`
+for the embedding weights). Offering the same discovered daemon in the B5 provider setup panel is M2
+work. A real extension-host smoke of the panel and a rebuilt-app screenshot remain M6/M12 integration
+work.
