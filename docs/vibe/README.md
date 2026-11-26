@@ -37,6 +37,7 @@ Vibecodium is a standalone, Windows-first AI IDE built on VSCodium. This folder 
 | [design/m3-model-downloader.md](design/m3-model-downloader.md) | M3 model catalog, resumable digest-verified downloader and free-space check |
 | [design/m3-hardware-probe.md](design/m3-hardware-probe.md) | M3 bounded hardware probe and the RAM/GPU-to-runtime recommendation policy |
 | [design/m3-first-run-wizard.md](design/m3-first-run-wizard.md) | M3 first-run wizard: catalog projection, install state, resumable download flow, start plan and the setup panel |
+| [design/m3-ollama.md](design/m3-ollama.md) | M3 local Ollama discovery: loopback /api/tags probe, bounded model projection, local chat and embedding selection, and the B1 preset overrides |
 | [CHANGELOG.md](CHANGELOG.md) | User-visible changes per release |
 | [SECURITY.md](SECURITY.md) | Security model and how to report issues |
 | [adr/README.md](adr/README.md) | Architecture decision records |
