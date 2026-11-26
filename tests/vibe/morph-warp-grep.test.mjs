@@ -988,6 +988,29 @@ test('format and bidi characters in workspace text are replaced instead of abort
   assert.equal(read.includes('\u200b'), false);
 });
 
+test('C1, bidi and line/paragraph separator characters are replaced in tool results', async (t) => {
+  const { root, mock, tool } = await fixture(t, scripted([
+    chatPayload('', [toolCall('call-1', 'grep_search', { pattern: 'needle' })]),
+    chatPayload('', [toolCall('call-2', 'read', { path: 'src/alpha.mjs', lines: '2-2' })]),
+    chatPayload('', [toolCall('call-3', 'finish', { files: 'src/alpha.mjs' })]),
+  ]));
+  const hostile = '\u0085\u202e\u2028\u2029';
+  await writeFile(path.join(root, 'src', 'alpha.mjs'), 'export const alpha = 1;\nexport const needle = "' + hostile + '";\nexport const omega = 3;\n', 'utf8');
+  const result = await tool.execute({ search_string: QUERY });
+  assert.equal(result.files[0].path, 'src/alpha.mjs');
+  const structure = mock.state.requests[0].body.messages[1].content;
+  const grep = toolResults(mock.state.requests[1].body.messages)[0].content;
+  assert.match(grep, /src\/alpha\.mjs:2:/);
+  const read = toolResults(mock.state.requests[2].body.messages)[1].content;
+  for (const character of ['\u0085', '\u202e', '\u2028', '\u2029']) {
+    assert.equal(structure.includes(character), false);
+    assert.equal(grep.includes(character), false);
+    assert.equal(read.includes(character), false);
+  }
+  assert.equal(grep.includes('\uFFFD'), true);
+  assert.equal(read.includes('\uFFFD'), true);
+});
+
 test('an oversized tool-call argument fails closed before it is echoed', async (t) => {
   const big = '{"pattern":"' + 'a'.repeat(70000) + '"}';
   const { mock, tool } = await fixture(t, scripted([
@@ -1012,4 +1035,16 @@ test('a glob result respects the tool output budget', async (t) => {
   const output = toolResults(mock.state.requests[1].body.messages)[0].content;
   assert.equal(output.length <= MAX_TOOL_OUTPUT_CHARS, true);
   assert.equal(output.includes('(truncated)'), true);
+});
+
+test('model reasoning text is sanitized before it is echoed into the next request', async (t) => {
+  const { mock, tool } = await fixture(t, scripted([
+    chatPayload('looking \u202e around', [toolCall('call-1', 'grep_search', { pattern: 'needle' })]),
+    chatPayload('', [toolCall('call-2', 'finish', { files: 'src/alpha.mjs' })]),
+  ]));
+  const result = await tool.execute({ search_string: QUERY });
+  assert.equal(result.files[0].path, 'src/alpha.mjs');
+  const assistant = mock.state.requests[1].body.messages.find((message) => message.role === 'assistant');
+  assert.equal(assistant.content.includes('\u202e'), false);
+  assert.equal(assistant.content.includes('\uFFFD'), true);
 });

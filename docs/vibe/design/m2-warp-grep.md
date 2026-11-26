@@ -124,7 +124,7 @@ failure uses a fixed `WarpGrepError` code (`invalid-input`, `invalid-options`, `
 
 ## Verification
 
-`node --test tests/vibe/morph-warp-grep.test.mjs` runs 45 tests. They cover the immutable schema, loop
+`node --test tests/vibe/morph-warp-grep.test.mjs` runs 47 tests. They cover the immutable schema, loop
 tools and `describe()` surface; a real B1 client against a local mock endpoint running a scripted
 grep/read/finish loop with the finished spans, bounded content, aggregated usage and the request shape
 (no `tools` array, the model's tools are built in) with no stream; whole-file and line-range finishes; default

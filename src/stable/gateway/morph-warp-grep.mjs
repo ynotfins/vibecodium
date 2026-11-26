@@ -1005,7 +1005,7 @@ export function createMorphWarpGrepTool(options) {
       }
       messages.push({
         role: 'assistant',
-        content: text,
+        content: sanitizeToolText(text),
         tool_calls: calls.map((call) => ({
           id: call.id,
           type: 'function',
