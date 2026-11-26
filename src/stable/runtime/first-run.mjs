@@ -16,7 +16,7 @@ import {
   validateCatalog,
   verifyInstalledModel,
 } from './model-downloader.mjs';
-import { validateLlamaExecutablePath } from './llama-server.mjs';
+import { validateLlamaExecutablePath, validateRestart } from './llama-server.mjs';
 import {
   discoverOllama as defaultDiscoverOllama,
   toOllamaProviderOptions,
@@ -30,13 +30,22 @@ export const MAX_NOTICES = 24;
 export const MAX_PATH_CHARS = 4096;
 export const MAX_ERROR_CODE_CHARS = 64;
 export const MAX_ERROR_MESSAGE_CHARS = 160;
+// The conservative restart/back-off policy the wizard hands to the supervisor when the caller does
+// not choose one: a bounded number of attempts, exponential delay and a stability reset. The
+// supervisor remains opt-in; a caller passes a different validated policy as `restart`.
+export const DEFAULT_FIRST_RUN_RESTART_POLICY = Object.freeze({
+  maxRestarts: 3,
+  baseDelayMs: 1_000,
+  maxDelayMs: 30_000,
+  stableMs: 60_000,
+});
 
 const RESERVED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const CONTROL_OR_BIDI = /[\u0000-\u001F\u007F-\u009F\p{Cf}\p{Zl}\p{Zp}]/u;
 const NOTICE_CODE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const OPTION_KEYS = new Set([
   'catalog', 'destinationDir', 'probe', 'downloadModel', 'verifyModel', 'runtimePath', 'onChange',
-  'discoverOllama',
+  'discoverOllama', 'restart',
 ]);
 const INSTALL_OPTION_KEYS = new Set(['signal']);
 const PROBE_RESULT_KEYS = new Set(['version', 'hardware', 'notices']);
@@ -426,6 +435,16 @@ export function createFirstRunWizard(options) {
       fail('invalid-options', 'runtimePath must name a readable llama-server executable');
     }
   }
+  let restartPolicy;
+  if (own.restart === undefined) {
+    restartPolicy = DEFAULT_FIRST_RUN_RESTART_POLICY;
+  } else {
+    try {
+      restartPolicy = validateRestart(own.restart);
+    } catch {
+      fail('invalid-options', 'restart must be a valid restart policy');
+    }
+  }
 
   let catalog;
   try {
@@ -503,7 +522,7 @@ export function createFirstRunWizard(options) {
     return { rows: rows, verifyFailed: verifyFailed };
   }
 
-  function startPlan() {
+  function startBlocker() {
     if (state.phase !== 'ready' || state.plan === null) {
       return Object.freeze({ available: false, reason: 'not-ready' });
     }
@@ -520,8 +539,18 @@ export function createFirstRunWizard(options) {
     if (runtimePath === null) {
       return Object.freeze({ available: false, reason: 'runtime-not-bundled' });
     }
-    const chat = entries.find(function (item) { return item.projected.role === 'chat'; });
-    const embedding = entries.find(function (item) { return item.projected.role === 'embedding'; });
+    return null;
+  }
+
+  function findRole(role) {
+    return entries.find(function (item) { return item.projected.role === role; });
+  }
+
+  function startPlan() {
+    const blocked = startBlocker();
+    if (blocked !== null) return blocked;
+    const chat = findRole('chat');
+    const embedding = findRole('embedding');
     return Object.freeze({
       available: true,
       kind: 'llama-server',
@@ -531,6 +560,27 @@ export function createFirstRunWizard(options) {
       contextSize: state.plan.contextSize,
       threads: state.plan.threads,
       gpuLayers: state.plan.gpuLayers,
+      restart: restartPolicy,
+    });
+  }
+
+  // The hand-off to the supervisor: exactly the options `createLlamaServer` accepts, with the same
+  // validated flags and restart policy the start plan reports. It never spawns; the caller owns the
+  // process boundary and the supervisor re-validates every field.
+  function runtimeOptions() {
+    const blocked = startBlocker();
+    if (blocked !== null) return blocked;
+    const chat = findRole('chat');
+    return Object.freeze({
+      available: true,
+      options: Object.freeze({
+        executablePath: runtimePath,
+        modelPath: path.join(destinationDir, chat.entry.file),
+        contextSize: state.plan.contextSize,
+        threads: state.plan.threads,
+        gpuLayers: state.plan.gpuLayers,
+        restart: restartPolicy,
+      }),
     });
   }
 
@@ -849,6 +899,7 @@ export function createFirstRunWizard(options) {
     refresh: refresh,
     install: install,
     startPlan: startPlan,
+    runtimeOptions: runtimeOptions,
     checkOllama: checkOllama,
     useOllama: useOllama,
     usePinned: usePinned,

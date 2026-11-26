@@ -5,6 +5,14 @@ import {
   createFirstRunController,
   renderFirstRunHtml,
 } from '../../src/stable/extensions/vibecodium-ai/src/first-run.cjs';
+import {
+  MAX_RESTARTS,
+  MAX_RESTART_DELAY_MS,
+  MAX_RESTART_STABLE_MS,
+  MIN_RESTARTS,
+  MIN_RESTART_DELAY_MS,
+  MIN_RESTART_STABLE_MS,
+} from '../../src/stable/runtime/llama-server.mjs';
 
 const chatId = 'qwen2.5-coder-1.5b-q4-k-m';
 const embeddingId = 'qwen3-embedding-0.6b-q8-0';
@@ -191,6 +199,102 @@ test('a ready plan starts from the panel without spawning it', async (t) => {
   assert.equal(started.ok, true);
   assert.equal(wizard.calls.start, 1);
   assert.match(controller.html(), /ready to start/);
+});
+
+test('the local runtime section shows the bounded restart policy and omits a malformed one', () => {
+  const start = {
+    available: true,
+    modelPath: 'C:/models/chat.gguf',
+    contextSize: 8192,
+    threads: 6,
+    gpuLayers: 0,
+    restart: { maxRestarts: 3, baseDelayMs: 1000, maxDelayMs: 30000, stableMs: 60000 },
+  };
+  function render(restart) {
+    return renderFirstRunHtml(baseView({
+      installed: true,
+      phase: 'ready',
+      start: Object.assign({}, start, { restart }),
+    }));
+  }
+  const html = render(start.restart);
+  assert.match(html, /Restarts automatically up to 3 times/);
+  assert.match(html, /back-off from 1 s to 30 s/);
+  assert.match(html, /a run stable for 60 s resets the count/);
+  assert.match(render(Object.assign({}, start.restart, { stableMs: 0 })), /a stable run never resets the count/);
+  assert.match(render(Object.assign({}, start.restart, { maxRestarts: 1 })), /up to 1 time with/);
+  assert.match(render(Object.assign({}, start.restart, { baseDelayMs: 1500 })), /from 1500 ms/);
+
+  for (const restart of [
+    undefined,
+    null,
+    { maxRestarts: '3', baseDelayMs: 1000, maxDelayMs: 30000, stableMs: 60000 },
+    { maxRestarts: 0, baseDelayMs: 1000, maxDelayMs: 30000, stableMs: 60000 },
+    { maxRestarts: 3 },
+    {},
+    Object.assign({}, start.restart, { extra: 1 }),
+    { constructor: 1, maxRestarts: 3, baseDelayMs: 1000, maxDelayMs: 30000 },
+    // Values outside the supervisor's validated ranges are not a usable policy, so the line must be
+    // omitted just like a malformed one rather than rendered as a misleading restart budget.
+    { maxRestarts: 11, baseDelayMs: 1000, maxDelayMs: 30000, stableMs: 60000 },
+    { maxRestarts: 3, baseDelayMs: 1, maxDelayMs: 30000, stableMs: 60000 },
+    { maxRestarts: 3, baseDelayMs: 5000, maxDelayMs: 1000, stableMs: 60000 },
+    { maxRestarts: 3, baseDelayMs: 1000, maxDelayMs: 30000, stableMs: 600001 },
+  ]) {
+    assert.equal(/Restarts automatically/.test(render(restart)), false,
+      'an impossible policy must not render a restart line: ' + JSON.stringify(restart));
+  }
+
+  let accessorCalls = 0;
+  const accessorStart = Object.assign({}, start);
+  Object.defineProperty(accessorStart, 'restart', {
+    enumerable: true,
+    get() {
+      accessorCalls += 1;
+      return start.restart;
+    },
+  });
+  const accessorHtml = renderFirstRunHtml(baseView({ installed: true, phase: 'ready', start: accessorStart }));
+  assert.equal(/Restarts automatically/.test(accessorHtml), false);
+  assert.equal(accessorCalls, 0);
+
+  const revoked = Proxy.revocable(start.restart, {});
+  revoked.revoke();
+  assert.equal(/Restarts automatically/.test(render(revoked.proxy)), false);
+});
+
+test('the panel restart bounds stay aligned with the supervisor validator', () => {
+  const policy = { maxRestarts: 3, baseDelayMs: 1000, maxDelayMs: 30000, stableMs: 60000 };
+  function renderRestartPolicy(overrides) {
+    return renderFirstRunHtml(baseView({
+      installed: true,
+      phase: 'ready',
+      start: {
+        available: true,
+        modelPath: 'C:/models/chat.gguf',
+        contextSize: 8192,
+        threads: 6,
+        gpuLayers: 0,
+        restart: Object.assign({}, policy, overrides),
+      },
+    }));
+  }
+  function omitted(overrides) {
+    return /Restarts automatically/.test(renderRestartPolicy(overrides)) === false;
+  }
+  assert.equal(omitted({ maxRestarts: MIN_RESTARTS - 1 }), true);
+  assert.equal(omitted({ maxRestarts: MAX_RESTARTS + 1 }), true);
+  assert.match(renderRestartPolicy({ maxRestarts: MIN_RESTARTS }), /Restarts automatically/);
+  assert.match(renderRestartPolicy({ maxRestarts: MAX_RESTARTS }), /Restarts automatically/);
+  assert.equal(omitted({ baseDelayMs: MIN_RESTART_DELAY_MS - 1 }), true);
+  assert.equal(omitted({ baseDelayMs: MAX_RESTART_DELAY_MS + 1 }), true);
+  assert.equal(omitted({ baseDelayMs: MAX_RESTART_DELAY_MS, maxDelayMs: MAX_RESTART_DELAY_MS }), false);
+  assert.equal(omitted({ baseDelayMs: 5000, maxDelayMs: 1000 }), true);
+  assert.equal(omitted({ stableMs: MIN_RESTART_STABLE_MS - 1 }), true);
+  assert.equal(omitted({ stableMs: MAX_RESTART_STABLE_MS + 1 }), true);
+  assert.match(renderRestartPolicy({ stableMs: MIN_RESTART_STABLE_MS }), /resets the count/);
+  assert.match(renderRestartPolicy({ stableMs: MAX_RESTART_STABLE_MS }), /resets the count/);
+  assert.match(renderRestartPolicy({ stableMs: 0 }), /never resets/);
 });
 
 test('a missing bundled binary is reported as a clear message', async (t) => {
