@@ -9,6 +9,8 @@ import test from 'node:test';
 import {
   LOOPBACK_HOST,
   LlamaServerError,
+  MAX_API_KEY_CHARS,
+  MIN_API_KEY_CHARS,
   buildLlamaServerArgs,
   createLlamaServer,
   reserveLoopbackPort,
@@ -226,7 +228,7 @@ test('an unusable apiKey fails closed without echoing the value', (t) => {
   const marker = 'Q'.repeat(30);
   for (const apiKey of [
     'short', 'k'.repeat(129), marker + ',', marker + ' ', marker + '\n', marker + '\u0007',
-    marker + '\u202E', 42, null,
+    marker + '\u202E', marker + '"', marker + '\\', 42, null,
   ]) {
     try {
       createLlamaServer({ ...base, apiKey });
@@ -244,6 +246,69 @@ test('an unusable apiKey fails closed without echoing the value', (t) => {
     get() { throw new Error('getter invoked'); },
   });
   assert.throws(() => createLlamaServer(accessor), isCode('invalid-options'));
+});
+
+test('an apiKey of valid length is still rejected for an unsafe character, without echoing it', (t) => {
+  const { modelPath } = makeModel(t);
+  const base = { executablePath: NODE, commandArgs: [FIXTURE], modelPath };
+  // Keep the sample inside the 32-128 window so the length check cannot mask the character check.
+  const atLength = (suffix) => 'a'.repeat(40 - suffix.length) + suffix;
+  for (const suffix of [',', ' ', '\n', '\u0007', '\u007f', '\u202E', '\u00e9', '"', '\\']) {
+    const apiKey = atLength(suffix);
+    assert.ok(
+      apiKey.length >= MIN_API_KEY_CHARS && apiKey.length <= MAX_API_KEY_CHARS,
+      'the sample is inside the length window',
+    );
+    try {
+      createLlamaServer({ ...base, apiKey });
+      assert.fail('expected a rejection for ' + JSON.stringify(apiKey));
+    } catch (error) {
+      assert.equal(error.code, 'invalid-api-key');
+      assert.ok(!error.message.includes(apiKey), 'the rejected key is never echoed');
+    }
+  }
+});
+
+test('an apiKey at either length bound is accepted and each controller generates its own key', (t) => {
+  const { modelPath } = makeModel(t);
+  const base = { executablePath: NODE, commandArgs: [FIXTURE], modelPath };
+  for (const apiKey of ['k'.repeat(MIN_API_KEY_CHARS), 'k'.repeat(MAX_API_KEY_CHARS)]) {
+    assert.equal(createLlamaServer({ ...base, apiKey }).auth().apiKey, apiKey);
+  }
+  const first = createLlamaServer(base).auth().apiKey;
+  const second = createLlamaServer(base).auth().apiKey;
+  assert.match(first, /^[A-Za-z0-9_-]{43}$/, 'the generated key is 32 random bytes in base64url');
+  assert.notEqual(first, second, 'each controller generates its own key');
+});
+
+test('a 403 from the authenticated probe is a foreign listener and the child is reaped', async (t) => {
+  let logPath = null;
+  const { server, log } = makeServer(t, {
+    fetch: async (url) => {
+      const deadlineAt = Date.now() + 3000;
+      while (logPath !== null && !existsSync(logPath) && Date.now() < deadlineAt) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      if (String(url).endsWith('/health')) return new Response('{}', { status: 200 });
+      return new Response('{}', { status: 403 });
+    },
+    startupTimeoutMs: 5000,
+    healthIntervalMs: 20,
+  });
+  logPath = log;
+  const key = server.auth().apiKey;
+  let caught = null;
+  try {
+    await server.start();
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(caught instanceof LlamaServerError && caught.code === 'readiness-mismatch');
+  assert.ok(!caught.message.includes(key), 'the readiness error never echoes the key');
+  assert.equal(server.status().state, 'stopped');
+  assert.equal(server.status().pid, null);
+  assert.equal(server.status().port, null);
+  assert.equal(await waitGone(readArgv(log).pid), true, 'a 403 listener is treated as foreign and the child is killed');
 });
 
 test('a listener that rejects the generated key fails readiness and is reaped', async (t) => {
@@ -492,17 +557,27 @@ test('options fail closed without spawning', (t) => {
     { commandArgs: ['--api-key-file', 'x'] },
     { commandArgs: ['--model', 'x'] },
     { commandArgs: ['--model=x'] },
+    { commandArgs: ['-m', 'x'] },
     { commandArgs: ['--no-webui'] },
+    { commandArgs: ['--no-webui=true'] },
     { commandArgs: ['--webui'] },
+    { commandArgs: ['--webui=true'] },
     { commandArgs: ['--ui'] },
+    { commandArgs: ['--ui=true'] },
     { commandArgs: ['--no-ui'] },
+    { commandArgs: ['--no-ui=true'] },
     { commandArgs: ['--cors-origins', 'localhost'] },
     { commandArgs: ['--cors-origins=*'] },
     { commandArgs: ['--cors-methods', 'GET'] },
+    { commandArgs: ['--cors-methods=GET'] },
     { commandArgs: ['--cors-headers', 'x'] },
+    { commandArgs: ['--cors-headers=Authorization'] },
     { commandArgs: ['--cors-credentials'] },
+    { commandArgs: ['--cors-credentials=true'] },
     { commandArgs: ['--no-cors-credentials'] },
+    { commandArgs: ['--no-cors-credentials=true'] },
     { commandArgs: ['--allow-unauthenticated-tools'] },
+    { commandArgs: ['--allow-unauthenticated-tools=true'] },
     { env: { LLAMA_API_KEY: 'x' } },
     { env: { llama_api_key: 'x' } },
     { env: { Llama_Api_Key: 'x' } },
@@ -718,6 +793,7 @@ test('a crash while running restarts on the same port after the back-off', async
     crashMs: 150,
     restart: { maxRestarts: 2, baseDelayMs: 200, maxDelayMs: 500, stableMs: 60_000 },
   });
+  const key = server.auth().apiKey;
   const first = await server.start();
   assert.equal(await waitForState(server, 'restarting'), true);
   assert.equal(server.status().port, first.port, 'the restart keeps the target port');
@@ -729,6 +805,7 @@ test('a crash while running restarts on the same port after the back-off', async
   assert.notEqual(second.pid, first.pid);
   assert.equal(second.restarts, 1);
   assert.equal(second.failure, null);
+  assert.equal(server.auth().apiKey, key, 'the key is unchanged across the restart');
   assert.equal(startsCount(starts), 2);
   assert.deepEqual(await server.health(), { ok: true, status: 200 });
   const client = createProviderClient('llama-cpp', {

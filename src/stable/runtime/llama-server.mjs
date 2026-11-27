@@ -7,12 +7,14 @@
 // instead of the full process environment. The module performs one health request and otherwise
 // keeps no network state; chat, embeddings and infill calls go through `provider-client.mjs`.
 //
-// The child is authenticated. Every controller gets an API key (generated when the caller does not
-// supply one), the child receives it only through `LLAMA_API_KEY`, the web UI is disabled and CORS
-// is pinned to `localhost`, so another local process cannot drive the model or scrape the UI. A
-// start is only reported ready once the public `/health` probe answers and an authenticated
-// `/props` probe with the same key is accepted; a listener that rejects the key is not our child and
-// fails the start with `readiness-mismatch` after the child is reaped.
+// The child is authenticated. Every controller owns one API key (generated when the caller does not
+// supply one and reused for the controller's lifetime), the child receives it only through
+// `LLAMA_API_KEY`, the web UI is disabled and CORS is same-origin only, so the API key is what keeps
+// another local process from driving the model and `--no-webui` keeps the UI off. A start is only
+// reported ready once the public `/health` probe answers and an authenticated `/props` probe with the
+// same key is accepted; a listener that answers `/health` but rejects the key is not our child and
+// fails the start with `readiness-mismatch` after the child is reaped. A squatter that answers 200 on
+// both endpoints would still be accepted, because the key is only checked for acceptance there.
 //
 // A caller may opt into a bounded restart/back-off policy: an unexpected exit while serving is
 // retried on the same port with exponential back-off, a small budget and a stability reset, and the
@@ -74,10 +76,14 @@ const API_KEY_PATTERN = /^[\x21-\x7E]+$/u;
 // cannot be rewritten by a caller.
 const RESERVED_SERVER_ARGS = new Set([
   '--host', '--port', '--no-webui', '--webui', '--ui', '--no-ui',
-  '--cors-credentials', '--no-cors-credentials', '--allow-unauthenticated-tools',
+  '--cors-credentials', '--no-cors-credentials', '--allow-unauthenticated-tools', '-m',
 ]);
 const RESERVED_SERVER_ARG_PREFIXES = Object.freeze([
   '--host=', '--port=', '--api-key', '--model', '--cors-origins', '--cors-methods', '--cors-headers',
+  // A boolean flag takes no value in llama.cpp, but refusing the `=` spelling too keeps the rule
+  // uniform and survives a future release that starts accepting one.
+  '--no-webui=', '--webui=', '--ui=', '--no-ui=', '--cors-credentials=', '--no-cors-credentials=',
+  '--allow-unauthenticated-tools=',
 ]);
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const OPTION_KEYS = new Set([
@@ -249,14 +255,15 @@ function validateInteger(value, label, minimum, maximum, code) {
 }
 
 // The key must be long enough to be unguessable, printable and single-valued. The message never
-// includes the value.
+// includes the value. A comma separates keys and llama.cpp parses the value as CSV, whose quote and
+// escape characters could split one caller key into several, so all three are refused.
 function validateApiKey(value) {
   if (typeof value !== 'string') fail('invalid-api-key', 'apiKey must be a string');
   if (value.length < MIN_API_KEY_CHARS || value.length > MAX_API_KEY_CHARS) {
     fail('invalid-api-key', 'apiKey must be between ' + MIN_API_KEY_CHARS + ' and ' + MAX_API_KEY_CHARS + ' characters');
   }
-  if (!API_KEY_PATTERN.test(value) || value.includes(',') || CONTROL_OR_BIDI.test(value)) {
-    fail('invalid-api-key', 'apiKey must be printable ASCII without commas or whitespace');
+  if (!API_KEY_PATTERN.test(value) || /[,"\\]/u.test(value) || CONTROL_OR_BIDI.test(value)) {
+    fail('invalid-api-key', 'apiKey must be printable ASCII without commas, quotes, backslashes or whitespace');
   }
   return value;
 }
@@ -412,8 +419,8 @@ export function buildLlamaServerArgs(config) {
   const own = readOwnData(config, 'config', ARG_KEYS);
   const modelPath = validateLlamaModelPath(own.modelPath);
   const port = validateInteger(own.port, 'port', MIN_PORT, MAX_PORT, 'invalid-port');
-  // The web UI is not part of the product and CORS only admits a caller on the loopback origin, so
-  // a page in a browser on this machine cannot drive the model.
+  // The web UI is not part of the product and CORS is same-origin only, so a page in a browser on
+  // this machine cannot drive the model; a local process is held back by the API key, not by CORS.
   const args = [
     '--model', modelPath, '--host', LOOPBACK_HOST, '--port', String(port),
     '--no-webui', '--cors-origins', 'localhost',
@@ -686,9 +693,10 @@ export function createLlamaServer(options) {
   }
 
   // The public /health answer only proves that something is listening on the port; any local
-  // process can bind it first. /props requires the key, so only the child that received our
-  // LLAMA_API_KEY accepts this request. A 401 or 403 is therefore a foreign listener, not a child
-  // that is still loading.
+  // process can bind it first. /props requires the key, so a listener that rejects our key is not the
+  // child we spawned. A 401 or 403 is therefore a foreign listener, not a child that is still
+  // loading; a listener that answers 200 on both endpoints is still accepted, which is the residual
+  // port-race risk.
   function probeAuthenticated(port) {
     return request(port, '/props', {
       accept: 'application/json',

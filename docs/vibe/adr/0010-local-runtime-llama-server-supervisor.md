@@ -31,9 +31,10 @@ Ship `src/stable/runtime/llama-server.mjs` as a dependency-free supervisor for a
 - The server flags are fixed: `--model`, `--host`, `--port`, `--no-webui`,
    `--cors-origins localhost`, plus optional bounded `--ctx-size`, `--threads` and `--n-gpu-layers`.
    Caller prefix arguments may not set the bind host, port, model, API key, web UI or CORS posture.
-- Every controller owns a per-start API key (32 random bytes in base64url, or a validated
-   caller-supplied one). The child receives it only as `LLAMA_API_KEY`, the web UI is off, and a
-   client that is given the key authenticates with `Authorization: Bearer <key>`.
+- Every controller owns one API key for its lifetime (32 random bytes in base64url, or a validated
+  caller-supplied one), reused across stops and restarts. The child receives it only as
+  `LLAMA_API_KEY`, the web UI is off, and a client that is given the key authenticates with
+  `Authorization: Bearer <key>`.
 - Readiness means the public `GET /health` returned 200 and an authenticated `GET /props` with the
    key returned 200 before the startup deadline. A listener that answers `/health` but rejects the
    key is not our child: the start stops the child and fails as `readiness-mismatch`. A never-ready
@@ -60,11 +61,14 @@ supervisor boundary, not a binary version.
 - A local model server runs on loopback only and inherits no provider credential or user `PATH`.
 - The supervisor is a process boundary, not a content boundary: request bodies and model output do
    not pass through it.
-- The loopback port is authenticated and the web UI and permissive CORS are off, so a local process
-   or a visited web page cannot drive the model with a plain request. The key lives in the
-   controller's closure and the child's environment, so a debugger or an administrator can still
-   read it, and a client that checks only `/health` would still accept a foreign listener between
-   the child's exit and the next start.
+- The loopback port is authenticated, so a local process cannot drive the model without the key, and
+   the web UI is off, so a visited web page has nothing to scrape; `--cors-origins localhost` makes
+   the API same-origin only for a page. The key lives in the controller's closure and the child's
+   environment, so a debugger or an administrator can still read it. Readiness and `health()` reject a
+   listener that answers `/health` but rejects the key; a listener that binds the reserved port and
+   answers 200 on `/props` too is still accepted, and the probe sends it the key, so a narrow
+   bind-then-close race (wider on a caller-supplied fixed port) remains and a client that checks only
+   `/health` would still accept a foreign listener between the child's exit and the next start.
 - The key must reach the B1 client: the `llama-cpp` preset uses `auth: 'bearer'` with
    `apiKeyRequired: false`, and the host wiring that passes `runtime.auth().apiKey` to that client is
    the next M3 slice. Until it lands, the product's own local chat path is unauthenticated against

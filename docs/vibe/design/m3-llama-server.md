@@ -35,7 +35,7 @@ the argument list, every error message and the retained output tail.
 | `executablePath` | absolute path to the `llama-server` executable (`.exe` on Windows, executable bit on POSIX) | required |
 | `commandArgs` | optional caller-provided prefix args, passed literally before the server flags | `[]` |
 | `modelPath` | absolute path to an existing `.gguf` file | required |
-| `apiKey` | API key the child must accept, 32 to 128 printable ASCII characters, no comma, no control or bidi character | 32 random bytes in base64url (43 characters), generated once per controller |
+| `apiKey` | API key the child must accept, 32 to 128 printable ASCII characters, no comma, quote, backslash, whitespace, control or bidi character | 32 random bytes in base64url (43 characters), generated once per controller and reused for its lifetime |
 | `port` | loopback port from 1024 to 65535 | one reserved ephemeral port |
 | `contextSize` | `--ctx-size`, 1 to 1,048,576 | omitted |
 | `threads` | `--threads`, 1 to 256 | omitted |
@@ -56,19 +56,22 @@ The server flags are exactly `--model <path> --host 127.0.0.1 --port <port> --no
 --cors-origins localhost`, followed in order by `--ctx-size`, `--threads` and `--n-gpu-layers` when
 supplied. The key is never an argument: llama.cpp reads it from `LLAMA_API_KEY`, so it cannot appear
 in a process listing. `commandArgs` precedes that list and exists for a wrapper or a test harness; it
-is not derived from user content. It may not set `--host`, `--port`, `--model`, `--no-webui`,
+is not derived from user content. It may not set `-m`, `--host`, `--port`, `--model`, `--no-webui`,
 `--webui`, `--ui`, `--no-ui`, `--cors-credentials`, `--no-cors-credentials`,
 `--allow-unauthenticated-tools` or any `--api-key*`, `--model*`, `--cors-origins*`, `--cors-methods*`
-or `--cors-headers*` spelling (the `=` forms included); the supervisor always appends its own
-loopback host, reserved port, model, key posture, web-UI and CORS flags.
+or `--cors-headers*` spelling (the `=` forms of every one of these are refused too); the supervisor
+always appends its own loopback host, reserved port, model, key posture, web-UI and CORS flags.
 
 `start()` resolves only after `GET /health` on `127.0.0.1:<port>` returns 200 and an authenticated
 `GET /props` with `Authorization: Bearer <key>` also returns 200, then reports the state `running`,
-the chosen port, `http://127.0.0.1:<port>/v1` and the child pid. The second probe is the ownership
-check: `/health` is public in llama.cpp, so any local process can answer it, while `/props` answers
-only to a server that received our key. A 401 or 403 from `/props` therefore means the listener is
-not our child: the start stops the child, returns the state to `stopped` and rejects with
-`readiness-mismatch`. A second `start()` while
+the chosen port, `http://127.0.0.1:<port>/v1` and the child pid. The second probe narrows the
+readiness gap: `/health` is public in llama.cpp, so any local process can answer it, while `/props`
+requires the key. A 401 or 403 from `/props` therefore means the listener is not our child: the start
+stops the child, returns the state to `stopped` and rejects with `readiness-mismatch`. A listener
+that binds the reserved port and answers 200 on both endpoints is still accepted, so the second probe
+is not a proof of ownership; the port is reserved with a bind-then-close and an ephemeral port
+narrows that race, while a caller-supplied fixed port makes it reachable by any local process that
+wins the race. A second `start()` while
 running returns the same snapshot. A concurrent `stop()` is serialized with `start()`: the stop flag
 is checked after the port is reserved (before the spawn), at the start of every health iteration, and
 after a successful probe (before readiness is accepted), so a stop that arrives while the port is
@@ -87,7 +90,8 @@ spends the budget and is retried until the budget is spent. An exit while `runni
 `health()` never throws and only probes while the controller is running: outside that state it
 reports `{ ok: false, status: 0 }`, so a released port cannot be mistaken for a healthy server. The
 probe is the authenticated `GET /props` with the controller's key, not the public `/health`, so a
-foreign listener that took the port reports not-ready instead of healthy. A reachable non-200 answer
+listener that rejects the key reports not-ready instead of healthy (a listener that answers 200 on
+`/props` is still treated as the runtime). A reachable non-200 answer
 reports its HTTP status as `{ ok: false, status: <http status> }`.
 
 ## Restart and back-off
@@ -140,9 +144,10 @@ ordinary names are trusted. A Windows child may still carry a few OS-added ident
 (`USERNAME`, `WINDIR` and similar) that Node adds on Windows; the security-relevant
 inheritance property is that no arbitrary parent variable or provider key reaches the child.
 
-Caller prefix arguments are a trusted surface, but the supervisor's own posture is not: `--host`/
-`--port`/`--model` (and their `=` forms), every `--api-key*` spelling, the web-UI flags, the CORS
-flags and `--allow-unauthenticated-tools` must not be set, and `--reuse-port`, `--agent`/`-ag`/
+Caller prefix arguments are a trusted surface, but the supervisor's own posture is not: `-m`,
+`--host`/`--port`/`--model` (and their `=` forms), every `--api-key*` spelling, the web-UI flags, the
+CORS flags and `--allow-unauthenticated-tools` must not be set (the `=` form of each boolean flag is
+refused too), and `--reuse-port`, `--agent`/`-ag`/
 `--ui-agent`, `--tools`, `--mcp-*` and `--ui-mcp-proxy` are refused because they would weaken the
 loopback-only, authenticated or no-tools guarantee. `--` is not a terminator in llama.cpp (it rejects
 the argument), and the supervisor's own flags cannot appear earlier in the list, so none of them can
@@ -185,11 +190,14 @@ The supervisor is a process boundary, not a content boundary. It does not read c
 environment, or pass the full process environment; see Environment above. Request bodies,
 responses and model text never pass through this module.
 
-The loopback port is authenticated per start. The key is generated from 32 random bytes (base64url,
-43 characters) unless the caller supplies one, the child receives it only as `LLAMA_API_KEY`, the web
-UI is disabled and CORS admits only `localhost`, readiness requires an authenticated `/props` answer,
-and a foreign listener fails the start instead of being accepted. `auth()` is the only read path, so
-a snapshot, a log line or a crash report cannot carry the key. The `llama-cpp` preset now uses
+The loopback port is authenticated for the controller's lifetime. Each controller owns one key,
+generated from 32 random bytes (base64url, 43 characters) unless the caller supplies one, and reuses
+it across stops and restarts; the child receives it only as `LLAMA_API_KEY`. The web UI is disabled
+and CORS is same-origin only, while the API key is what stops another local process from driving the
+model. Readiness requires an authenticated `/props` answer, so a listener that rejects the key fails
+the start as `readiness-mismatch`; a listener that answers 200 on both endpoints is still accepted,
+and that port race is recorded as a residual risk. `auth()` is the only read path, so a snapshot, a
+log line or a crash report cannot carry the key. The `llama-cpp` preset now uses
 `auth: 'bearer'` with `apiKeyRequired: false`, so a client that is given the key sends
 `Authorization: Bearer <key>` while a plain `llama-server` without a key still works. The host
 wiring that passes `runtime.auth().apiKey` to that client is the next M3 slice; until it lands the
@@ -248,18 +256,20 @@ streamed and non-streamed tool calls, embeddings and `/infill`, with the key and
 fixture for the same paths without it; the first-run wizard will use the same client and key.
 
 The authenticated loopback boundary has its own cases in the same file: a started controller reports
-a generated key of 32 to 128 URL-safe characters through `auth()` and nowhere in `status()`,
-`describe()`, `config`, the argument list or the child's argv log, while the fixture sees
-`LLAMA_API_KEY`; a caller-supplied key is accepted, sent on chat and `/props`, unchanged across a
-stop and reused on restart; a key that is too short or too long, contains a comma, a space, a
-newline, a control or bidi character or is not a string fails as `invalid-api-key` without echoing
-the value, and an accessor is refused without being invoked; a fake listener that answers `/health`
-with 200 and `/props` with 401 fails the start as `readiness-mismatch`, leaves the controller
+a generated key of 43 base64url characters through `auth()` and nowhere in `status()`, `describe()`,
+`config`, the argument list or the child's argv log, while the fixture sees `LLAMA_API_KEY`; the two
+length bounds (32 and 128) are accepted and two controllers generate different keys; a caller-supplied
+key is accepted, sent on chat and `/props`, unchanged across a stop and reused on restart; a key that
+is too short or too long, contains a comma, a quote, a backslash, a space, a newline, a control or
+bidi character or is not a string fails as `invalid-api-key` without echoing the value, including a
+sample of valid length so the character check cannot be masked by the length check, and an accessor
+is refused without being invoked; a fake listener that answers `/health` with 200 and `/props` with
+401, and one that answers 403, fails the start as `readiness-mismatch`, leaves the controller
 `stopped` with no pid or port, is proven dead through `process.kill(pid, 0)` and is seen to have
 received the `Authorization: Bearer` header; and the fail-closed option matrix refuses every reserved
-`commandArgs` spelling (`--api-key`, `--api-key-file`, `--model`, the UI and CORS flags,
-`--allow-unauthenticated-tools`, case variants and `=` forms) and every `LLAMA_API_KEY` environment
-override. The living `llama-cpp` preset contract is covered by
+`commandArgs` spelling (`-m`, `--api-key`, `--api-key-file`, `--model`, the UI and CORS flags,
+`--allow-unauthenticated-tools`, case variants and the `=` form of each) and every `LLAMA_API_KEY`
+environment override. The living `llama-cpp` preset contract is covered by
 `node --test tests/vibe/provider-presets.test.mjs`.
 
 The restart policy has its own cases in the same file, with the fixture counting boots through
