@@ -177,8 +177,8 @@ be duplicated or shadowed. Caller-chosen numeric flags such as `--threads` remai
    `invalid-command-args`, `invalid-env`, `invalid-options`: a bounded option is malformed, an
    accessor was supplied, an unknown field appeared or a reserved key was read.
 - `invalid-api-key`: a caller-supplied key is not a string, is shorter than 32 or longer than 128
-   characters, or contains a comma, whitespace, a non-ASCII or a control or bidi character. The
-   message is fixed and never echoes the value.
+   characters, or contains a comma, quote, backslash, whitespace, a non-ASCII or a control or bidi
+   character. The message is fixed and never echoes the value.
 - `invalid-host`: validator-only (`validateLoopbackHost`); it accepts only `127.0.0.1`, and the
    controller has no host option.
 - `runtime-unavailable`: the host has no `fetch` implementation.
@@ -271,11 +271,11 @@ sample of valid length so the character check cannot be masked by the length che
 is refused without being invoked; a fake listener that answers `/health` with 200 and `/props` with
 401, and one that answers 403, fails the start as `readiness-mismatch`, leaves the controller
 `stopped` with no pid or port, is proven dead through `process.kill(pid, 0)` and is seen to have
-received the `Authorization: Bearer` header; and the fail-closed option matrix refuses every reserved
-`commandArgs` spelling (`-m`, `--api-key`, `--api-key-file`, `--model`, the UI and CORS flags,
+received the `Authorization: Bearer` header; and the fail-closed option matrix refuses the reserved
+`commandArgs` families (`-m`, `--api-key`, `--api-key-file`, `--model`, the UI and CORS flags,
 `--allow-unauthenticated-tools`, the remote-model sources `-mu`/`--model-url`, `-hf`/`--hf-repo`,
-`-dr`/`--docker-repo`, the peer tunnel `--connect`, case variants, the underscore spelling of each and
-the `=` form of each) and every `LLAMA_API_KEY` environment override, while a non-reserved flag such as
+`-dr`/`--docker-repo` and the peer tunnel `--connect`, with representative case, underscore and `=`
+spellings) and refuses an `LLAMA_API_KEY` environment override, while a non-reserved flag such as
 `--chat_template` still passes in either spelling. The living `llama-cpp` preset contract is covered by
 `node --test tests/vibe/provider-presets.test.mjs`.
 
