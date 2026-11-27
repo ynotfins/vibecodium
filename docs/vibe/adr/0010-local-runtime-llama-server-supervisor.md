@@ -32,9 +32,9 @@ Ship `src/stable/runtime/llama-server.mjs` as a dependency-free supervisor for a
    `--cors-origins localhost`, plus optional bounded `--ctx-size`, `--threads` and `--n-gpu-layers`.
    Caller prefix arguments may not set the bind host, port, model, API key, web UI or CORS posture.
 - Every controller owns one API key for its lifetime (32 random bytes in base64url, or a validated
-  caller-supplied one), reused across stops and restarts. The child receives it only as
-  `LLAMA_API_KEY`, the web UI is off, and a client that is given the key authenticates with
-  `Authorization: Bearer <key>`.
+   caller-supplied one), reused across stops and restarts. The child receives it only as
+   `LLAMA_API_KEY`, the web UI is off, and a client that is given the key authenticates with
+   `Authorization: Bearer <key>`.
 - Readiness means the public `GET /health` returned 200 and an authenticated `GET /props` with the
    key returned 200 before the startup deadline. A listener that answers `/health` but rejects the
    key is not our child: the start stops the child and fails as `readiness-mismatch`. A never-ready
