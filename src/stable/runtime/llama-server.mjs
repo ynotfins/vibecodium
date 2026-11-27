@@ -6,20 +6,34 @@
 // the port and the runtime limits are bounded, and the child environment is a small allowlist
 // instead of the full process environment. The module performs one health request and otherwise
 // keeps no network state; chat, embeddings and infill calls go through `provider-client.mjs`.
+//
+// The child is authenticated. Every controller gets an API key (generated when the caller does not
+// supply one), the child receives it only through `LLAMA_API_KEY`, the web UI is disabled and CORS
+// is pinned to `localhost`, so another local process cannot drive the model or scrape the UI. A
+// start is only reported ready once the public `/health` probe answers and an authenticated
+// `/props` probe with the same key is accepted; a listener that rejects the key is not our child and
+// fails the start with `readiness-mismatch` after the child is reaped.
+//
 // A caller may opt into a bounded restart/back-off policy: an unexpected exit while serving is
 // retried on the same port with exponential back-off, a small budget and a stability reset, and the
 // controller ends in a bounded `failed` state once the budget is spent. Without a policy an exit
 // stays reported as `exited`, exactly as before.
 
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { lstatSync, realpathSync, statSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 
-export const RUNTIME_MODULE_VERSION = 1;
+export const RUNTIME_MODULE_VERSION = 2;
 export const LOOPBACK_HOST = ['127', '0', '0', '1'].join('.');
 export const MIN_PORT = 1024;
 export const MAX_PORT = 65535;
+// The generated key is 32 random bytes in base64url (43 characters). A caller-supplied key must sit
+// in the same bounded window and be printable ASCII without a comma, because llama.cpp treats the
+// value as a comma-separated key list.
+export const MIN_API_KEY_CHARS = 32;
+export const MAX_API_KEY_CHARS = 128;
 export const MIN_CONTEXT_SIZE = 1;
 export const MAX_CONTEXT_SIZE = 1_048_576;
 export const MIN_THREADS = 1;
@@ -54,11 +68,21 @@ export const DEFAULT_RESTART_STABLE_MS = 60_000;
 
 const RESERVED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const CONTROL_OR_BIDI = /[\u0000-\u001F\u007F-\u009F\p{Cf}\p{Zl}\p{Zp}]/u;
-const RESERVED_SERVER_ARGS = new Set(['--host', '--port']);
+const API_KEY_PATTERN = /^[\x21-\x7E]+$/u;
+// Server flags the supervisor owns. commandArgs may not set them, in either the separate-value or
+// the `--flag=value` spelling, so the loopback bind, the model, the key and the CORS/web-UI posture
+// cannot be rewritten by a caller.
+const RESERVED_SERVER_ARGS = new Set([
+  '--host', '--port', '--no-webui', '--webui', '--ui', '--no-ui',
+  '--cors-credentials', '--no-cors-credentials', '--allow-unauthenticated-tools',
+]);
+const RESERVED_SERVER_ARG_PREFIXES = Object.freeze([
+  '--host=', '--port=', '--api-key', '--model', '--cors-origins', '--cors-methods', '--cors-headers',
+]);
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const OPTION_KEYS = new Set([
   'executablePath', 'commandArgs', 'modelPath', 'port', 'contextSize', 'threads', 'gpuLayers',
-  'startupTimeoutMs', 'healthIntervalMs', 'stopTimeoutMs', 'env', 'fetch', 'restart',
+  'apiKey', 'startupTimeoutMs', 'healthIntervalMs', 'stopTimeoutMs', 'env', 'fetch', 'restart',
 ]);
 const ARG_KEYS = new Set(['modelPath', 'port', 'contextSize', 'threads', 'gpuLayers']);
 const RESTART_KEYS = new Set(['maxRestarts', 'baseDelayMs', 'maxDelayMs', 'stableMs']);
@@ -74,7 +98,7 @@ const DENIED_ENV_KEYS = new Set([
   'node_options', 'node_path', 'ld_preload', 'ld_audit', 'ld_library_path',
   'dyld_insert_libraries', 'dyld_library_path', 'dyld_framework_path',
   'dyld_fallback_library_path', 'dyld_fallback_framework_path', 'systemroot',
-  'ggml_backend_path',
+  'ggml_backend_path', 'llama_api_key',
 ]);
 const DENIED_ENV_PREFIXES = Object.freeze(['llama_arg_']);
 const DENIED_SERVER_ARGS = new Set(['-ag']);
@@ -224,6 +248,23 @@ function validateInteger(value, label, minimum, maximum, code) {
   return value;
 }
 
+// The key must be long enough to be unguessable, printable and single-valued. The message never
+// includes the value.
+function validateApiKey(value) {
+  if (typeof value !== 'string') fail('invalid-api-key', 'apiKey must be a string');
+  if (value.length < MIN_API_KEY_CHARS || value.length > MAX_API_KEY_CHARS) {
+    fail('invalid-api-key', 'apiKey must be between ' + MIN_API_KEY_CHARS + ' and ' + MAX_API_KEY_CHARS + ' characters');
+  }
+  if (!API_KEY_PATTERN.test(value) || value.includes(',') || CONTROL_OR_BIDI.test(value)) {
+    fail('invalid-api-key', 'apiKey must be printable ASCII without commas or whitespace');
+  }
+  return value;
+}
+
+function generateApiKey() {
+  return randomBytes(32).toString('base64url');
+}
+
 function validateCommandArgs(value) {
   if (value === undefined) return Object.freeze([]);
   let length;
@@ -251,8 +292,8 @@ function validateCommandArgs(value) {
     }
     if (CONTROL_OR_BIDI.test(arg)) fail('invalid-command-args', 'commandArgs entries contain unsafe characters');
     const lowered = arg.toLowerCase();
-    if (RESERVED_SERVER_ARGS.has(lowered) || lowered.startsWith('--host=') || lowered.startsWith('--port=')) {
-      fail('invalid-command-args', 'commandArgs must not set the bind host or port');
+    if (RESERVED_SERVER_ARGS.has(lowered) || RESERVED_SERVER_ARG_PREFIXES.some((prefix) => lowered.startsWith(prefix))) {
+      fail('invalid-command-args', 'commandArgs must not set the bind host, port, model, API key, CORS or web UI');
     }
     if (DENIED_SERVER_ARGS.has(lowered) || DENIED_SERVER_ARG_PREFIXES.some((prefix) => lowered.startsWith(prefix))) {
       fail('invalid-command-args', 'commandArgs must not enable shared ports, agent tools or MCP tools');
@@ -339,7 +380,7 @@ export function validateRestart(value) {
   return Object.freeze({ maxRestarts, baseDelayMs, maxDelayMs, stableMs });
 }
 
-function childEnvironment(overrides) {
+function childEnvironment(overrides, apiKey) {
   // Windows synthesises a system/user PATH for a child whose environment block omits it, which
   // would reintroduce user-writable search directories. Pin it to empty instead; a caller that
   // needs a specific PATH passes one explicitly.
@@ -357,6 +398,13 @@ function childEnvironment(overrides) {
     }
     env[key] = overrides[key];
   }
+  // The key is the supervisor's own, so it is written last and never read from the parent process.
+  if (process.platform === 'win32') {
+    for (const existing of Object.keys(env)) {
+      if (existing.toLowerCase() === 'llama_api_key') delete env[existing];
+    }
+  }
+  env.LLAMA_API_KEY = apiKey;
   return env;
 }
 
@@ -364,7 +412,12 @@ export function buildLlamaServerArgs(config) {
   const own = readOwnData(config, 'config', ARG_KEYS);
   const modelPath = validateLlamaModelPath(own.modelPath);
   const port = validateInteger(own.port, 'port', MIN_PORT, MAX_PORT, 'invalid-port');
-  const args = ['--model', modelPath, '--host', LOOPBACK_HOST, '--port', String(port)];
+  // The web UI is not part of the product and CORS only admits a caller on the loopback origin, so
+  // a page in a browser on this machine cannot drive the model.
+  const args = [
+    '--model', modelPath, '--host', LOOPBACK_HOST, '--port', String(port),
+    '--no-webui', '--cors-origins', 'localhost',
+  ];
   if (own.contextSize !== undefined) {
     validateInteger(own.contextSize, 'contextSize', MIN_CONTEXT_SIZE, MAX_CONTEXT_SIZE, 'invalid-context-size');
     args.push('--ctx-size', String(own.contextSize));
@@ -444,6 +497,7 @@ function validateOptions(options) {
     ? DEFAULT_STOP_TIMEOUT_MS
     : validateInteger(own.stopTimeoutMs, 'stopTimeoutMs', MIN_STOP_TIMEOUT_MS, MAX_STOP_TIMEOUT_MS, 'invalid-timeout');
   const restart = validateRestart(own.restart);
+  const apiKey = own.apiKey === undefined ? generateApiKey() : validateApiKey(own.apiKey);
   if (own.fetch !== undefined && typeof own.fetch !== 'function') fail('invalid-options', 'fetch must be a function');
   const fetchImpl = own.fetch ?? globalThis.fetch;
   if (typeof fetchImpl !== 'function') fail('runtime-unavailable', 'this runtime has no fetch implementation');
@@ -458,7 +512,8 @@ function validateOptions(options) {
     startupTimeoutMs,
     healthIntervalMs,
     stopTimeoutMs,
-    env: childEnvironment(validateEnv(own.env)),
+    env: childEnvironment(validateEnv(own.env), apiKey),
+    apiKey,
     restart,
     fetch: fetchImpl,
   });
@@ -607,23 +662,38 @@ export function createLlamaServer(options) {
     state[kind] = (state[kind] + text).slice(-MAX_CHILD_OUTPUT_CHARS);
   }
 
-  async function probe(port) {
+  async function request(port, pathname, headers) {
     try {
-      const response = await config.fetch('http://' + LOOPBACK_HOST + ':' + port + '/health', {
+      const response = await config.fetch('http://' + LOOPBACK_HOST + ':' + port + pathname, {
         method: 'GET',
-        headers: { accept: 'application/json' },
+        headers,
         redirect: 'error',
         signal: timeoutSignal(HEALTH_TIMEOUT_MS),
       });
       try {
         if (response.body && typeof response.body.cancel === 'function') await response.body.cancel();
       } catch {
-        /* a cancelled body is not a health failure */
+        /* a cancelled body is not a readiness failure */
       }
       return { ok: response.status === 200, status: response.status };
     } catch {
       return { ok: false, status: 0 };
     }
+  }
+
+  function probe(port) {
+    return request(port, '/health', { accept: 'application/json' });
+  }
+
+  // The public /health answer only proves that something is listening on the port; any local
+  // process can bind it first. /props requires the key, so only the child that received our
+  // LLAMA_API_KEY accepts this request. A 401 or 403 is therefore a foreign listener, not a child
+  // that is still loading.
+  function probeAuthenticated(port) {
+    return request(port, '/props', {
+      accept: 'application/json',
+      authorization: 'Bearer ' + config.apiKey,
+    });
   }
 
   async function start() {
@@ -735,7 +805,14 @@ export function createLlamaServer(options) {
           fail('server-exited', 'the server exited before it became ready');
         }
         const health = await probe(port);
-        if (health.ok) {
+        const authenticated = health.ok ? await probeAuthenticated(port) : { ok: false, status: 0 };
+        if (authenticated.status === 401 || authenticated.status === 403) {
+          await shutdownChild();
+          state.state = 'stopped';
+          state.port = null;
+          fail('readiness-mismatch', 'the server on the reserved port rejected the controller API key');
+        }
+        if (health.ok && authenticated.ok) {
           if (stopRequested) {
             await shutdownChild();
             state.state = 'stopped';
@@ -819,15 +896,20 @@ export function createLlamaServer(options) {
 
   async function health() {
     if (state.state !== 'running' || state.port === null) return Object.freeze({ ok: false, status: 0 });
-    const result = await probe(state.port);
+    const result = await probeAuthenticated(state.port);
     return Object.freeze({ ok: result.ok, status: result.status });
   }
+
+  // The key is deliberately absent from status(), describe() and config: the only way to read it is
+  // this accessor, so a snapshot, a log line or a crash report cannot leak it.
+  const authView = Object.freeze({ apiKey: config.apiKey });
 
   return Object.freeze({
     version: RUNTIME_MODULE_VERSION,
     start,
     stop,
     health,
+    auth: () => authView,
     status: snapshot,
     describe: snapshot,
     config: Object.freeze({
