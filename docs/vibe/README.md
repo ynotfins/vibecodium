@@ -1,6 +1,6 @@
 # Vibecodium Documentation
 
-> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-26
+> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-27
 
 Vibecodium is a standalone, Windows-first AI IDE built on VSCodium. This folder is the product's documentation suite. The upstream VSCodium docs in `docs/` (outside `docs/vibe/`) describe the base build and are left unchanged.
 
@@ -38,7 +38,7 @@ Vibecodium is a standalone, Windows-first AI IDE built on VSCodium. This folder 
 | [design/m3-llama-server.md](design/m3-llama-server.md) | M3 local `llama-server` supervisor: loopback process boundary, health gating, environment allowlist, opt-in restart/back-off and failure model |
 | [design/m3-model-downloader.md](design/m3-model-downloader.md) | M3 model catalog, resumable digest-verified downloader and free-space check |
 | [design/m3-hardware-probe.md](design/m3-hardware-probe.md) | M3 bounded hardware probe and the RAM/GPU-to-runtime recommendation policy |
-| [design/m3-first-run-wizard.md](design/m3-first-run-wizard.md) | M3 first-run wizard: catalog projection, install state, resumable download flow, pinned and local-daemon start plans, the pinned sidecar install in the start action, supervisor runtime options with the bounded restart policy, Ollama detection and selection, and the setup panel |
+| [design/m3-first-run-wizard.md](design/m3-first-run-wizard.md) | M3 first-run wizard: catalog projection, install state, resumable download flow, pinned and local-daemon start plans, a separate embedding start plan and supervisor hand-off, the pinned sidecar install in the start action, supervisor runtime options with the bounded restart policy, Ollama detection and selection, and the setup panel |
 | [design/m3-ollama.md](design/m3-ollama.md) | M3 local Ollama discovery: loopback /api/tags probe, bounded model projection, local chat and embedding selection, and the B1 preset overrides |
 | [design/m3-sidecar-binary.md](design/m3-sidecar-binary.md) | M3 pinned llama.cpp sidecar: the `vibe/sidecars.json` pin, digest-verified archive fetch, allowlisted ZIP extraction and idempotent executable install |
 | [design/m3-third-party-notices.md](design/m3-third-party-notices.md) | M3 third-party notices: the `vibe/notices.json` license ledger, verbatim texts pinned by SHA-256, and the generated notice document checked by `verify` |

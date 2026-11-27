@@ -1,6 +1,6 @@
 # Vibecodium User Guide
 
-> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-26
+> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-27
 
 Vibecodium is not released yet. This guide grows with each milestone; every section states whether the feature is available.
 

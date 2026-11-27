@@ -1,6 +1,6 @@
 # M3 pinned runtime sidecar
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-26
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-27
 
 >
 > Pins the llama.cpp `llama-server` release and installs its files only after a size and digest

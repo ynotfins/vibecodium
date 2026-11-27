@@ -1,6 +1,6 @@
 # M3 first-run wizard
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-26
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-27
 >
 > The first-run setup experience. The headless controller lives in
 > [first-run.mjs](../../../src/stable/runtime/first-run.mjs), the webview panel in
@@ -8,8 +8,9 @@
 > tests in [first-run.test.mjs](../../../tests/vibe/first-run.test.mjs),
 > [first-run-panel.test.mjs](../../../tests/vibe/first-run-panel.test.mjs) and
 > [first-run-ollama.test.mjs](../../../tests/vibe/first-run-ollama.test.mjs),
-> [first-run-restart.test.mjs](../../../tests/vibe/first-run-restart.test.mjs) and
-> [first-run-sidecar.test.mjs](../../../tests/vibe/first-run-sidecar.test.mjs). It composes the delivered
+> [first-run-restart.test.mjs](../../../tests/vibe/first-run-restart.test.mjs),
+> [first-run-sidecar.test.mjs](../../../tests/vibe/first-run-sidecar.test.mjs) and
+> [first-run-embedding.test.mjs](../../../tests/vibe/first-run-embedding.test.mjs). It composes the delivered
 > probe ([m3-hardware-probe.md](m3-hardware-probe.md)), catalog and downloader
 > ([m3-model-downloader.md](m3-model-downloader.md)), supervisor contract
 > ([m3-llama-server.md](m3-llama-server.md)) and pinned sidecar installer
@@ -21,7 +22,8 @@ This document covers M3's fourth runtime slice, the first-run wizard, plus the l
 detection and explicit daemon selection into it and of the supervisor's restart policy into the
 hand-off: one flow that tells a new install what this machine can run, which pinned weights are
 already present, downloads only the missing ones, and hands the caller the exact local B1 start
-plan and, for the pinned path, the exact `createLlamaServer` options. It ships no `llama-server`
+plan and, for the pinned path, the exact `createLlamaServer` options, plus a separate embedding start
+plan that carries the recorded embedding flags and its own supervisor hand-off. It ships no `llama-server`
 process: the supervisor still owns the process boundary, and the pin and verified installer are the
 separate [m3-sidecar-binary.md](m3-sidecar-binary.md) slice. The start action now installs that
 pinned sidecar when no host-supplied `runtimePath` exists, adopting an already installed runtime
@@ -53,7 +55,8 @@ entry fails closed as `no-chat-model` or `no-embedding-model`; a malformed catal
 
 `createFirstRunWizard({ catalog, destinationDir, probe?, downloadModel?, verifyModel?, runtimePath?, onChange?, discoverOllama?, restart?, sidecar?, installSidecar?, verifySidecar? })`
 returns a frozen controller with `refresh()`, `install()`, `start()`, `startPlan()`, `runtimeOptions()`,
-`checkOllama()`, `useOllama()`, `usePinned()`, `view()` and `dispose()`.
+`embeddingPlan()`, `embeddingRuntimeOptions()`, `checkOllama()`, `useOllama()`, `usePinned()`, `view()`
+and `dispose()`.
 
 | Option | Meaning |
 |---|---|
@@ -159,6 +162,37 @@ daemon start plan instead (there are no supervisor options), and otherwise it re
 `{ available: false, reason }` value as `startPlan()`. The wizard always chooses a bounded restart
 policy; a caller that wants no automatic restart builds its own supervisor options instead.
 
+### Embedding start plan and runtime options
+
+`embeddingPlan()` is the second plan, separate from `startPlan()`, for the pinned embedding weights: it
+carries the exact flags a `llama-server` needs to serve embeddings from the delivered catalog file
+without the caller rebuilding them. It returns frozen `{ available: false, reason }` with `disposed`,
+`not-ready` (before a successful refresh or outside `ready`), `no-embedding-model` (a selected daemon
+with no local embedding model) or `runtime-not-bundled` (the pinned runtime is not installed yet; the
+panel's start action still installs it through `start()`). On a ready pinned machine the shape is:
+
+```
+{ available: true, kind: 'llama-server', executablePath, modelPath, commandArgs, restart }
+```
+
+`executablePath` is the same validated runtime path the chat plan uses, `modelPath` joins
+`destinationDir` and the catalog's embedding entry `file`, `commandArgs` is the exported frozen
+`EMBEDDING_SERVER_ARGS` (`--embedding`, `--pooling`, `last`, `-ub`, `8192`), and `restart` is the same
+effective policy `startPlan()` reports. While the discovered daemon is the selected runtime and its
+summary carries an embedding model the plan is `{ available: true, kind: 'ollama', baseUrl, model }`
+where `baseUrl` and `model` are the validated loopback URL and embedding model; a daemon that reports
+only a chat model stays `no-embedding-model`, and switching back to `usePinned()` restores the pinned
+plan. `view().embedding` carries the same plan.
+
+`embeddingRuntimeOptions()` is the matching hand-off. A pinned plan becomes
+`{ available: true, options }` where `options` contains exactly the `createLlamaServer` fields
+`executablePath`, `modelPath`, `commandArgs` and `restart`, frozen at both levels, so a caller can write
+`createLlamaServer(wizard.embeddingRuntimeOptions().options)` and the supervisor still validates the
+executable, the model, every flag (the pinned flags set no bind host or port and enable no agent or MCP
+switch) and the policy. A daemon plan is returned as-is because a daemon is not spawnable, and a blocked
+plan is the same `{ available: false, reason }` value. The wizard never spawns an embedding server, and
+the plan never accepts caller-supplied flags, a port or a ubatch override.
+
 ### Ollama detection and selection
 
 `checkOllama()` is a read-only detection that runs beside the pinned plan. `view().ollama` stays `null`
@@ -190,7 +224,7 @@ is `'pinned'` until a selection succeeds.
 `vibecodium.firstRun.open` and `vibecodium.firstRun.setWizard`. The webview renders the phase, verdict,
 acceleration, the four steps (hardware check, pinned models, model download, local runtime), the model
 rows and sizes, the notice codes, a progress element during a download, a pinned-runtime progress
-line while the start action installs it, an Ollama section, and five or six buttons: **Check again**,
+line while the start action installs it, an embedding-server section, an Ollama section, and five or six buttons: **Check again**,
 **Download models**, **Start local runtime**, **Check for Ollama**, **Use Ollama** and, while the
 daemon is selected, **Use pinned models**. The buttons post `refresh`, `install`, `start`, `ollama`,
 `use-ollama` and `use-pinned`; `open()` performs one automatic Ollama check after the first refresh.
@@ -200,7 +234,12 @@ then says the runtime will be downloaded and verified on start and the button ca
 (falling back to `startPlan()` for a wizard that does not expose it). **Use Ollama** is enabled only when the summary is available and
 carries `providerOptions`. The Ollama section shows the not-checked, available (base URL, chat and
 embedding model, and whether the daemon is in use) and unavailable (bounded reason) states with every
-value escaped. When the pinned start plan is available, the local-runtime section also shows the
+value escaped. An **Embedding server** section renders the same plan: the executable and model paths and
+the exact flags when the pinned plan is available, the loopback base URL and embedding model when the
+daemon is selected, and one bounded sentence per blocked reason, including `runtime-not-bundled`,
+`no-embedding-model`, the not-ready case and a closed-wizard message for `disposed`. `embeddingFlags` reads at most 16 bounded `commandArgs`
+strings through own data descriptors (a non-array, a revoked Proxy or a hostile trap renders no flags, and an
+accessor-backed entry is skipped without being invoked, while the other data entries still show), and every rendered value is escaped like the rest of the page. When the pinned start plan is available, the local-runtime section also shows the
 bounded restart policy (up to N attempts, the back-off range and the stability window) read through own
 data descriptors; a missing, malformed, out-of-range, accessor-backed or revoked value omits that line
 instead of throwing. Every message must be a plain object (not a Proxy or an array) with exactly one own enumerable
@@ -236,7 +275,10 @@ recommendation validates the hardware and model descriptors again; the downloade
 the destination and the bytes; `toOllamaProviderOptions` re-validates the whole daemon answer before a
 provider override is exposed; `validateRestart` validates the restart policy through own data
 descriptors; `runtimeOptions()` copies only the six supervisor fields; and the supervisor re-validates
-the executable, the model, the flags and the policy.
+the executable, the model, the flags and the policy. `EMBEDDING_SERVER_ARGS` is frozen at module load and
+`embeddingPlan()` reuses it, so a caller cannot supply embedding flags; `embeddingRuntimeOptions()`
+copies only the four supervisor fields and a daemon plan carries only the validated base URL and
+embedding model.
 Errors expose only a code matching `^[a-z0-9][a-z0-9-]{0,63}$` and a fixed message, so an injected
 error body, path or credential is never echoed; the Ollama summary carries only a validated base URL,
 model names, a count and bounded notice codes; the restart line carries bounded integers only; the
@@ -257,7 +299,11 @@ valid shape is reported as Ollama, though the only effect is a displayed base UR
 offered to that same endpoint, with no secret and no write. The start action installs the pinned
 runtime but still only assembles data, so a bug there cannot start a process with unexpected flags or
 an unbounded restart loop; the eventual caller must still pass the options through the supervisor
-rather than building a child itself.
+rather than building a child itself. The supervisor's `commandArgs` check enumerates the long-form
+`--host`/`--port` forms and the `-ag`/agent/MCP switches; a short-alias gap, if one exists in the pinned
+build, is pre-existing and remains with the supervisor owner, and this plan only ever passes the frozen
+embedding list. An `--embedding` server is still an unauthenticated loopback service, narrower than the
+chat plan because it does not serve completions.
 
 ## Verification
 
@@ -296,6 +342,19 @@ invoked. The panel tests add the enabled **Start local runtime** button for a co
 explanatory text, the bounded runtime progress line, an accessor-backed runtime that is never
 invoked, and the `start()` call with its success and bounded failure statuses.
 
+`node --test tests/vibe/first-run-embedding.test.mjs` covers the embedding plan: `not-ready` before a
+refresh, `disposed` after disposal, `runtime-not-bundled` while the pinned runtime is missing, the frozen
+pinned shape whose `modelPath` joins the destination directory and the catalog's embedding file and
+whose `commandArgs` deep-equals `EMBEDDING_SERVER_ARGS`, the delivered `createLlamaServer` accepting
+those options unchanged (its own flag validation accepts the pinned list without mutating it), the same
+restart policy as the chat plan, and
+`embeddingRuntimeOptions()` returning exactly the four fields frozen at both levels and accepted
+unchanged by `createLlamaServer` without spawning. It also proves the daemon shape, the
+`no-embedding-model` case for a chat-only daemon, the restoration of the pinned plan after `usePinned`,
+and that the view carries the same plan. The panel test renders the escaped embedding section for a ready
+plan, a hostile `modelPath` and flag list, every blocked reason, the daemon shape, an accessor-backed
+plan that is never invoked, and an older view without the plan that still shows the heading.
+
 `node --test tests/vibe/first-run.test.mjs tests/vibe/first-run-panel.test.mjs` covers the projection,
 both required roles, the ready, needs-download, insufficient and failed phases, merged notices, the
 download order and progress, idempotence, single-flight, abort, retry after a failure, safe error
@@ -321,7 +380,12 @@ verified installer and start-action wiring are delivered in
 [m3-sidecar-binary.md](m3-sidecar-binary.md)), place the generated third-party notice beside the
 installed files and the application (see [m3-third-party-notices.md](m3-third-party-notices.md)),
 supply the Microsoft VC++ 2015-2022 x64 runtime, run one live install/start smoke on a clean Windows
-machine, and start the embedding server from a second plan (with `--embedding --pooling last -ub 8192`
-for the embedding weights). Offering the same discovered daemon in the B5 provider setup panel is M2
+machine, and enforce an installer-owned runtime directory under the application data root. The embedding
+start plan and its supervisor hand-off are delivered above; the caller that actually starts and
+supervises that second process is the M6 index binding, its first consumer, and the wizard itself ships
+no process. That binding must smoke-start the pinned `b12426` archive with `EMBEDDING_SERVER_ARGS` before
+it relies on them, and add the matching `-b 8192` to the same frozen constant: at `b12426` the default
+`-b 2048` clamps the effective ubatch, so `-ub 8192` alone starts cleanly but batches at 2048. Offering
+the same discovered daemon in the B5 provider setup panel is M2
 work. A real extension-host smoke of the panel and a rebuilt-app screenshot remain M6/M12 integration
 work.
