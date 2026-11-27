@@ -107,9 +107,12 @@ const DENIED_ENV_KEYS = new Set([
   'ggml_backend_path', 'llama_api_key',
 ]);
 const DENIED_ENV_PREFIXES = Object.freeze(['llama_arg_']);
-const DENIED_SERVER_ARGS = new Set(['-ag']);
+const DENIED_SERVER_ARGS = new Set(['-ag', '-mu', '-hf', '-dr']);
 const DENIED_SERVER_ARG_PREFIXES = Object.freeze([
   '--reuse-port', '--agent', '--tools', '--mcp-', '--ui-agent', '--ui-mcp-proxy',
+  // Remote-model sources and the peer tunnel would leave the local single-model posture; refuse them
+  // like the model flag itself, so commandArgs cannot point the child at a remote GGUF or a peer.
+  '--model-url', '--hf-repo', '--docker-repo', '--connect',
 ]);
 const MAX_ENV_NAME_CHARS = 64;
 const MAX_ENV_TOTAL_CHARS = 32_768;
@@ -308,7 +311,7 @@ function validateCommandArgs(value) {
       fail('invalid-command-args', 'commandArgs must not set the bind host, port, model, API key, CORS or web UI');
     }
     if (DENIED_SERVER_ARGS.has(normalised) || DENIED_SERVER_ARG_PREFIXES.some((prefix) => normalised.startsWith(prefix))) {
-      fail('invalid-command-args', 'commandArgs must not enable shared ports, agent tools or MCP tools');
+      fail('invalid-command-args', 'commandArgs must not enable shared ports, agent tools, MCP tools, remote model sources or peer connections');
     }
     out.push(arg);
   }

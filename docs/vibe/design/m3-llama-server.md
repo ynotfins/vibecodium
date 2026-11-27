@@ -150,9 +150,11 @@ inheritance property is that no arbitrary parent variable or provider key reache
 Caller prefix arguments are a trusted surface, but the supervisor's own posture is not: `-m`,
 `--host`/`--port`/`--model` (and their `=` forms), every `--api-key*` spelling, the web-UI flags, the
 CORS flags and `--allow-unauthenticated-tools` must not be set (the `=` form of each boolean flag is
-refused too), and `--reuse-port`, `--agent`/`-ag`/
+refused too); `--reuse-port`, `--agent`/`-ag`/
 `--ui-agent`, `--tools`, `--mcp-*` and `--ui-mcp-proxy` are refused because they would weaken the
-loopback-only, authenticated or no-tools guarantee. `--` is not a terminator in llama.cpp (it rejects
+loopback-only, authenticated or no-tools guarantee, and the remote-model sources `-mu`/`--model-url`,
+`-hf`/`--hf-repo`, `-dr`/`--docker-repo` and the peer tunnel `--connect` are refused so `commandArgs`
+cannot point the child at a remote GGUF or a peer. `--` is not a terminator in llama.cpp (it rejects
 the argument), and the supervisor's own flags cannot appear earlier in the list, so none of them can
 be duplicated or shadowed. Caller-chosen numeric flags such as `--threads` remain a trusted surface.
 
@@ -271,8 +273,9 @@ is refused without being invoked; a fake listener that answers `/health` with 20
 `stopped` with no pid or port, is proven dead through `process.kill(pid, 0)` and is seen to have
 received the `Authorization: Bearer` header; and the fail-closed option matrix refuses every reserved
 `commandArgs` spelling (`-m`, `--api-key`, `--api-key-file`, `--model`, the UI and CORS flags,
-`--allow-unauthenticated-tools`, case variants, the underscore spelling of each and the `=` form of
-each) and every `LLAMA_API_KEY` environment override, while a non-reserved flag such as
+`--allow-unauthenticated-tools`, the remote-model sources `-mu`/`--model-url`, `-hf`/`--hf-repo`,
+`-dr`/`--docker-repo`, the peer tunnel `--connect`, case variants, the underscore spelling of each and
+the `=` form of each) and every `LLAMA_API_KEY` environment override, while a non-reserved flag such as
 `--chat_template` still passes in either spelling. The living `llama-cpp` preset contract is covered by
 `node --test tests/vibe/provider-presets.test.mjs`.
 
