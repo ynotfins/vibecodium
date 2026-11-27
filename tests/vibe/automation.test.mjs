@@ -132,7 +132,7 @@ test('codex harness config generation (not used by the loop: Codex elevation tri
   assert.notEqual(always.status, 1, 'gh pr list must still work');
   assert.doesNotMatch(out, /not-a-real-secret-123|scoped-test-token-456|morph-test-key-789/);
   const cfg = readFileSync(path.join(f.logs, 'codex-home', 'config.toml'), 'utf8');
-  assert.ok(cfg.includes('model_provider = "omniroute"\nmodel = "openrouter/deepseek/deepseek-v4.1-flash-1017"'));
+  assert.ok(cfg.includes('model_provider = "omniroute"\nmodel = "requesty/deepseek/deepseek-v4.1-flash-1017"'));
   assert.match(cfg, /base_url = "http:\/\/127\.0\.0\.1:20128\/v1"/);
   const roots = (cfg.match(/writable_roots = \[([^\]]+)/) || [])[1].match(/"([^"]+)"/g).map((x) => x.slice(1, -1));
   assert.ok(roots[1] === roots[0] + '.worktrees', `writes limited to the clone and its worktrees: ${roots}`);

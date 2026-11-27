@@ -12,10 +12,10 @@
       "baseURL": "http://127.0.0.1:20128/v1",
       "keyEnv": "OMNIROUTE_API_KEY",
       "classes": {
-        "strong": "openrouter/deepseek/deepseek-v4.1-flash-1017",
-        "standard": "openrouter/deepseek/deepseek-v4.1-flash-1017",
-        "review": "openrouter/deepseek/deepseek-v4.1-flash-1017",
-        "cheap": "openrouter/deepseek/deepseek-v4.1-flash-1017"
+        "strong": "requesty/deepseek/deepseek-v4.1-flash-1017",
+        "standard": "requesty/deepseek/deepseek-v4.1-flash-1017",
+        "review": "requesty/deepseek/deepseek-v4.1-flash-1017",
+        "cheap": "requesty/deepseek/deepseek-v4.1-flash-1017"
       },
       "harness": "opencode"
     },
