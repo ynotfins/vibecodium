@@ -60,7 +60,10 @@ is not derived from user content. It may not set `-m`, `--host`, `--port`, `--mo
 `--webui`, `--ui`, `--no-ui`, `--cors-credentials`, `--no-cors-credentials`,
 `--allow-unauthenticated-tools` or any `--api-key*`, `--model*`, `--cors-origins*`, `--cors-methods*`
 or `--cors-headers*` spelling (the `=` forms of every one of these are refused too); the supervisor
-always appends its own loopback host, reserved port, model, key posture, web-UI and CORS flags.
+always appends its own loopback host, reserved port, model, key posture, web-UI and CORS flags. The
+refusal is applied after the same normalisation llama.cpp performs on `--` arguments, which lowercases
+nothing but rewrites `_` to `-`, so `--cors_origins`, `--api_key`, `--no_webui` and the other
+underscore spellings are refused exactly like their hyphenated forms rather than slipping through.
 
 `start()` resolves only after `GET /health` on `127.0.0.1:<port>` returns 200 and an authenticated
 `GET /props` with `Authorization: Bearer <key>` also returns 200, then reports the state `running`,
@@ -268,8 +271,9 @@ is refused without being invoked; a fake listener that answers `/health` with 20
 `stopped` with no pid or port, is proven dead through `process.kill(pid, 0)` and is seen to have
 received the `Authorization: Bearer` header; and the fail-closed option matrix refuses every reserved
 `commandArgs` spelling (`-m`, `--api-key`, `--api-key-file`, `--model`, the UI and CORS flags,
-`--allow-unauthenticated-tools`, case variants and the `=` form of each) and every `LLAMA_API_KEY`
-environment override. The living `llama-cpp` preset contract is covered by
+`--allow-unauthenticated-tools`, case variants, the underscore spelling of each and the `=` form of
+each) and every `LLAMA_API_KEY` environment override, while a non-reserved flag such as
+`--chat_template` still passes in either spelling. The living `llama-cpp` preset contract is covered by
 `node --test tests/vibe/provider-presets.test.mjs`.
 
 The restart policy has its own cases in the same file, with the fixture counting boots through

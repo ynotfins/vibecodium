@@ -298,11 +298,16 @@ function validateCommandArgs(value) {
       fail('invalid-command-args', 'commandArgs entries must be non-empty bounded strings');
     }
     if (CONTROL_OR_BIDI.test(arg)) fail('invalid-command-args', 'commandArgs entries contain unsafe characters');
+    // llama.cpp lowercases nothing but it does rewrite `_` to `-` on every `--`-prefixed argument
+    // before dispatch (common/arg.cpp), so `--cors_origins` is the same flag as `--cors-origins`.
+    // Normalise the same way before the reserved/denied comparison, otherwise the underscore
+    // spelling slips past the refusal and rewrites a flag the supervisor owns.
     const lowered = arg.toLowerCase();
-    if (RESERVED_SERVER_ARGS.has(lowered) || RESERVED_SERVER_ARG_PREFIXES.some((prefix) => lowered.startsWith(prefix))) {
+    const normalised = lowered.startsWith('--') ? lowered.replaceAll('_', '-') : lowered;
+    if (RESERVED_SERVER_ARGS.has(normalised) || RESERVED_SERVER_ARG_PREFIXES.some((prefix) => normalised.startsWith(prefix))) {
       fail('invalid-command-args', 'commandArgs must not set the bind host, port, model, API key, CORS or web UI');
     }
-    if (DENIED_SERVER_ARGS.has(lowered) || DENIED_SERVER_ARG_PREFIXES.some((prefix) => lowered.startsWith(prefix))) {
+    if (DENIED_SERVER_ARGS.has(normalised) || DENIED_SERVER_ARG_PREFIXES.some((prefix) => normalised.startsWith(prefix))) {
       fail('invalid-command-args', 'commandArgs must not enable shared ports, agent tools or MCP tools');
     }
     out.push(arg);
