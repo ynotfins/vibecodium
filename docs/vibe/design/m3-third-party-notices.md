@@ -1,6 +1,6 @@
 # M3 third-party notices
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-26
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-27
 
 >
 > Keeps the third-party notices for the pinned runtime components honest. The generator lives in

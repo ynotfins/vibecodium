@@ -261,6 +261,64 @@ function renderOllama(ollama, source) {
     escapeHtml(text(summaryField(ollama, 'reason', null), 'unavailable')) + ').</p>';
 }
 
+// The embedding plan is display-only. A missing plan renders nothing (older views), and every value
+// goes through the bounded text helper and the HTML escaper, so a hostile wizard cannot inject markup.
+function embeddingFlags(args) {
+  if (types.isProxy(args) || !Array.isArray(args)) return [];
+  let length;
+  try {
+    length = args.length;
+  } catch {
+    return [];
+  }
+  if (!Number.isInteger(length) || length < 0) return [];
+  const out = [];
+  const limit = Math.min(length, 16);
+  for (let index = 0; index < limit; index += 1) {
+    let descriptor;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(args, String(index));
+    } catch {
+      continue;
+    }
+    if (!descriptor || !('value' in descriptor)) continue;
+    const arg = text(descriptor.value, null);
+    if (arg !== null) out.push(arg);
+  }
+  return out;
+}
+
+function renderEmbedding(embedding) {
+  if (!embedding || typeof embedding !== 'object' || types.isProxy(embedding)) {
+    return '<p class="muted">Finish the setup steps before planning the embedding server.</p>';
+  }
+  if (summaryField(embedding, 'available', false) !== true) {
+    const reason = summaryField(embedding, 'reason', null);
+    const message = reason === 'runtime-not-bundled'
+      ? 'The pinned llama.cpp runtime is not installed yet.'
+      : reason === 'no-embedding-model'
+        ? 'The selected Ollama daemon has no embedding model.'
+        : reason === 'disposed'
+          ? 'The setup wizard is closed; open it again to plan the embedding server.'
+          : 'Finish the setup steps before planning the embedding server.';
+    return '<p class="muted">' + escapeHtml(message) + '</p>';
+  }
+  if (summaryField(embedding, 'kind', null) === 'ollama') {
+    return '<p>Embedding model: <code>' +
+      escapeHtml(text(summaryField(embedding, 'model', null), '-')) +
+      '</code> from the Ollama daemon at <code>' +
+      escapeHtml(text(summaryField(embedding, 'baseUrl', null), '-')) + '</code>.</p>';
+  }
+  const flags = embeddingFlags(summaryField(embedding, 'commandArgs', null));
+  return '<p>Embedding server: <code>' +
+    escapeHtml(text(summaryField(embedding, 'executablePath', null), '-')) +
+    '</code> with model <code>' +
+    escapeHtml(text(summaryField(embedding, 'modelPath', null), '-')) + '</code></p>' +
+    (flags.length === 0
+      ? ''
+      : '<p class="muted">Flags: <code>' + escapeHtml(flags.join(' ')) + '</code></p>');
+}
+
 function renderFirstRunHtml(view, status) {
   const state = status && typeof status === 'object' ? status : {};
   if (!view || typeof view !== 'object') {
@@ -318,6 +376,7 @@ function renderFirstRunHtml(view, status) {
     '<h2>Models</h2>\n' + renderModels(view.models) +
     renderNotices(view.notices) +
     '<h2>Local runtime</h2>\n' + renderStart(start, runtime) +
+    '<h2>Embedding server</h2>\n' + renderEmbedding(view.embedding) +
     '<h2>Ollama</h2>\n' + renderOllama(view.ollama, source) +
     '<div class="actions">\n' +
     '<button type="button" data-action="refresh">Check again</button>\n' +

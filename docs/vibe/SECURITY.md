@@ -1,6 +1,6 @@
 # Security
 
-> Doc class: living · Owner: security-reviewer · Last reviewed: 2026-11-26
+> Doc class: living · Owner: security-reviewer · Last reviewed: 2026-11-27
 
 ## Model
 

@@ -1,6 +1,6 @@
 # Building Vibecodium on Windows
 
-> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-24
+> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-27
 
 Vibecodium builds with VSCodium's scripts. Run everything in **Git Bash** from the repository root.
 
