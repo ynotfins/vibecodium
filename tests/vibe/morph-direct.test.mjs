@@ -162,7 +162,7 @@ test('a stopped omniroute endpoint completes chat and embeddings on morph in the
   const chat = await router.chat('plan', { taskId: 'acceptance-chat', messages: MESSAGES });
   assert.equal(chat.text, 'morph answer');
   assert.deepEqual(chat.servedBy, { id: 'morph', label: 'morph', fallback: true });
-  assert.deepEqual(chat.routedBy, { taskClass: 'plan', provider: 'omniroute', model: 'omni-plan' });
+  assert.deepEqual(chat.routedBy, { taskClass: 'plan', provider: 'omniroute', model: 'omni-plan', tier: null });
   assert.equal(chat.attempts.length, 2);
   assert.deepEqual(chat.attempts[0], {
     id: 'omniroute',
@@ -178,7 +178,7 @@ test('a stopped omniroute endpoint completes chat and embeddings on morph in the
   const embeddings = await router.embeddings('embed', { taskId: 'acceptance-embed', input: 'embed me' });
   assert.deepEqual(embeddings.vectors, [[0.1, 0.2, 0.3]]);
   assert.deepEqual(embeddings.servedBy, { id: 'morph', label: 'morph', fallback: true });
-  assert.deepEqual(embeddings.routedBy, { taskClass: 'embed', provider: 'omniroute', model: 'omni-embed' });
+  assert.deepEqual(embeddings.routedBy, { taskClass: 'embed', provider: 'omniroute', model: 'omni-embed', tier: null });
   assert.equal(embeddings.attempts[0].code, 'network-error');
   assert.equal(mock.state.embeddings.length, 1);
   assert.equal(mock.state.embeddings[0].model, 'morph-direct-embed');

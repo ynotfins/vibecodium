@@ -32,12 +32,28 @@ export const MAX_BUDGET_TOKENS = 1_000_000_000;
 export const MAX_TRACKED_TASKS = 10_000;
 export const MAX_ESTIMATE_BYTES = 64 * 1024 * 1024;
 
+// A Router difficulty maps to one of these tiers (`morph-router.mjs` exports the same list as
+// `ROUTER_TIERS`). The list, the prompt caps and the answer bound are local so the policy layer has
+// no runtime dependency on the network adapter, and the tests assert equality with the adapter's
+// constants so the numbers cannot drift.
+export const DIFFICULTY_TIERS = Object.freeze(['cheap', 'standard', 'powerful']);
+export const MAX_CLASSIFY_PROMPT_CHARS = 32 * 1024;
+export const MAX_CLASSIFY_PROMPT_BYTES = 128 * 1024;
+export const MAX_CLASSIFY_ANSWER_BYTES = 32 * 1024;
+// The classify request body is a small JSON envelope around the prompt; a token cannot encode less
+// than one UTF-8 byte, so framing bytes plus prompt bytes plus the adapter's answer byte bound is a
+// conservative upper bound on a billed classification without shipping a tokenizer.
+export const CLASSIFY_FRAMING_TOKENS = 256;
+
+const DIFFICULTY_LABELS = Object.freeze(['easy', 'medium', 'hard', 'needs_info']);
+
 const TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const CONTROL_OR_BIDI = /[\u0000-\u001F\u007F-\u009F\p{Cf}\p{Zl}\p{Zp}]/u;
-const ROUTE_KEYS = new Set(['provider', 'model', 'maxOutputTokens']);
-const OPTION_KEYS = new Set(['policy', 'providers', 'budgets', 'now']);
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+const ROUTE_KEYS = new Set(['provider', 'model', 'maxOutputTokens', 'tiers']);
+const OPTION_KEYS = new Set(['policy', 'providers', 'budgets', 'now', 'difficulty']);
 const BUDGET_KEYS = new Set(['perTaskTokens', 'perDayTokens']);
-const CHAT_KEYS = new Set(['taskId', 'messages', 'tools', 'stream']);
+const CHAT_KEYS = new Set(['taskId', 'messages', 'tools', 'stream', 'tier']);
 const EMBEDDING_KEYS = new Set(['taskId', 'input']);
 
 export class ProviderRouterError extends Error {
@@ -105,6 +121,117 @@ function validateProviderId(value, label) {
   return value;
 }
 
+function validateTaskId(value) {
+  if (typeof value !== 'string' || !TASK_ID.test(value)) {
+    fail('invalid-request', 'taskId must be a bounded identifier');
+  }
+  return value;
+}
+
+function isWellFormed(value) {
+  if (typeof value.isWellFormed === 'function') return value.isWellFormed();
+  return !LONE_SURROGATE.test(value);
+}
+
+// A route may name the difficulty tiers it serves. An untagged route serves every tier, so the
+// existing policies keep their meaning and a tier hint can only reorder routes, never remove one.
+function readTiers(value) {
+  if (value === undefined) return Object.freeze([]);
+  if (!Array.isArray(value)) fail('invalid-policy', 'route tiers must be an array');
+  if (value.length === 0 || value.length > DIFFICULTY_TIERS.length) {
+    fail('invalid-policy', 'route tiers must list between 1 and ' + DIFFICULTY_TIERS.length + ' known tiers');
+  }
+  const out = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const tier = ownData(value, String(index), 'invalid-policy', 'route tier');
+    if (!DIFFICULTY_TIERS.includes(tier)) {
+      fail('invalid-policy', 'route tier is not a known difficulty tier');
+    }
+    if (out.includes(tier)) fail('invalid-policy', 'route tiers must not repeat a tier');
+    out.push(tier);
+  }
+  return Object.freeze(out);
+}
+
+function readDifficulty(value) {
+  if (value === undefined) return null;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    fail('invalid-options', 'difficulty must be an adapter object with a classify method');
+  }
+  const classify = ownData(value, 'classify', 'invalid-options', 'difficulty adapter classify method');
+  if (typeof classify !== 'function') {
+    fail('invalid-options', 'difficulty adapter needs a classify method');
+  }
+  return Object.freeze({ classify });
+}
+
+function orderRoutes(routes, tier) {
+  if (tier === null) return routes;
+  const matching = routes.filter((route) => route.tiers.includes(tier));
+  if (matching.length === 0) return routes;
+  const neutral = routes.filter((route) => route.tiers.length === 0);
+  const other = routes.filter((route) => route.tiers.length > 0 && !route.tiers.includes(tier));
+  return Object.freeze([...matching, ...neutral, ...other]);
+}
+
+function readTierHint(request) {
+  const tier = request.tier;
+  if (tier === undefined) return null;
+  if (typeof tier !== 'string' || !DIFFICULTY_TIERS.includes(tier)) {
+    fail('invalid-request', 'tier must be cheap, standard or powerful');
+  }
+  return tier;
+}
+
+function readClassifyPrompt(value) {
+  if (typeof value !== 'string') fail('invalid-request', 'classify prompt must be a string');
+  if (value.length > MAX_CLASSIFY_PROMPT_CHARS) fail('invalid-request', 'classify prompt is too long');
+  if (!isWellFormed(value)) fail('invalid-request', 'classify prompt is not well-formed Unicode');
+  if (value.includes('\u0000')) fail('invalid-request', 'classify prompt carries a NUL character');
+  if (value.trim().length === 0) fail('invalid-request', 'classify prompt is empty');
+  const bytes = Buffer.byteLength(value, 'utf8');
+  if (bytes > MAX_CLASSIFY_PROMPT_BYTES) fail('invalid-request', 'classify prompt is too long');
+  // The adapter JSON-escapes the prompt in the request body, so the billed bound counts the escaped
+  // form: one control character costs six bytes once encoded, and the plan must not under-reserve it.
+  return Buffer.byteLength(JSON.stringify(value), 'utf8') - 2;
+}
+
+function classifyReservationTokens(promptBytes) {
+  return CLASSIFY_FRAMING_TOKENS + promptBytes + MAX_CLASSIFY_ANSWER_BYTES;
+}
+
+// The adapter answer is copied field by field into a frozen result, so a hostile or buggy adapter
+// cannot smuggle extra data (a prompt echo, a credential) through the classification result.
+function readClassifyAnswer(value) {
+  if (!isPlainObject(value)) fail('invalid-response', 'the difficulty answer is invalid');
+  const tier = ownData(value, 'tier', 'invalid-response', 'difficulty answer tier');
+  if (!DIFFICULTY_TIERS.includes(tier)) fail('invalid-response', 'the difficulty answer tier is unknown');
+  const difficulty = ownData(value, 'difficulty', 'invalid-response', 'difficulty answer difficulty');
+  if (difficulty !== null && !DIFFICULTY_LABELS.includes(difficulty)) {
+    fail('invalid-response', 'the difficulty answer label is unknown');
+  }
+  const confidence = ownData(value, 'confidence', 'invalid-response', 'difficulty answer confidence');
+  if (confidence !== null && (typeof confidence !== 'number' || !Number.isFinite(confidence) ||
+      confidence < 0 || confidence > 1)) {
+    fail('invalid-response', 'the difficulty answer confidence is out of range');
+  }
+  const meetsThreshold = ownData(value, 'meetsThreshold', 'invalid-response', 'difficulty answer meetsThreshold');
+  if (typeof meetsThreshold !== 'boolean') fail('invalid-response', 'the difficulty answer meetsThreshold is invalid');
+  const needsInfo = ownData(value, 'needsInfo', 'invalid-response', 'difficulty answer needsInfo');
+  if (typeof needsInfo !== 'boolean') fail('invalid-response', 'the difficulty answer needsInfo is invalid');
+  const fallback = ownData(value, 'fallback', 'invalid-response', 'difficulty answer fallback');
+  if (typeof fallback !== 'boolean') fail('invalid-response', 'the difficulty answer fallback is invalid');
+  const code = ownData(value, 'code', 'invalid-response', 'difficulty answer code');
+  if (code !== null && (typeof code !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/u.test(code))) {
+    fail('invalid-response', 'the difficulty answer code is invalid');
+  }
+  const status = ownData(value, 'status', 'invalid-response', 'difficulty answer status');
+  if (status !== null && (!Number.isInteger(status) || status < 100 || status > 599)) {
+    fail('invalid-response', 'the difficulty answer status is invalid');
+  }
+  return Object.freeze({ tier, difficulty, confidence, meetsThreshold, needsInfo, fallback, code, status });
+}
+
 function validateModel(value) {
   if (typeof value !== 'string' || value.length === 0 || value.length > MAX_MODEL_CHARS ||
       CONTROL_OR_BIDI.test(value) || !MODEL_NAME.test(value)) {
@@ -153,6 +280,7 @@ function readRoutes(taskClass, routes, providers) {
     seen.add(provider);
     const model = validateModel(route.model);
     const maxOutputTokens = validateOutputCap(route.maxOutputTokens, taskClass);
+    const tiers = readTiers(route.tiers);
     const client = providers[provider];
     if (client === undefined) fail('invalid-policy', 'task class ' + taskClass + ' references an unknown provider');
     const chat = ownData(client, 'chat', 'invalid-provider', 'provider chat method');
@@ -163,7 +291,7 @@ function readRoutes(taskClass, routes, providers) {
         fail('invalid-provider', 'provider ' + provider + ' needs an embeddings method');
       }
     }
-    out.push(Object.freeze({ provider, model, maxOutputTokens, client }));
+    out.push(Object.freeze({ provider, model, maxOutputTokens, client, tiers }));
   }
   return Object.freeze(out);
 }
@@ -188,19 +316,27 @@ function readPolicy(value, providers) {
     if (!TASK_CLASSES.includes(key)) fail('invalid-policy', 'unknown task class: ' + key);
   }
   const out = Object.create(null);
-  const chains = Object.create(null);
+  const plans = Object.create(null);
   for (const taskClass of TASK_CLASSES) {
     if (policy[taskClass] === undefined) fail('invalid-policy', 'policy is missing task class ' + taskClass);
     const routes = readRoutes(taskClass, policy[taskClass], providers);
     out[taskClass] = routes;
-    chains[taskClass] = createProviderFallback(routes.map((route) => Object.freeze({
-      id: route.provider,
-      label: route.provider,
-      model: route.model,
-      client: route.client,
-    })));
+    const orders = { default: routes };
+    for (const tier of DIFFICULTY_TIERS) orders[tier] = orderRoutes(routes, tier);
+    plans[taskClass] = Object.freeze(Object.fromEntries(Object.entries(orders).map(([key, list]) => [
+      key,
+      Object.freeze({
+        routes: list,
+        chain: createProviderFallback(list.map((route) => Object.freeze({
+          id: route.provider,
+          label: route.provider,
+          model: route.model,
+          client: route.client,
+        }))),
+      }),
+    ])));
   }
-  return Object.freeze({ policy: Object.freeze(out), chains: Object.freeze(chains) });
+  return Object.freeze({ policy: Object.freeze(out), plans: Object.freeze(plans) });
 }
 
 function readBudgets(value) {
@@ -230,16 +366,13 @@ function readOptions(value) {
     policy: options.policy,
     providers: options.providers,
     budgets: options.budgets,
+    difficulty: readDifficulty(options.difficulty),
     now: options.now ?? Date.now,
   };
 }
 
 function taskIdOf(input) {
-  const taskId = ownData(input, 'taskId', 'invalid-request', 'taskId');
-  if (typeof taskId !== 'string' || !TASK_ID.test(taskId)) {
-    fail('invalid-request', 'taskId must be a bounded identifier');
-  }
-  return taskId;
+  return validateTaskId(ownData(input, 'taskId', 'invalid-request', 'taskId'));
 }
 
 function validateInputKeys(input, keys) {
@@ -361,11 +494,24 @@ function dayKey(stamp) {
   return date.toISOString().slice(0, 10);
 }
 
+// The usage hint is read through own data descriptors so a hostile or accessor-backed answer cannot
+// run a getter during settlement, and only a positive safe integer is trusted as a token count; a
+// bad, absent or over-large value keeps the conservative reservation instead.
 function usageTokens(answer) {
-  const usage = answer?.usage;
+  let usage;
+  try {
+    usage = ownData(answer, 'usage', 'invalid-response', 'usage');
+  } catch {
+    return undefined;
+  }
   if (usage === null || typeof usage !== 'object') return undefined;
-  const total = ownData(usage, 'totalTokens', 'invalid-response', 'usage totalTokens');
-  return Number.isInteger(total) && total >= 0 ? total : undefined;
+  let total;
+  try {
+    total = ownData(usage, 'totalTokens', 'invalid-response', 'usage totalTokens');
+  } catch {
+    return undefined;
+  }
+  return Number.isSafeInteger(total) && total >= 0 ? total : undefined;
 }
 
 function publicTask(task) {
@@ -392,7 +538,8 @@ export function createProviderRouter(options) {
   const config = readOptions(options);
   const budgets = readBudgets(config.budgets);
   const providers = readProviders(config.providers);
-  const { policy, chains } = readPolicy(config.policy, providers);
+  const { policy, plans } = readPolicy(config.policy, providers);
+  const difficulty = config.difficulty;
   const tasks = new Map();
   let day = { key: undefined, used: 0, reserved: 0 };
 
@@ -465,30 +612,33 @@ export function createProviderRouter(options) {
       fail('invalid-task-class', 'only the embed class accepts embeddings');
     }
     const routes = policy[taskClass];
-    const chain = chains[taskClass];
+    const tier = operation === 'chat' ? readTierHint(request) : null;
     now();
     const task = taskFor(taskId);
     const inputTokens = estimateInputTokens(request);
     const outputTokens = operation === 'chat'
       ? Math.max(...routes.map((route) => route.maxOutputTokens))
       : 0;
+    // The tier only reorders the same policy routes, so the worst-case reservation is unchanged.
     const reservation = (inputTokens + outputTokens) * routes.length;
     const held = reserve(task, reservation);
+    const plan = plans[taskClass][tier ?? 'default'];
+    const first = plan.routes[0];
 
     const outgoing = Object.create(null);
     for (const key of Object.keys(request)) {
-      if (key !== 'taskId') outgoing[key] = request[key];
+      if (key !== 'taskId' && key !== 'tier') outgoing[key] = request[key];
     }
     if (operation === 'chat') {
-      outgoing.model = routes[0].model;
+      outgoing.model = first.model;
       outgoing.maxTokens = outputTokens;
     } else {
-      outgoing.model = routes[0].model;
+      outgoing.model = first.model;
     }
 
     let answer;
     try {
-      answer = await chain[operation](outgoing);
+      answer = await plan.chain[operation](outgoing);
     } catch (error) {
       settle(task, held, 0);
       throw error;
@@ -499,10 +649,49 @@ export function createProviderRouter(options) {
       ...answer,
       routedBy: Object.freeze({
         taskClass,
-        provider: routes[0].provider,
-        model: routes[0].model,
+        provider: first.provider,
+        model: first.model,
+        tier,
       }),
     });
+  }
+
+  // A billed classification is charged like any other provider call: the conservative bound is
+  // reserved against the task and day before dispatch, and settled with the adapter's reported usage
+  // when it provides one. The answer is re-validated and copied, never trusted.
+  async function classify(taskId, prompt) {
+    const id = validateTaskId(taskId);
+    if (difficulty === null) fail('no-difficulty-provider', 'no difficulty adapter is configured');
+    const promptBytes = readClassifyPrompt(prompt);
+    now();
+    const task = taskFor(id);
+    const tokens = classifyReservationTokens(promptBytes);
+    const held = reserve(task, tokens);
+    let answer;
+    try {
+      answer = await difficulty.classify(prompt);
+    } catch (error) {
+      settle(task, held, 0);
+      throw error;
+    }
+    let result;
+    try {
+      result = readClassifyAnswer(answer);
+    } catch (error) {
+      // The request was dispatched, so the conservative charge stays even though the answer is unusable.
+      settle(task, held, tokens);
+      throw error;
+    }
+    let actual;
+    try {
+      actual = usageTokens(answer);
+    } catch {
+      actual = undefined;
+    }
+    // A reported count above the conservative bound is not trusted; keep the reservation instead.
+    if (actual !== undefined && actual > tokens) actual = undefined;
+    settle(task, held, actual === undefined || actual === 0 ? tokens : actual);
+    return result;
   }
 
   return Object.freeze({
@@ -514,6 +703,7 @@ export function createProviderRouter(options) {
       if (!TASK_CLASSES.includes(taskClass)) fail('invalid-task-class', 'unknown task class');
       return run(taskClass, input, 'embeddings');
     },
+    classify,
     status: (taskId) => {
       if (typeof taskId !== 'string' || !TASK_ID.test(taskId)) fail('invalid-request', 'taskId is invalid');
       now();
@@ -526,12 +716,15 @@ export function createProviderRouter(options) {
     describe: () => Object.freeze({
       version: PROVIDER_ROUTER_VERSION,
       taskClasses: TASK_CLASSES,
+      tiers: DIFFICULTY_TIERS,
+      difficulty: difficulty !== null,
       policy: Object.freeze(Object.fromEntries(TASK_CLASSES.map((taskClass) => [
         taskClass,
         Object.freeze(policy[taskClass].map((route) => Object.freeze({
           provider: route.provider,
           model: route.model,
           maxOutputTokens: route.maxOutputTokens,
+          tiers: route.tiers,
         }))),
       ]))),
       budgets,

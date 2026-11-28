@@ -4,6 +4,18 @@ import test from 'node:test';
 
 import { ProviderClientError, createProviderClient } from '../../src/stable/gateway/provider-client.mjs';
 import {
+  DIFFICULTIES,
+  MAX_ROUTER_INPUT_BYTES,
+  MAX_ROUTER_INPUT_CHARS,
+  MAX_ROUTER_RESPONSE_BYTES,
+  ROUTER_TIERS,
+} from '../../src/stable/gateway/morph-router.mjs';
+import {
+  CLASSIFY_FRAMING_TOKENS,
+  DIFFICULTY_TIERS,
+  MAX_CLASSIFY_ANSWER_BYTES,
+  MAX_CLASSIFY_PROMPT_BYTES,
+  MAX_CLASSIFY_PROMPT_CHARS,
   MAX_TRACKED_TASKS,
   ProviderRouterError,
   TASK_CLASSES,
@@ -100,6 +112,7 @@ test('the policy table chooses the provider and model for every B3 task class', 
       taskClass,
       provider: taskClass === 'review' || taskClass === 'summarize' ? 'secondary' : 'primary',
       model: taskClass + '-model',
+      tier: null,
     });
     assert.equal(answer.servedBy.id, answer.routedBy.provider);
   }
@@ -143,7 +156,7 @@ test('a transient primary failure uses the policy fallback for that task class',
   const answer = await router.chat('plan', { taskId: 'fallback', messages: MESSAGES });
   assert.equal(answer.text, 'answer from plan-fallback');
   assert.deepEqual(answer.servedBy, { id: 'secondary', label: 'secondary', fallback: true });
-  assert.deepEqual(answer.routedBy, { taskClass: 'plan', provider: 'primary', model: 'plan-primary' });
+  assert.deepEqual(answer.routedBy, { taskClass: 'plan', provider: 'primary', model: 'plan-primary', tier: null });
   assert.deepEqual(answer.attempts.map((attempt) => attempt.outcome), ['failed', 'answered']);
   assert.equal(secondary.calls.chat[0].model, 'plan-fallback');
 });
@@ -601,4 +614,402 @@ test('an in-flight reservation does not leak across the UTC day boundary', async
   assert.equal(day.usedTokens, 50);
   assert.equal(day.reservedTokens, 0);
   assert.ok(day.remainingTokens <= 1_000);
+});
+
+// --- Difficulty tier hints and the billed classification path -------------------------------
+
+const DIFFICULTY_ANSWER = Object.freeze({
+  tier: 'cheap',
+  difficulty: 'easy',
+  confidence: 0.9,
+  meetsThreshold: true,
+  needsInfo: false,
+  fallback: false,
+  code: null,
+  status: null,
+});
+
+function tierPolicy() {
+  const policy = policyWith();
+  policy.plan = [
+    { provider: 'primary', model: 'plan-standard', maxOutputTokens: 16, tiers: ['standard'] },
+    { provider: 'secondary', model: 'plan-powerful', maxOutputTokens: 16, tiers: ['powerful'] },
+    { provider: 'tertiary', model: 'plan-neutral', maxOutputTokens: 16 },
+  ];
+  return policy;
+}
+
+function tierRouter(overrides = {}) {
+  const primary = overrides.primary ?? recordingClient();
+  const secondary = overrides.secondary ?? recordingClient();
+  const tertiary = overrides.tertiary ?? recordingClient();
+  return {
+    primary,
+    secondary,
+    tertiary,
+    router: createProviderRouter({
+      policy: overrides.policy ?? tierPolicy(),
+      providers: { primary: primary.client, secondary: secondary.client, tertiary: tertiary.client },
+      budgets: overrides.budgets ?? { perTaskTokens: 100_000, perDayTokens: 1_000_000 },
+      ...(overrides.difficulty === undefined ? {} : { difficulty: overrides.difficulty }),
+      now: () => NOW,
+    }),
+  };
+}
+
+function retryableClient(calls) {
+  return Object.freeze({
+    async chat(input) {
+      calls.push(input);
+      throw new ProviderClientError('http-status', 'provider is unavailable', { status: 503 });
+    },
+    async embeddings() {
+      throw new ProviderClientError('http-status', 'provider is unavailable', { status: 503 });
+    },
+  });
+}
+
+test('the difficulty tiers, prompt caps and answer bound mirror the Router adapter constants', async () => {
+  assert.ok(Object.isFrozen(DIFFICULTY_TIERS));
+  assert.deepEqual([...DIFFICULTY_TIERS], [...ROUTER_TIERS]);
+  assert.equal(MAX_CLASSIFY_PROMPT_CHARS, MAX_ROUTER_INPUT_CHARS);
+  assert.equal(MAX_CLASSIFY_PROMPT_BYTES, MAX_ROUTER_INPUT_BYTES);
+  assert.equal(MAX_CLASSIFY_ANSWER_BYTES, MAX_ROUTER_RESPONSE_BYTES);
+  assert.ok(Number.isInteger(CLASSIFY_FRAMING_TOKENS) && CLASSIFY_FRAMING_TOKENS > 0);
+
+  // Every label the adapter can emit, plus its documented needs_info, is accepted.
+  for (const label of [...DIFFICULTIES, 'needs_info']) {
+    const accepted = tierRouter({
+      difficulty: Object.freeze({ async classify() { return { ...DIFFICULTY_ANSWER, difficulty: label }; } }),
+    });
+    const answer = await accepted.router.classify('labels-' + label.replace('_', '-'), 'prompt');
+    assert.equal(answer.difficulty, label);
+  }
+});
+
+test('route tiers are validated and reported by describe()', async () => {
+  const { router } = tierRouter();
+  const described = router.describe();
+  assert.deepEqual([...described.tiers], ['cheap', 'standard', 'powerful']);
+  assert.equal(described.difficulty, false);
+  assert.deepEqual(described.policy.plan.map((route) => [...route.tiers]), [['standard'], ['powerful'], []]);
+  assert.deepEqual([...described.policy.review[0].tiers], []);
+
+  const invalidTiers = [
+    ['unknown tier', [{ provider: 'primary', model: 'm', maxOutputTokens: 16, tiers: ['turbo'] }]],
+    ['empty list', [{ provider: 'primary', model: 'm', maxOutputTokens: 16, tiers: [] }]],
+    ['duplicate', [{ provider: 'primary', model: 'm', maxOutputTokens: 16, tiers: ['cheap', 'cheap'] }]],
+    ['not an array', [{ provider: 'primary', model: 'm', maxOutputTokens: 16, tiers: 'cheap' }]],
+    ['sparse', [{ provider: 'primary', model: 'm', maxOutputTokens: 16, tiers: ['cheap', , 'powerful'] }]],
+  ];
+  for (const [label, routes] of invalidTiers) {
+    const policy = policyWith();
+    policy.plan = routes;
+    const client = recordingClient();
+    assert.throws(
+      () => createProviderRouter({
+        policy,
+        providers: { primary: client.client },
+        budgets: { perTaskTokens: 100_000, perDayTokens: 1_000_000 },
+      }),
+      (error) => error instanceof ProviderRouterError && error.code === 'invalid-policy',
+      label,
+    );
+  }
+
+  const accessorRoute = { provider: 'primary', model: 'm', maxOutputTokens: 16 };
+  Object.defineProperty(accessorRoute, 'tiers', { enumerable: true, get() { return ['cheap']; } });
+  const accessorPolicy = policyWith();
+  accessorPolicy.plan = [accessorRoute];
+  const accessorClient = recordingClient();
+  assert.throws(
+    () => createProviderRouter({
+      policy: accessorPolicy,
+      providers: { primary: accessorClient.client },
+      budgets: { perTaskTokens: 100_000, perDayTokens: 1_000_000 },
+    }),
+    (error) => error instanceof ProviderRouterError && error.code === 'invalid-policy',
+  );
+});
+
+test('a tier hint reorders only the class routes and never reaches a provider', async () => {
+  const { router, primary, secondary, tertiary } = tierRouter();
+  const answer = await router.chat('plan', { taskId: 'tier-powerful', messages: MESSAGES, tier: 'powerful' });
+  assert.deepEqual(answer.routedBy, {
+    taskClass: 'plan',
+    provider: 'secondary',
+    model: 'plan-powerful',
+    tier: 'powerful',
+  });
+  assert.equal(answer.text, 'answer from plan-powerful');
+  assert.equal(secondary.calls.chat.length, 1);
+  assert.equal(primary.calls.chat.length, 0);
+  assert.equal(tertiary.calls.chat.length, 0);
+  assert.equal('tier' in secondary.calls.chat[0], false);
+  assert.equal(Object.keys(secondary.calls.chat[0]).includes('tier'), false);
+});
+
+test('a tier hint keeps every policy route as fallback: matching, then untagged, then other tiers', async () => {
+  const primary = recordingClient();
+  const secondaryCalls = [];
+  const tertiary = recordingClient();
+  const { router } = tierRouter({
+    secondary: { client: retryableClient(secondaryCalls) },
+    primary,
+    tertiary,
+  });
+  const answer = await router.chat('plan', { taskId: 'tier-fallback', messages: MESSAGES, tier: 'powerful' });
+  assert.equal(secondaryCalls.length, 1);
+  assert.equal(tertiary.calls.chat.length, 1);
+  assert.equal(primary.calls.chat.length, 0);
+  assert.equal(answer.text, 'answer from plan-neutral');
+  assert.equal(answer.servedBy.id, 'tertiary');
+  assert.equal(answer.routedBy.provider, 'secondary');
+  assert.equal(answer.routedBy.tier, 'powerful');
+  assert.equal('tier' in tertiary.calls.chat[0], false);
+
+  // The other-tier route is last, and is still reachable when the two earlier groups fail.
+  const primaryLast = recordingClient();
+  const exhausted = tierRouter({
+    primary: primaryLast,
+    secondary: { client: retryableClient([]) },
+    tertiary: { client: retryableClient([]) },
+  });
+  const last = await exhausted.router.chat('plan', {
+    taskId: 'tier-fallback-last', messages: MESSAGES, tier: 'powerful',
+  });
+  assert.equal(last.text, 'answer from plan-standard');
+  assert.equal(primaryLast.calls.chat.length, 1);
+  assert.equal(primaryLast.calls.chat[0].model, 'plan-standard');
+});
+
+test('an unmatched or absent tier hint leaves the policy order unchanged', async () => {
+  const cheap = tierRouter();
+  const cheapAnswer = await cheap.router.chat('plan', { taskId: 'tier-cheap', messages: MESSAGES, tier: 'cheap' });
+  assert.equal(cheapAnswer.text, 'answer from plan-standard');
+  assert.equal(cheap.primary.calls.chat.length, 1);
+  assert.equal(cheap.secondary.calls.chat.length, 0);
+  assert.equal(cheapAnswer.routedBy.tier, 'cheap');
+
+  const plain = tierRouter();
+  const plainAnswer = await plain.router.chat('plan', { taskId: 'tier-none', messages: MESSAGES });
+  assert.equal(plainAnswer.text, 'answer from plan-standard');
+  assert.equal(plainAnswer.routedBy.tier, null);
+
+  const untagged = tierRouter({ policy: policyWith() });
+  const untaggedAnswer = await untagged.router.chat('plan', { taskId: 'tier-untagged', messages: MESSAGES, tier: 'powerful' });
+  assert.equal(untaggedAnswer.text, 'answer from plan-model');
+  assert.equal(untaggedAnswer.routedBy.tier, 'powerful');
+});
+
+test('a tier hint cannot shrink the reservation that covers every policy route', async () => {
+  const messages = [{ role: 'user', content: 'x'.repeat(20) }];
+  const serialized = JSON.stringify({ messages });
+  const inputBound = Buffer.byteLength(serialized, 'utf8') + 16 + 64;
+  const reservation = (inputBound + 16) * 3;
+  const blocked = tierRouter({ budgets: { perTaskTokens: reservation - 1, perDayTokens: 100_000 } });
+  const error = await blocked.router
+    .chat('plan', { taskId: 'tier-budget', messages, tier: 'powerful' })
+    .catch((failure) => failure);
+  assert.equal(error.code, 'budget-exhausted');
+  assert.equal(error.requiredTokens, reservation);
+  assert.equal(blocked.secondary.calls.chat.length, 0);
+
+  const allowed = tierRouter({ budgets: { perTaskTokens: reservation, perDayTokens: 100_000 } });
+  await allowed.router.chat('plan', { taskId: 'tier-budget', messages, tier: 'powerful' });
+  assert.equal(allowed.secondary.calls.chat.length, 1);
+});
+
+test('an invalid tier hint fails closed before any provider call', async () => {
+  const { router, primary, secondary, tertiary } = tierRouter();
+  for (const tier of ['turbo', 3, null, ['powerful']]) {
+    const error = await router.chat('plan', { taskId: 'tier-invalid', messages: MESSAGES, tier })
+      .catch((failure) => failure);
+    assert.ok(error instanceof ProviderRouterError);
+    assert.equal(error.code, 'invalid-request');
+  }
+  assert.equal(primary.calls.chat.length, 0);
+  assert.equal(secondary.calls.chat.length, 0);
+  assert.equal(tertiary.calls.chat.length, 0);
+
+  const embeddings = await router.embeddings('embed', { taskId: 'tier-embed', input: 'x', tier: 'cheap' })
+    .catch((failure) => failure);
+  assert.equal(embeddings.code, 'invalid-request');
+});
+
+test('classify() without a difficulty adapter fails closed and spends nothing', async () => {
+  const { router } = tierRouter();
+  const error = await router.classify('classify-none', 'how hard is this').catch((failure) => failure);
+  assert.ok(error instanceof ProviderRouterError);
+  assert.equal(error.code, 'no-difficulty-provider');
+  assert.equal(router.status('classify-none').task.usedTokens, 0);
+  assert.equal(router.status('classify-none').day.usedTokens, 0);
+});
+
+test('a billed classification is reserved against the task and day and copied without extras', async () => {
+  const prompts = [];
+  const difficulty = Object.freeze({
+    async classify(prompt) {
+      prompts.push(prompt);
+      return { ...DIFFICULTY_ANSWER, secret: 'ADAPTER-SECRET' };
+    },
+  });
+  const { router } = tierRouter({ difficulty });
+  const prompt = 'explain this diff';
+  const result = await router.classify('classify-bound', prompt);
+  assert.deepEqual(prompts, [prompt]);
+  assert.deepEqual({ ...result }, { ...DIFFICULTY_ANSWER });
+  assert.equal(Object.isFrozen(result), true);
+  assert.equal(JSON.stringify(result).includes('ADAPTER-SECRET'), false);
+  assert.equal(JSON.stringify(result).includes(prompt), false);
+
+  const charge = CLASSIFY_FRAMING_TOKENS + Buffer.byteLength(prompt, 'utf8') + MAX_CLASSIFY_ANSWER_BYTES;
+  assert.equal(router.status('classify-bound').task.usedTokens, charge);
+  assert.equal(router.status('classify-bound').task.reservedTokens, 0);
+  assert.equal(router.status('classify-bound').day.usedTokens, charge);
+
+  const usageDifficulty = Object.freeze({
+    async classify() {
+      return { ...DIFFICULTY_ANSWER, usage: { totalTokens: 7 } };
+    },
+  });
+  const metered = tierRouter({ difficulty: usageDifficulty });
+  const meteredResult = await metered.router.classify('classify-usage', prompt);
+  assert.equal(meteredResult.tier, 'cheap');
+  assert.equal(metered.router.status('classify-usage').task.usedTokens, 7);
+  assert.equal(metered.router.describe().difficulty, true);
+
+  // A zero or negative count is not a usable charge and keeps the reservation.
+  for (const totalTokens of [0, -1]) {
+    const unusable = tierRouter({
+      difficulty: Object.freeze({ async classify() { return { ...DIFFICULTY_ANSWER, usage: { totalTokens } }; } }),
+    });
+    const taskId = 'classify-unusable-' + String(totalTokens).replace('-', 'n');
+    await unusable.router.classify(taskId, prompt);
+    assert.equal(unusable.router.status(taskId).task.usedTokens, charge);
+  }
+
+  // A reported count above the conservative bound is not trusted; the reservation stays.
+  const overstated = tierRouter({
+    difficulty: Object.freeze({ async classify() { return { ...DIFFICULTY_ANSWER, usage: { totalTokens: 1e21 } }; } }),
+  });
+  await overstated.router.classify('classify-overstated', prompt);
+  assert.equal(overstated.router.status('classify-overstated').task.usedTokens, charge);
+
+  // A usage hint behind an accessor is never read and keeps the conservative charge.
+  let getterCalls = 0;
+  const accessorUsage = Object.defineProperty({ ...DIFFICULTY_ANSWER }, 'usage', {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      return { totalTokens: 7 };
+    },
+  });
+  const guarded = tierRouter({ difficulty: Object.freeze({ async classify() { return accessorUsage; } }) });
+  await guarded.router.classify('classify-usage-getter', prompt);
+  assert.equal(getterCalls, 0);
+  assert.equal(guarded.router.status('classify-usage-getter').task.usedTokens, charge);
+
+  // A control character is billed as its six-byte JSON escape, so the bound cannot under-reserve.
+  const escaped = tierRouter({ difficulty: Object.freeze({ async classify() { return { ...DIFFICULTY_ANSWER }; } }) });
+  await escaped.router.classify('classify-escaped', 'a\u0001b');
+  const escapedCharge = CLASSIFY_FRAMING_TOKENS + Buffer.byteLength(JSON.stringify('a\u0001b'), 'utf8') - 2 +
+    MAX_CLASSIFY_ANSWER_BYTES;
+  assert.equal(escaped.router.status('classify-escaped').task.usedTokens, escapedCharge);
+  assert.equal(escapedCharge, CLASSIFY_FRAMING_TOKENS + 8 + MAX_CLASSIFY_ANSWER_BYTES);
+
+
+  const hostileAnswer = Object.defineProperty({ ...DIFFICULTY_ANSWER }, 'tier', {
+    enumerable: true,
+    get() { return 'cheap'; },
+  });
+  const hostile = tierRouter({ difficulty: Object.freeze({ async classify() { return hostileAnswer; } }) });
+  const invalid = await hostile.router.classify('classify-accessor', prompt).catch((failure) => failure);
+  assert.equal(invalid.code, 'invalid-response');
+  assert.equal(hostile.router.status('classify-accessor').task.usedTokens, charge);
+});
+
+test('classify() validates its prompt and budget before the adapter is called', async () => {
+  let calls = 0;
+  const difficulty = Object.freeze({
+    async classify() {
+      calls += 1;
+      return { ...DIFFICULTY_ANSWER };
+    },
+  });
+  const { router } = tierRouter({ difficulty });
+  const badPrompts = [
+    '',
+    '   ',
+    'nul\u0000inside',
+    '\uD800lone',
+    'x'.repeat(MAX_CLASSIFY_PROMPT_CHARS + 1),
+  ];
+  for (const prompt of badPrompts) {
+    const error = await router.classify('classify-prompt', prompt).catch((failure) => failure);
+    assert.ok(error instanceof ProviderRouterError);
+    assert.equal(error.code, 'invalid-request');
+  }
+  const badId = await router.classify('bad id!', 'prompt').catch((failure) => failure);
+  assert.equal(badId.code, 'invalid-request');
+  assert.equal(calls, 0);
+  assert.equal(router.status('classify-prompt').task.usedTokens, 0);
+
+  const tight = tierRouter({
+    difficulty,
+    budgets: { perTaskTokens: 10, perDayTokens: 1_000_000 },
+  });
+  const exhausted = await tight.router.classify('classify-tight', 'prompt').catch((failure) => failure);
+  assert.equal(exhausted.code, 'budget-exhausted');
+  assert.equal(calls, 0);
+  assert.equal(tight.router.status('classify-tight').task.usedTokens, 0);
+});
+
+test('a failed classification releases its charge and a malformed answer keeps it', async () => {
+  const throwing = tierRouter({
+    difficulty: Object.freeze({
+      async classify() {
+        throw new ProviderClientError('network-error', 'the adapter is offline');
+      },
+    }),
+  });
+  const error = await throwing.router.classify('classify-throw', 'prompt').catch((failure) => failure);
+  assert.equal(error.code, 'network-error');
+  assert.equal(throwing.router.status('classify-throw').task.usedTokens, 0);
+  assert.equal(throwing.router.status('classify-throw').task.reservedTokens, 0);
+
+  const malformed = tierRouter({
+    difficulty: Object.freeze({ async classify() { return { tier: 'turbo' }; } }),
+  });
+  const invalid = await malformed.router.classify('classify-malformed', 'prompt').catch((failure) => failure);
+  assert.equal(invalid.code, 'invalid-response');
+  const charge = CLASSIFY_FRAMING_TOKENS + Buffer.byteLength('prompt', 'utf8') + MAX_CLASSIFY_ANSWER_BYTES;
+  assert.equal(malformed.router.status('classify-malformed').task.usedTokens, charge);
+  assert.equal(malformed.router.status('classify-malformed').task.reservedTokens, 0);
+
+  const outOfRange = tierRouter({
+    difficulty: Object.freeze({ async classify() { return { ...DIFFICULTY_ANSWER, confidence: 1.5 }; } }),
+  });
+  const range = await outOfRange.router.classify('classify-range', 'prompt').catch((failure) => failure);
+  assert.equal(range.code, 'invalid-response');
+
+  assert.throws(
+    () => createProviderRouter({
+      policy: policyWith(),
+      providers: { primary: recordingClient().client },
+      budgets: { perTaskTokens: 100_000, perDayTokens: 1_000_000 },
+      difficulty: { classify: 'not a function' },
+    }),
+    (failure) => failure instanceof ProviderRouterError && failure.code === 'invalid-options',
+  );
+});
+
+test('a classification result can drive a tier hint end to end', async () => {
+  const difficulty = Object.freeze({ async classify() { return { ...DIFFICULTY_ANSWER, tier: 'powerful', difficulty: 'hard' }; } });
+  const { router, secondary } = tierRouter({ difficulty });
+  const classified = await router.classify('classify-e2e', 'refactor this module');
+  const answer = await router.chat('plan', { taskId: 'classify-e2e', messages: MESSAGES, tier: classified.tier });
+  assert.equal(classified.tier, 'powerful');
+  assert.equal(answer.routedBy.provider, 'secondary');
+  assert.equal(secondary.calls.chat.length, 1);
 });
