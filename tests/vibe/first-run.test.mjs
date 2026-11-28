@@ -144,6 +144,7 @@ test('a ready machine exposes the start plan once the binary and both models are
     kind: 'llama-server',
     executablePath: runtime,
     modelPath: path.join(root, 'models', chatEntry.file),
+    model: chatEntry.id,
     embeddingModelPath: path.join(root, 'models', embeddingEntry.file),
     contextSize: 8192,
     threads: 6,

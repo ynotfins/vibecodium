@@ -131,6 +131,7 @@ test('the start action installs the pinned sidecar once and returns the pinned p
     kind: 'llama-server',
     executablePath: executable,
     modelPath: path.join(root, 'models', chatEntry.file),
+    model: chatEntry.id,
     embeddingModelPath: path.join(root, 'models', embeddingEntry.file),
     contextSize: 8192,
     threads: 6,
