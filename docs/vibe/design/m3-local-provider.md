@@ -84,17 +84,17 @@ remote host. A `wizard` is a trusted caller surface in the same class as the sup
 ## Residual risks
 
 - The client is started in the same process that owns the supervisor, so a debugger or an administrator
-  can read the key from memory, exactly as recorded for the supervisor.
+   can read the key from memory, exactly as recorded for the supervisor.
 - The bridge reads `startPlan()` a second time to obtain the B1 model name; a wizard that changes its
-  plan between `runtimeOptions()` and `startPlan()` fails `invalid-plan` rather than starting a client
-  for a model the runtime was not told to serve. The delivered wizard returns a frozen plan, so this is
-  only reachable with an injected or misbehaving wizard.
+   plan between `runtimeOptions()` and `startPlan()` fails `invalid-plan` rather than starting a client
+   for a model the runtime was not told to serve. The delivered wizard returns a frozen plan, so this is
+   only reachable with an injected or misbehaving wizard.
 - `*.localhost` is accepted on the RFC 6761 promise that a resolver maps it to loopback; this Windows
-  target does, and a non-conforming resolver would be a deployment risk rather than a code path to a
-  remote host. An IPv4-mapped loopback literal (`::ffff:127.0.0.1`) is normalised by the URL parser to
-  `[::ffff:7f00:1]` and is refused, which is over-strict but fails closed.
+   target does, and a non-conforming resolver would be a deployment risk rather than a code path to a
+   remote host. An IPv4-mapped loopback literal (`::ffff:127.0.0.1`) is normalised by the URL parser to
+   `[::ffff:7f00:1]` and is refused, which is over-strict but fails closed.
 - The host wiring is unit-tested against the loopback fixture, not a real `b12426` binary; the live
-  loopback smoke with the pinned weights is still open (M3).
+   loopback smoke with the pinned weights is still open (M3).
 
 ## Verification
 
