@@ -67,6 +67,7 @@ Do not start M2 items (lane A owns M2 completion) and do not start M4/M5/M6 work
 - Next step: wire the host-supplied root into the product path (M6/M12) and reconcile the Windows location with `ARCHITECTURE.md` section 4 through a governance proposal then; keep the authenticated-manifest gate, signing, the packaged catalog copy and the clean-machine live smoke open for M3/M12.
 - Status: done.
 - Original prompt (verbatim): the lane goal-runner prompt recorded in the entry above (same session prompt).
+- Delivery: PR #91 (`https://github.com/ynotfins/vibecodium/pull/91`), commit `57d5897` plus the `origin/vibe/main` merge `216a486` (which kept both the loopback-auth and owned-runtime entries in `STATUS`, `CHANGELOG` and `ROADMAP`). CI on `216a486` passed both `verify` runs, both `compile` jobs, `ecformat`, both `zizmor` runs and the Devin review; `build (macos-14, arm64)` failed in 1 s on its unsupported runner label (the known infrastructure limitation) and the `build` legs for `X64` and `LOONG64` failed when `raw.githubusercontent.com` returned 429 for the Chromium clang script (an external rate limit, not a slice failure). Merged as `eaed62e` on 2026-11-28.
 
 ### 2026-11-26 - M3 first-run embedding server plan
 
