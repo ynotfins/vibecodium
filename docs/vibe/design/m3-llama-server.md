@@ -312,6 +312,13 @@ creates a real B1 `llama-cpp` client against the running server and verifies cha
 streamed and non-streamed tool calls, embeddings and `/infill`, with the key and a 401 from the
 fixture for the same paths without it; the first-run wizard will use the same client and key.
 
+A child's pid is read from `status()` on the supervisor's first probe, where it is set immediately
+after `spawn` and before any reap, and the never-ready and readiness-mismatch cases prove the kill
+from that pid with `process.kill(pid, 0)`; no case polls for the fixture's argv log, because the
+readiness deadline starts after `spawn` and a loaded host can reap a child before it has written one.
+The argv log is read only after a start reached `running`, where the fixture writes it before it
+listens.
+
 The authenticated loopback boundary has its own cases in the same file: a started controller reports
 a generated key of 43 base64url characters through `auth()` and nowhere in `status()`, `describe()`,
 `config`, the argument list or the child's argv log, while the fixture sees `LLAMA_API_KEY`; the two
@@ -331,7 +338,9 @@ received the `Authorization: Bearer` header; and the fail-closed option matrix r
 remote presets (`--embd-gemma-default`, `--fim-qwen-*`, `--gpt-oss-*-default`, `--vision-gemma-*`),
 the router-mode catalogs (`--models-dir`, `--models-preset`, `--models-max`,
 `--models-memory-margin`, `--models-autoload`) and the peer tunnel `--connect`, with representative
-case and underscore spellings and the `=` form of each value-taking long switch) and refuses an
+case and underscore spellings and the `=` form of each value-taking long switch, while the
+loader-disabling `--no-models-autoload` is accepted because the `--models-` prefix cannot catch it
+and it can only turn the loader off) and refuses an
 `LLAMA_API_KEY` environment override and any `env` override of the profile config roots (`APPDATA`, `PROGRAMDATA`, `XDG_CONFIG_HOME`, `HOME`, in any casing, without echoing the value), while a non-reserved flag such as `--chat_template` still passes
 in either spelling and the numeric tuning flags `-b`, `-ub`, `-t`, `-c` and `-ngl`, the local draft
 `-md`/`--model-draft`, the draft tuning flags `--spec-draft-threads`/`--spec-draft-ngl` and the ngram-only
