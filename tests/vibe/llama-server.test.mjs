@@ -282,20 +282,19 @@ test('an apiKey at either length bound is accepted and each controller generates
 });
 
 test('a 403 from the authenticated probe is a foreign listener and the child is reaped', async (t) => {
-  let logPath = null;
-  const { server, log } = makeServer(t, {
+  let childPid = null;
+  const { server } = makeServer(t, {
+    // The pid is set immediately after `spawn` and cleared when the child is reaped, and the
+    // supervisor only probes once it has spawned, so the first probe is a pid handshake that cannot
+    // race the fixture's argv log the way a file wait can on a loaded host.
     fetch: async (url) => {
-      const deadlineAt = Date.now() + 3000;
-      while (logPath !== null && !existsSync(logPath) && Date.now() < deadlineAt) {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
+      if (childPid === null) childPid = server.status().pid;
       if (String(url).endsWith('/health')) return new Response('{}', { status: 200 });
       return new Response('{}', { status: 403 });
     },
     startupTimeoutMs: 5000,
     healthIntervalMs: 20,
   });
-  logPath = log;
   const key = server.auth().apiKey;
   let caught = null;
   try {
@@ -308,20 +307,18 @@ test('a 403 from the authenticated probe is a foreign listener and the child is 
   assert.equal(server.status().state, 'stopped');
   assert.equal(server.status().pid, null);
   assert.equal(server.status().port, null);
-  assert.equal(await waitGone(readArgv(log).pid), true, 'a 403 listener is treated as foreign and the child is killed');
+  assert.ok(Number.isInteger(childPid) && childPid > 0, 'the first probe ran after the spawn');
+  assert.equal(await waitGone(childPid), true, 'a 403 listener is treated as foreign and the child is killed');
 });
 
 test('a listener that rejects the generated key fails readiness and is reaped', async (t) => {
   const seen = [];
-  // The child boots asynchronously; answer only once it has written its argv log, so the pid is
-  // known and the "reaped" assertion is meaningful.
-  let logPath = null;
-  const { server, log } = makeServer(t, {
+  // The pid is read on the first probe instead of waiting for the fixture's argv log: the supervisor
+  // only probes after `spawn`, and a log wait can outlive the child when the host is loaded.
+  let childPid = null;
+  const { server } = makeServer(t, {
     fetch: async (url, init) => {
-      const deadlineAt = Date.now() + 3000;
-      while (logPath !== null && !existsSync(logPath) && Date.now() < deadlineAt) {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
+      if (childPid === null) childPid = server.status().pid;
       const target = String(url);
       const headers = new Headers(init?.headers ?? {});
       seen.push({ path: new URL(target).pathname, authorization: headers.get('authorization') });
@@ -331,9 +328,15 @@ test('a listener that rejects the generated key fails readiness and is reaped', 
     startupTimeoutMs: 5000,
     healthIntervalMs: 20,
   });
-  logPath = log;
   const key = server.auth().apiKey;
-  await assert.rejects(server.start(), isCode('readiness-mismatch'));
+  let caught = null;
+  try {
+    await server.start();
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(caught instanceof LlamaServerError && caught.code === 'readiness-mismatch');
+  assert.ok(!caught.message.includes(key), 'the readiness error never echoes the key');
   assert.equal(server.status().state, 'stopped');
   assert.equal(server.status().pid, null);
   assert.equal(server.status().port, null);
@@ -341,16 +344,30 @@ test('a listener that rejects the generated key fails readiness and is reaped', 
     seen.some((entry) => entry.path === '/props' && entry.authorization === 'Bearer ' + key),
     'the readiness probe authenticates itself',
   );
-  assert.equal(await waitGone(readArgv(log).pid), true, 'a server that rejects the key is killed');
+  assert.ok(Number.isInteger(childPid) && childPid > 0, 'the first probe ran after the spawn');
+  assert.equal(await waitGone(childPid), true, 'a server that rejects the key is killed');
 });
 
 test('a never-ready server fails as startup-timeout and is killed', async (t) => {
-  const { server, log } = makeServer(t, { env: { FAKE_LLAMA_MODE: 'hang' }, startupTimeoutMs: 250, healthIntervalMs: 20 });
+  let childPid = null;
+  const { server } = makeServer(t, {
+    env: { FAKE_LLAMA_MODE: 'hang' },
+    startupTimeoutMs: 250,
+    healthIntervalMs: 20,
+    // The start deadline is measured from after `spawn`, so a loaded host can reap the child before
+    // the fixture has written its argv log. Read the pid on the first probe and prove the kill from
+    // it, so the assertion never depends on a file the child may not have written yet.
+    fetch: async (url, init) => {
+      if (childPid === null) childPid = server.status().pid;
+      return fetch(url, init);
+    },
+  });
   await assert.rejects(server.start(), isCode('startup-timeout'));
   assert.equal(server.status().state, 'stopped');
   assert.equal(server.status().pid, null);
   assert.equal(server.status().port, null);
-  assert.equal(await waitGone(readArgv(log).pid), true, 'a timed-out child is killed');
+  assert.ok(Number.isInteger(childPid) && childPid > 0, 'at least one probe ran before the timeout');
+  assert.equal(await waitGone(childPid), true, 'a timed-out child is killed');
   assert.deepEqual(await server.health(), { ok: false, status: 0 });
 });
 
@@ -632,8 +649,10 @@ test('options fail closed without spawning', (t) => {
     // cannot slip in through the naming convention; the two tuning flags are only meaningful in
     // router mode, which the appended `--model` never allows here.
     { commandArgs: ['--models-max', '2'] },
+    { commandArgs: ['--models-max=2'] },
     { commandArgs: ['--models-autoload'] },
     { commandArgs: ['--models-memory-margin', '1024'] },
+    { commandArgs: ['--models-memory-margin=1024'] },
     { commandArgs: ['--api-key', 'x'] },
     { commandArgs: ['--api_key', 'x'] },
     { commandArgs: ['--api-key=secret'] },
@@ -734,6 +753,10 @@ test('options fail closed without spawning', (t) => {
     // b12426 registers `--model-draft` and `-md` on `--spec-draft-model`, and those load a local file.
     ['--spec-draft-model', 'draft.gguf'], ['--model-draft', 'draft.gguf'],
     ['--model_draft', 'draft.gguf'],
+    // `--no-models-autoload` is the one `--models-*` spelling the pinned b12426 registers that the
+    // `--models-` prefix cannot catch (the `no-` breaks the match), and it only disables the loader,
+    // so it is accepted on purpose; the positive `--models-autoload` form stays refused.
+    ['--no-models-autoload'],
   ]) {
     assert.doesNotThrow(() => createLlamaServer({ ...valid, commandArgs }));
   }
