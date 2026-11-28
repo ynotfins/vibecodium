@@ -100,11 +100,19 @@ const COPIED_ENV_KEYS = Object.freeze(
 // Environment names that change how a child loads code or where the system resolves libraries.
 // A caller override must not be able to redirect them; the comparison is case-insensitive because
 // Windows environment names are case-insensitive.
+// The profile roots are here for a different reason: the pinned `b12426` build applies
+// `/etc/llama.cpp/config.ini` and `${XDG_CONFIG_HOME:-~/.config}/llama.cpp/config.ini` before argv
+// (on Windows `%PROGRAMDATA%\llama.cpp\config.ini` and `%APPDATA%\llama.cpp\config.ini`, resolved
+// with `getenv`), and a config file can set a remote model or projector source past every argument
+// denial. The allowlist never copies these names and refusing them as overrides means the delivered
+// Windows child resolves neither profile root; a POSIX host still reads `/etc/llama.cpp/config.ini`
+// and falls back to the passwd home's `.config/llama.cpp/config.ini` when `HOME` is absent.
 const DENIED_ENV_KEYS = new Set([
   'node_options', 'node_path', 'ld_preload', 'ld_audit', 'ld_library_path',
   'dyld_insert_libraries', 'dyld_library_path', 'dyld_framework_path',
   'dyld_fallback_library_path', 'dyld_fallback_framework_path', 'systemroot',
   'ggml_backend_path', 'llama_api_key',
+  'appdata', 'programdata', 'xdg_config_home', 'home',
 ]);
 const DENIED_ENV_PREFIXES = Object.freeze(['llama_arg_']);
 // Every spelling the pinned b12426 source registers for a denied switch. `--hf-repo` has two short
