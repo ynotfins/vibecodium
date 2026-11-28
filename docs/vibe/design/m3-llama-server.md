@@ -156,8 +156,16 @@ CORS flags and `--allow-unauthenticated-tools` must not be set (the `=` form of 
 refused too); `--reuse-port`, `--agent`/`-ag`/
 `--ui-agent`, `--tools`, `--mcp-*` and `--ui-mcp-proxy` are refused because they would weaken the
 loopback-only, authenticated or no-tools guarantee, and the remote-model sources `-mu`/`--model-url`,
-`-hf`/`--hf-repo`, `-dr`/`--docker-repo` and the peer tunnel `--connect` are refused so `commandArgs`
-cannot point the child at a remote GGUF or a peer. `--` is not a terminator in llama.cpp (it rejects
+`-hf`/`-hfr`/`--hf-repo`/`--hf-repo-draft`, `-hff`/`--hf-file`, `-hft`/`--hf-token`,
+`-hfd`/`-hfrd`/`--spec-draft-hf`, `-mmu`/`--mmproj-url`,
+`-dr`/`--docker-repo`, the eleven value-less presets that write a remote repository
+(`--embd-gemma-default`, the `--fim-qwen-*` presets, `--gpt-oss-*-default` and the
+`--vision-gemma-*` presets) and the peer tunnel `--connect` are refused so `commandArgs` cannot point the
+child at a remote GGUF, remote draft or remote projector, or at a peer. At the pin `b12426` `-hfr` is
+a second registered short alias of `--hf-repo` beside `-hf`, `-hff` and `-hft` are the short forms of
+the file and token switches, `-hfd`/`-hfrd` belong to `--spec-draft-hf`, `-mmu` belongs to
+`--mmproj-url`, and each preset sets a Hugging Face repository (two also a remote draft) that the
+server downloads and uses instead of the validated local model path, so every spelling is named rather than only the long form. `--` is not a terminator in llama.cpp (it rejects
 the argument), and the supervisor's own flags cannot appear earlier in the list, so none of them can
 be duplicated or shadowed. Caller-chosen numeric flags such as `--threads` remain a trusted surface.
 
@@ -240,7 +248,17 @@ Residual risks:
 - The retained stdout/stderr tail is bounded in memory and never exposed; redaction is not
    implemented because nothing reads it yet.
 - `commandArgs` and `env` are a trusted caller surface. Only the supervisor's own flags, the key
-   name, shared-port, agent/MCP and loader/system values are refused.
+   name, shared-port, agent/MCP, remote-model and loader/system values are refused; every other
+   llama-server flag a caller passes is trusted and literal.
+- The denied list covers argv and the `LLAMA_ARG_*` environment names, not the pinned build's own
+   `config.ini` files (`%PROGRAMDATA%\llama.cpp\config.ini` and `%APPDATA%\llama.cpp\config.ini` at
+   `b12426`), which llama.cpp applies before argv with unknown keys ignored. A machine- or
+   user-level config could therefore still set a remote model or projector source for the child; it
+   is outside `commandArgs` and this card, and is recorded as an M3 follow-up: `b12426` registers no
+   config-disable switch or environment variable, so the follow-up must pin a build that has one or
+   isolate the user profile (the machine-wide path is only read when `PROGRAMDATA` is in the child
+   environment, which the supervisor's allowlist does not copy, though a caller `env` override could
+   add it).
 
 ## Verification
 
@@ -279,10 +297,17 @@ is refused without being invoked; a fake listener that answers `/health` with 20
 `stopped` with no pid or port, is proven dead through `process.kill(pid, 0)` and is seen to have
 received the `Authorization: Bearer` header; and the fail-closed option matrix refuses the reserved
 `commandArgs` families (`-m`, `--api-key`, `--api-key-file`, `--model`, the UI and CORS flags,
-`--allow-unauthenticated-tools`, the remote-model sources `-mu`/`--model-url`, `-hf`/`--hf-repo`,
-`-dr`/`--docker-repo` and the peer tunnel `--connect`, with representative case, underscore and `=`
-spellings) and refuses an `LLAMA_API_KEY` environment override, while a non-reserved flag such as
-`--chat_template` still passes in either spelling. The living `llama-cpp` preset contract is covered by
+`--allow-unauthenticated-tools`, the remote-model sources `-mu`/`--model-url`,
+`-hf`/`-hfr`/`--hf-repo`/`--hf-repo-draft`, `-hff`/`--hf-file`, `-hft`/`--hf-token`,
+`-hfd`/`-hfrd`/`--spec-draft-hf`, `-mmu`/`--mmproj-url`, `-dr`/`--docker-repo`, the eleven
+remote presets (`--embd-gemma-default`, `--fim-qwen-*`, `--gpt-oss-*-default`, `--vision-gemma-*`)
+and the peer
+tunnel `--connect`, with representative case and underscore spellings and the `=` form of each
+value-taking long switch) and refuses an
+`LLAMA_API_KEY` environment override, while a non-reserved flag such as `--chat_template` still passes
+in either spelling and the numeric tuning flags `-b`, `-ub`, `-t`, `-c` and `-ngl`, the local draft
+`-md`, the draft tuning flags `--spec-draft-threads`/`--spec-draft-ngl` and the ngram-only
+`--spec-default` remain accepted. The living `llama-cpp` preset contract is covered by
 `node --test tests/vibe/provider-presets.test.mjs`.
 
 The restart policy has its own cases in the same file, with the fixture counting boots through

@@ -107,12 +107,32 @@ const DENIED_ENV_KEYS = new Set([
   'ggml_backend_path', 'llama_api_key',
 ]);
 const DENIED_ENV_PREFIXES = Object.freeze(['llama_arg_']);
-const DENIED_SERVER_ARGS = new Set(['-ag', '-mu', '-hf', '-dr']);
+// Every spelling the pinned b12426 source registers for a denied switch. `--hf-repo` has two short
+// aliases (`-hf` and `-hfr`), the Hugging Face file/token switches have their own (`-hff`, `-hft`),
+// the speculative draft repository adds `--spec-draft-hf` with `-hfd` and `-hfrd`, and the
+// multimodal projector has its own remote URL, `--mmproj-url`/`-mmu`; naming only the long form and
+// one alias would leave a caller-supplied prefix argument able to download a remote GGUF past the
+// local single-model refusal. The value-less preset switches below are the other writers of a remote
+// repository in the same source: each one sets a Hugging Face repo (and two also a remote draft) and
+// the server downloads it and replaces the validated local model path. The comparison below
+// lower-cases every argument, so a case-variant spelling is refused too; llama.cpp only registers the
+// lower-case names, which makes that extra refusal belt-and-braces rather than load-bearing.
+const DENIED_SERVER_ARGS = new Set([
+  '-ag', '-mu', '-hf', '-hfr', '-hff', '-hft', '-hfd', '-hfrd', '-mmu', '-dr',
+  // value-less presets that set params.model.hf_repo (and, for the two `-spec` presets, the draft)
+  '--embd-gemma-default',
+  '--fim-qwen-1.5b-default', '--fim-qwen-3b-default', '--fim-qwen-7b-default',
+  '--fim-qwen-30b-default', '--fim-qwen-7b-spec', '--fim-qwen-14b-spec',
+  '--gpt-oss-20b-default', '--gpt-oss-120b-default',
+  '--vision-gemma-4b-default', '--vision-gemma-12b-default',
+]);
 const DENIED_SERVER_ARG_PREFIXES = Object.freeze([
   '--reuse-port', '--agent', '--tools', '--mcp-', '--ui-agent', '--ui-mcp-proxy',
   // Remote-model sources and the peer tunnel would leave the local single-model posture; refuse them
   // like the model flag itself, so commandArgs cannot point the child at a remote GGUF or a peer.
-  '--model-url', '--hf-repo', '--docker-repo', '--connect',
+  // `--hf-repo` already covers the draft alias `--hf-repo-draft`.
+  '--model-url', '--hf-repo', '--hf-file', '--hf-token', '--spec-draft-hf', '--mmproj-url',
+  '--docker-repo', '--connect',
 ]);
 const MAX_ENV_NAME_CHARS = 64;
 const MAX_ENV_TOTAL_CHARS = 32_768;
