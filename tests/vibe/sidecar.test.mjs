@@ -1421,3 +1421,124 @@ test('an unsafe archive entry name is not echoed in the error', async (t) => {
   assert.ok(!message.includes('example.com'));
   assertNoInstalledFiles(dir);
 });
+
+// --- Installer-owned runtime directory (M3: a webview path never reaches a write) ---
+
+function ownedTargetDir(root, sidecar = 'llama-server', version = 'b12426') {
+  return path.join(root, 'runtime', 'win32-x64', sidecar + '-' + version);
+}
+
+test('installSidecar with ownedRoot derives the installer-owned runtime directory', async (t) => {
+  const entries = runtimeFiles('owned');
+  const archive = makeZip(entries);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  let requests = 0;
+  await withServer((request, response) => {
+    requests += 1;
+    response.writeHead(200, { 'content-type': 'application/zip', 'content-length': archive.length });
+    response.end(archive);
+  }, async (base) => {
+    const sidecar = makeSidecar({ url: base + 'llama.zip', archive, files });
+    const root = tempDir(t);
+    const result = await installSidecar(sidecar, { platformKey: 'win32-x64', ownedRoot: root });
+    const expected = ownedTargetDir(root);
+    assert.equal(requests, 1);
+    assert.equal(result.installed, true);
+    assert.equal(result.verified, true);
+    assert.equal(result.executablePath, path.join(expected, 'llama-server.exe'));
+    for (const entry of entries) {
+      assert.deepEqual(readFileSync(path.join(expected, entry.name)), Buffer.from(entry.data));
+    }
+    assert.equal(lstatSync(path.join(root, 'runtime'), { throwIfNoEntry: false }).isDirectory(), true);
+
+    const second = await installSidecar(sidecar, { platformKey: 'win32-x64', ownedRoot: root,
+      fetchImpl: () => {
+        throw new Error('the second install must not open a socket');
+      },
+    });
+    assert.equal(requests, 1);
+    assert.equal(second.skipped, true);
+  });
+});
+
+test('verifySidecarInstall with ownedRoot verifies the derived directory without a caller path', async (t) => {
+  const entries = runtimeFiles('owned-verify');
+  const sidecar = manifestForFiles(entries).sidecar;
+  const root = tempDir(t);
+  const dir = ownedTargetDir(root);
+  const missing = await verifySidecarInstall(sidecar, { platformKey: 'win32-x64', ownedRoot: root });
+  assert.deepEqual(missing, Object.freeze({ verified: false, reason: 'missing', version: 'b12426' }));
+
+  writeRuntimeFiles(dir, entries);
+  const verified = await verifySidecarInstall(sidecar, { platformKey: 'win32-x64', ownedRoot: root });
+  assert.equal(verified.verified, true);
+  assert.equal(verified.executablePath, path.join(dir, 'llama-server.exe'));
+
+  writeFileSync(path.join(dir, 'llama.dll'), Buffer.from('short'));
+  const sized = await verifySidecarInstall(sidecar, { platformKey: 'win32-x64', ownedRoot: root });
+  assert.equal(sized.reason, 'size');
+});
+
+test('ownedRoot is required or exclusive and never accepts a caller directory', async (t) => {
+  const entries = runtimeFiles('owned-options');
+  const archive = makeZip(entries);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const root = tempDir(t);
+  const targetDir = path.join(root, 'runtime');
+
+  let fetched = 0;
+  const fetchImpl = async () => {
+    fetched += 1;
+    return archiveResponse(archive);
+  };
+
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64' }), 'invalid-options');
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64', ownedRoot: root, targetDir, fetchImpl }), 'invalid-options');
+  await expectFailure(verifySidecarInstall(sidecar, { platformKey: 'win32-x64', ownedRoot: root, targetDir }), 'invalid-options');
+  await expectFailure(verifySidecarInstall(sidecar, { platformKey: 'win32-x64' }), 'invalid-options');
+  assert.equal(fetched, 0);
+  assert.equal(lstatSync(path.join(root, 'runtime'), { throwIfNoEntry: false }), undefined);
+});
+
+test('an ownedRoot the installer cannot own is refused as invalid-destination', async (t) => {
+  const entries = runtimeFiles('owned-escape');
+  const archive = makeZip(entries);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const root = tempDir(t);
+  let fetched = 0;
+  const fetchImpl = async () => {
+    fetched += 1;
+    return archiveResponse(archive);
+  };
+
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64', ownedRoot: 'relative/appdata', fetchImpl }), 'invalid-destination');
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64', ownedRoot: 42, fetchImpl }), 'invalid-destination');
+  const file = path.join(root, 'not-a-directory');
+  writeFileSync(file, 'x');
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64', ownedRoot: file, fetchImpl }), 'invalid-destination');
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64', ownedRoot: path.parse(root).root, fetchImpl }), 'invalid-destination');
+  await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64', ownedRoot: path.join(root, 'a\u202Eb'), fetchImpl }), 'invalid-destination');
+  assert.equal(lstatSync(path.join(root, 'runtime'), { throwIfNoEntry: false }), undefined);
+
+  const owned = path.join(root, 'appdata');
+  mkdirSync(owned);
+  const outside = path.join(root, 'outside');
+  mkdirSync(outside);
+  try {
+    symlinkSync(outside, path.join(owned, 'runtime'), process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (error && (error.code === 'EPERM' || error.code === 'EACCES')) {
+      t.diagnostic('this host cannot create a directory symlink without elevation');
+    } else {
+      throw error;
+    }
+  }
+  if (lstatSync(path.join(owned, 'runtime'), { throwIfNoEntry: false })?.isSymbolicLink()) {
+    await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64', ownedRoot: owned, fetchImpl }), 'invalid-destination');
+    await expectFailure(verifySidecarInstall(sidecar, { platformKey: 'win32-x64', ownedRoot: owned }), 'invalid-destination');
+    assert.deepEqual(readdirSync(outside), []);
+  }
+  assert.equal(fetched, 0);
+});

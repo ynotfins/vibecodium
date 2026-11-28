@@ -69,7 +69,7 @@ and `dispose()`.
 | `onChange` | Optional display callback, invoked with the current view after a phase or progress change. A throwing callback is ignored. |
 | `discoverOllama` | Optional discovery effect, default the delivered `discoverOllama`. Tests inject a local fake so no socket is opened; the product leaves it unset. |
 | `restart` | Optional restart policy handed to the supervisor. It is validated with the supervisor's exported `validateRestart` at construction; omitted uses the frozen conservative default `{ maxRestarts: 3, baseDelayMs: 1000, maxDelayMs: 30000, stableMs: 60000 }`. |
-| `sidecar` | Optional pinned-runtime settings, owned by the host and never by the webview: `{ manifest, id?, targetDir?, platformKey? }`. The manifest is validated with the installer's `validateSidecarManifest`, `id` defaults to the sole entry, `targetDir` defaults to `<destinationDir>/runtime`, and the platform must have a pinned target. A malformed bag fails closed as `invalid-sidecar`. |
+| `sidecar` | Optional pinned-runtime settings, owned by the host and never by the webview: `{ manifest, id?, appDataRoot?, targetDir?, platformKey? }`. The manifest is validated with the installer's `validateSidecarManifest`, `id` defaults to the sole entry, and the platform must have a pinned target. With `appDataRoot` the installer derives `<root>/runtime/<platformKey>/<id>-<version>` itself and receives only the owned root, so no caller directory reaches a write; `targetDir` alongside it is refused rather than ignored. Without `appDataRoot`, `targetDir` defaults to `<destinationDir>/runtime` for a host that already owns an installed runtime. A malformed bag, a non-absolute or unownable root fails closed as `invalid-sidecar`. |
 | `installSidecar` | Optional installer effect, default the delivered `installSidecar`. It is called only by `start()`; tests inject a local fake so no network is used. |
 | `verifySidecar` | Optional offline verifier, default the delivered `verifySidecarInstall`. `refresh()` uses it to adopt a runtime that is already on disk; it never touches the network. |
 
@@ -128,8 +128,11 @@ result or hostile (accessor, Proxy, non-string) result returns
 `{ available: false, reason: 'runtime-install-failed', code }` with a bounded code and leaves the plan
 unchanged, so a retry can run. A second start reuses the validated executable and does not call the
 installer again. `refresh()` adopts an existing runtime through the injected offline `verifySidecar`
-without a download; a failed or hostile check is advisory. The default `targetDir` is
-`<destinationDir>/runtime`; the host, not the webview, owns it.
+without a download; a failed or hostile check is advisory. With `appDataRoot` the verifier receives exactly
+`{ ownedRoot, platformKey }` and the installer receives the same bag plus its existing `signal` and
+`onProgress` controls, so the installer derives `<root>/runtime/<platformKey>/<id>-<version>` and no
+caller directory is passed; without it the default `targetDir` is `<destinationDir>/runtime`. The
+host, not the webview, owns both surfaces.
 
 ### Start plan and runtime options
 
@@ -273,8 +276,9 @@ reviewed loopback probe (one credential-free `GET` to `http://127.0.0.1:<port>/a
 the M1 endpoint policy before the request and bounded by its own deadline and body cap), and the
 injected `installSidecar`, whose product default is the reviewed pinned installer (a credential-free
 bounded transfer that verifies the archive and every extracted file before writing). The wizard
-validates the manifest, the sole id, the host-owned absolute `targetDir` and the platform target at
-construction, and validates the returned executable path with the supervisor's own check before the
+validates the manifest, the sole id, the host-owned `appDataRoot` or absolute `targetDir` (never both)
+and the platform target at construction, and validates the returned executable path with the
+supervisor's own check before the
 plan uses it. The probe, both sidecar effects, the verifier and the downloader are injected, and the
 product uses the reviewed modules. The catalog is validated before any entry is projected; the
 recommendation validates the hardware and model descriptors again; the downloader validates the URL,
@@ -297,10 +301,11 @@ of UTF-8, and uses the same nonce in `style-src`, `script-src`, the `<style>` ta
 
 Residual risks: the wizard trusts its injected `probe`, `downloadModel`, `verifyModel`, `discoverOllama`,
 `installSidecar`, `verifySidecar` and `runtimePath` exactly as the supervisor trusts a caller-supplied
-binary; the product wiring leaves them at their reviewed defaults. The sidecar `targetDir` is
-host-owned and must be an absolute local path the application data root controls, never a webview
-value; a caller that passes a writable, attacker-controlled directory can still be redirected by a
-filesystem junction the installer already rejects. Any loopback service that answers `/api/tags` with a
+binary; the product wiring leaves them at their reviewed defaults. The sidecar `appDataRoot` (preferred)
+or `targetDir` is host-owned: with a root the installer derives and proves the directory itself, and the
+legacy absolute directory must still be one the application controls, never a webview value; a caller
+that passes a writable, attacker-controlled directory can still be redirected by a filesystem junction
+the installer already rejects. Any loopback service that answers `/api/tags` with a
 valid shape is reported as Ollama, though the only effect is a displayed base URL and the overrides
 offered to that same endpoint, with no secret and no write. The start action installs the pinned
 runtime but still only assembles data, so a bug there cannot start a process with unexpected flags or
@@ -337,14 +342,17 @@ extra key, a non-integer, or a cap below the base delay), and proves an accessor
 restart constants so a change there fails the panel test instead of silently drifting.
 
 `node --test tests/vibe/first-run-sidecar.test.mjs` covers the start action: `runtime-not-bundled`
-without a sidecar, one install then a cached plan, the default `<destinationDir>/runtime` target, a
-bounded failure with a retry, an unverified/relative/missing/Proxy installer result, an
+without a sidecar, one install then a cached plan, the default `<destinationDir>/runtime` target, an
+`appDataRoot` that derives `<root>/runtime/<platformKey>/<id>-<version>` and passes only `{ ownedRoot,
+platformKey }` (plus the installer's existing `signal`/`onProgress`) instead of a caller directory, adoption of an owned runtime through `appDataRoot` without
+a download, a bounded failure with a retry, an unverified/relative/missing/Proxy installer result, an
 accessor-backed result that is never invoked, the not-ready and insufficient refusals, adoption of an
 already installed runtime through the offline verifier, a throwing or hostile verifier that never
 breaks refresh, clamped progress, busy while a model download runs, disposal, the daemon plan with no
 install, and construction validation (Proxy, accessor, unknown key, malformed manifest, unknown id,
-unsupported platform, relative or traversal target directory, non-function effects) with no getter
-invoked. The panel tests add the enabled **Start local runtime** button for a configured sidecar, the
+unsupported platform, relative or traversal target directory, `targetDir` alongside `appDataRoot`,
+non-function effects) with no getter invoked. The panel tests add the enabled **Start local runtime**
+button for a configured sidecar, the
 explanatory text, the bounded runtime progress line, an accessor-backed runtime that is never
 invoked, and the `start()` call with its success and bounded failure statuses.
 
@@ -385,8 +393,11 @@ Copy the installed files and `vibe/models/catalog.json` into the packaged applic
 verified installer and start-action wiring are delivered in
 [m3-sidecar-binary.md](m3-sidecar-binary.md)), place the generated third-party notice beside the
 installed files and the application (see [m3-third-party-notices.md](m3-third-party-notices.md)),
-supply the Microsoft VC++ 2015-2022 x64 runtime, run one live install/start smoke on a clean Windows
-machine, and enforce an installer-owned runtime directory under the application data root. The embedding
+supply the Microsoft VC++ 2015-2022 x64 runtime, and run one live install/start smoke on a clean Windows
+machine. The installer-owned runtime directory is delivered: the host configures `appDataRoot`, the
+installer derives `<root>/runtime/<platformKey>/<id>-<version>` and refuses a caller `targetDir`
+alongside it, and the wizard still keeps the legacy `targetDir` for a host that already owns a runtime.
+The embedding
 start plan and its supervisor hand-off are delivered above; the caller that actually starts and
 supervises that second process is the M6 index binding, its first consumer, and the wizard itself ships
 no process. That binding must smoke-start the pinned `b12426` archive with `EMBEDDING_SERVER_ARGS` before

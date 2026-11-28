@@ -24,6 +24,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { inflateRawSync } from 'node:zlib';
+import { assertOwnedRuntimeDirectory, ownedRuntimeDirectory } from './app-data.mjs';
 import { validateLlamaExecutablePath } from './llama-server.mjs';
 
 export const SIDECAR_MODULE_VERSION = 1;
@@ -75,9 +76,10 @@ const SIDECAR_KEYS = new Set(['id', 'version', 'licenses', 'publishedAt', 'sourc
 const TARGET_KEYS = new Set(['url', 'sha256', 'sizeBytes', 'executable', 'files']);
 const FILE_KEYS = new Set(['path', 'sha256', 'sizeBytes']);
 const INSTALL_OPTION_KEYS = new Set([
-  'targetDir', 'platformKey', 'fetchImpl', 'onProgress', 'signal', 'idleTimeoutMs', 'totalTimeoutMs',
+  'targetDir', 'ownedRoot', 'platformKey', 'fetchImpl', 'onProgress', 'signal', 'idleTimeoutMs',
+  'totalTimeoutMs',
 ]);
-const VERIFY_OPTION_KEYS = new Set(['targetDir', 'platformKey']);
+const VERIFY_OPTION_KEYS = new Set(['targetDir', 'ownedRoot', 'platformKey']);
 
 const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_SIGNATURE = 0x02014b50;
@@ -613,6 +615,33 @@ function resolveTargetDir(value) {
   return resolved;
 }
 
+// The installer-owned path: with `ownedRoot` the caller names only the application data root and the
+// installer derives the single directory for this pinned target itself, so a webview-supplied path can
+// never reach a write. The legacy `targetDir` stays for a host that already owns an installed runtime.
+function installDirectory(validated, own, platformKey) {
+  if (own.ownedRoot === undefined) {
+    if (own.targetDir === undefined) fail('invalid-options', 'targetDir or ownedRoot is required');
+    return resolveTargetDir(own.targetDir);
+  }
+  if (own.targetDir !== undefined) fail('invalid-options', 'targetDir cannot be combined with ownedRoot');
+  let owned;
+  try {
+    owned = ownedRuntimeDirectory(own.ownedRoot, {
+      id: validated.id,
+      version: validated.version,
+      platformKey,
+    });
+  } catch {
+    fail('invalid-destination', 'ownedRoot must be an application data root this installer can own');
+  }
+  const dir = resolveTargetDir(owned.directory);
+  try {
+    return assertOwnedRuntimeDirectory(owned.root, dir);
+  } catch {
+    fail('invalid-destination', 'ownedRoot must be an application data root this installer can own');
+  }
+}
+
 function containedPath(dir, relative) {
   const full = path.join(dir, ...relative.split('/'));
   const relation = path.relative(dir, full);
@@ -1107,10 +1136,9 @@ function verifiedSummary(sidecar, target, dir) {
 export async function verifySidecarInstall(sidecar, options = {}) {
   const validated = validateSidecar(sidecar);
   const own = readOwnData(options, 'options', VERIFY_OPTION_KEYS, 'invalid-options');
-  if (own.targetDir === undefined) fail('invalid-options', 'targetDir is required');
-  const dir = resolveTargetDir(own.targetDir);
   const platformKey = own.platformKey ?? process.platform + '-' + process.arch;
   const resolved = resolveSidecarTarget(validated, platformKey);
+  const dir = installDirectory(validated, own, resolved.platformKey);
   const result = await inspectInstall(validated, resolved.target, dir);
   if (!result.verified) {
     return Object.freeze({ verified: false, reason: result.reason, version: validated.version });
@@ -1121,10 +1149,9 @@ export async function verifySidecarInstall(sidecar, options = {}) {
 export async function installSidecar(sidecar, options = {}) {
   const validated = validateSidecar(sidecar);
   const own = readOwnData(options, 'options', INSTALL_OPTION_KEYS, 'invalid-options');
-  if (own.targetDir === undefined) fail('invalid-options', 'targetDir is required');
-  const dir = resolveTargetDir(own.targetDir);
   const platformKey = own.platformKey ?? process.platform + '-' + process.arch;
   const resolved = resolveSidecarTarget(validated, platformKey);
+  const dir = installDirectory(validated, own, resolved.platformKey);
   const fetchImpl = own.fetchImpl ?? globalThis.fetch;
   if (typeof fetchImpl !== 'function') fail('runtime-unavailable', 'this runtime has no fetch implementation');
   if (own.onProgress !== undefined && typeof own.onProgress !== 'function') {

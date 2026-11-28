@@ -1,6 +1,6 @@
 # ADR-0011: Nightly llama.cpp intake for the bundled local runtime
 
-> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-26
+> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-27
 
 - Status: accepted
 - Date: 2026-11-26
@@ -55,13 +55,17 @@ review decide the pin instead.
    seven-day wait and a `TECH_RADAR.md` row update. No in-product self-update of the binary.
 7. The gates in `../design/m3-sidecar-binary.md` remain in force before the installer is enabled by
    default or the binary is bundled: an authenticated manifest, or a `source`-to-URL binding plus an
-   enforced seven-day rule; an installer-owned `targetDir` under the application-data root, never a
+   enforced seven-day rule; an installer-owned directory under the application-data root, never a
    webview-supplied path; and, for multi-process or POSIX use, a cross-process lock and a
    descriptor-bound part-file read. This decision relaxes and defers none of them. The loader-side
    seven-day enforcement and the chosen manifest-authentication route (an authenticated manifest, or the
    binding plus its enforced check) are hardening that must land before either the installer is enabled by
-   default or the binary is bundled; the signing route stays owner-parked, the notices file ships, and the
-   installer-owned directory remains a gate.
+   default or the binary is bundled; the signing route stays owner-parked and the notices file ships. The
+   owned-directory capability is now delivered as code (`../design/m3-sidecar-binary.md`,
+   `src/stable/runtime/app-data.mjs`): the installer derives and proves `<root>/runtime/<platformKey>/<id>-<version>`
+   from an `ownedRoot` and the wizard accepts `sidecar.appDataRoot`; the gate stays open until the wired
+   product path supplies that root instead of the legacy `<destinationDir>/runtime` default (M6/M12), and
+   the Windows location needs the M12 `ARCHITECTURE.md` section 4 reconciliation.
 
 ## Alternatives considered
 
@@ -89,6 +93,7 @@ review decide the pin instead.
    review is 2026-12-03, when the `v1.1.0` build (`b12774`) becomes eligible if its digests verify; the
    review must also confirm that the radar row still carries the seven-day evidence, because the loader
    does not check it.
-- The signing route, the manifest-authentication route, the notices file, the Microsoft runtime pin,
-   the installer-owned directory and the cross-process lock with its descriptor-bound part-file read
-   remain open M3/M12 work, with the signing route parked for the owner.
+- The signing route, the manifest-authentication route, the Microsoft runtime pin, the host wiring that
+   supplies the installer-owned application-data root and the cross-process lock with its
+   descriptor-bound part-file read remain open M3/M12 work, with the signing route parked for the owner.
+   The notices file ships.

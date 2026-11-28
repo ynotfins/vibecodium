@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -479,6 +479,10 @@ test('invalid sidecar options fail closed without invoking an accessor', (t) => 
   bad({ sidecar: { manifest, targetDir: 'relative/runtime' } }, 'invalid-sidecar');
   bad({ sidecar: { manifest, targetDir: path.join(root, 'a') + path.sep + '..' + path.sep + 'runtime' } },
     'invalid-sidecar');
+  bad({ sidecar: { manifest, appDataRoot: 'relative/appdata' } }, 'invalid-sidecar');
+  bad({ sidecar: { manifest, platformKey: PLATFORM_KEY, appDataRoot: path.parse(root).root } }, 'invalid-sidecar');
+  bad({ sidecar: { manifest, appDataRoot: path.join(root, 'appdata'), targetDir: path.join(root, 'runtime') } },
+    'invalid-sidecar');
   bad({ installSidecar: 'nope' }, 'invalid-options');
   bad({ verifySidecar: 'nope' }, 'invalid-options');
 });
@@ -520,4 +524,68 @@ test('a concurrent second start shares the in-flight install and returns the sam
   assert.equal(a, b);
   assert.equal(Object.isFrozen(a), true);
   assert.deepEqual(a, wizard.startPlan());
+});
+
+// --- Installer-owned application data root (M3: the host names a root, the installer derives the path) ---
+
+function ownedSidecarDir(appDataRoot) {
+  return path.join(appDataRoot, 'runtime', PLATFORM_KEY, sidecarEntry.id + '-' + sidecarEntry.version);
+}
+
+test('sidecar appDataRoot derives the installer-owned runtime directory on start', async (t) => {
+  const root = tempRoot(t);
+  const appDataRoot = path.join(root, 'appdata');
+  mkdirSync(appDataRoot, { recursive: true });
+  const derived = ownedSidecarDir(appDataRoot);
+  const calls = [];
+  const { wizard } = makeWizard(t, {
+    root,
+    options: {
+      sidecar: { manifest, platformKey: PLATFORM_KEY, appDataRoot },
+      installSidecar: async (sidecar, installOptions) => {
+        calls.push(installOptions);
+        return sidecarResult(derived);
+      },
+    },
+  });
+  const before = await wizard.refresh();
+  assert.equal(before.runtime.configured, true);
+  assert.equal(before.runtime.installed, false);
+
+  const plan = await wizard.start();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].ownedRoot, appDataRoot);
+  assert.equal(Object.hasOwn(calls[0], 'targetDir'), false);
+  assert.equal(calls[0].platformKey, PLATFORM_KEY);
+  assert.equal(plan.available, true);
+  assert.equal(plan.executablePath, path.join(derived, sidecarTarget.executable));
+  assert.equal(wizard.view().runtime.installed, true);
+  assert.equal(lstatSync(path.join(root, 'runtime'), { throwIfNoEntry: false }), undefined);
+});
+
+test('refresh adopts an owned runtime through appDataRoot without a download', async (t) => {
+  const root = tempRoot(t);
+  const appDataRoot = path.join(root, 'appdata');
+  const derived = ownedSidecarDir(appDataRoot);
+  const executable = writeSidecarExecutable(derived);
+  const calls = [];
+  const { wizard } = makeWizard(t, {
+    root,
+    options: {
+      sidecar: { manifest, platformKey: PLATFORM_KEY, appDataRoot },
+      verifySidecar: async (sidecar, verifyOptions) => {
+        calls.push(verifyOptions);
+        return { verified: true, executablePath: executable, version: sidecarEntry.version };
+      },
+      installSidecar: async () => {
+        throw new Error('refresh must not install');
+      },
+    },
+  });
+  const view = await wizard.refresh();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].ownedRoot, appDataRoot);
+  assert.equal(Object.hasOwn(calls[0], 'targetDir'), false);
+  assert.equal(view.runtime.installed, true);
+  assert.equal(view.start.available, true);
 });
