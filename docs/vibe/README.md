@@ -1,6 +1,6 @@
 # Vibecodium Documentation
 
-> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-27
+> Doc class: living · Owner: docs-keeper · Last reviewed: 2026-11-28
 
 Vibecodium is a standalone, Windows-first AI IDE built on VSCodium. This folder is the product's documentation suite. The upstream VSCodium docs in `docs/` (outside `docs/vibe/`) describe the base build and are left unchanged.
 

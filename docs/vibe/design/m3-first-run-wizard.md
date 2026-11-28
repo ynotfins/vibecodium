@@ -1,6 +1,6 @@
 # M3 first-run wizard
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-27
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-28
 >
 > The first-run setup experience. The headless controller lives in
 > [first-run.mjs](../../../src/stable/runtime/first-run.mjs), the webview panel in
@@ -186,8 +186,16 @@ panel's start action still installs it through `start()`). On a ready pinned mac
 
 `executablePath` is the same validated runtime path the chat plan uses, `modelPath` joins
 `destinationDir` and the catalog's embedding entry `file`, `commandArgs` is the exported frozen
-`EMBEDDING_SERVER_ARGS` (`--embedding`, `--pooling`, `last`, `-ub`, `8192`), and `restart` is the same
-effective policy `startPlan()` reports. While the discovered daemon is the selected runtime and its
+`EMBEDDING_SERVER_ARGS` (`--embedding`, `--pooling`, `last`, `-c`, `8192`, `-b`, `8192`, `-ub`,
+`8192`), and
+`restart` is the same effective policy `startPlan()` reports. The context is pinned to
+`RECOMMENDED_EMBEDDING_CONTEXT_TOKENS`, the same cap the hardware probe's embedding memory estimate
+counts: at the pinned `b12426` build `--ctx-size` defaults to 0, so an unpinned server takes the
+model's trained 32768-token context and allocates a far larger KV cache than the shown estimate. All
+three batch/context switches carry 8192 on purpose: `llama_context` sizes the physical batch as
+`min(n_batch, n_ubatch)`, clamps the logical batch to the context for a causal model, and
+`--batch-size` defaults to 2048, so `-ub 8192` alone would start cleanly but batch at 2048 (and a
+context below the batch would silently shrink it). While the discovered daemon is the selected runtime and its
 summary carries an embedding model the plan is `{ available: true, kind: 'ollama', baseUrl, model }`
 where `baseUrl` and `model` are the validated loopback URL and embedding model; a daemon that reports
 only a chat model stays `no-embedding-model`, and switching back to `usePinned()` restores the pinned
@@ -200,7 +208,7 @@ plan. `view().embedding` carries the same plan.
 executable, the model, every flag (the pinned flags set no bind host or port and enable no agent or MCP
 switch) and the policy. A daemon plan is returned as-is because a daemon is not spawnable, and a blocked
 plan is the same `{ available: false, reason }` value. The wizard never spawns an embedding server, and
-the plan never accepts caller-supplied flags, a port or a ubatch override.
+the plan never accepts caller-supplied flags, a port, a context or a batch or ubatch override.
 
 ### Ollama detection and selection
 
@@ -366,7 +374,10 @@ whose `commandArgs` deep-equals `EMBEDDING_SERVER_ARGS`, the delivered `createLl
 those options unchanged (its own flag validation accepts the pinned list without mutating it), the same
 restart policy as the chat plan, and
 `embeddingRuntimeOptions()` returning exactly the four fields frozen at both levels and accepted
-unchanged by `createLlamaServer` without spawning. It also proves the daemon shape, the
+unchanged by `createLlamaServer` without spawning. One focused test pins the recorded context: the `-c`
+value equals `String(RECOMMENDED_EMBEDDING_CONTEXT_TOKENS)` (the test imports the constant, so the flag
+and the policy cannot drift), sits before the batch flags, is not below the recorded `-b`, and appears
+exactly once beside a single `--pooling`. It also proves the daemon shape, the
 `no-embedding-model` case for a chat-only daemon, the restoration of the pinned plan after `usePinned`,
 and that the view carries the same plan. The panel test renders the escaped embedding section for a ready
 plan, a hostile `modelPath` and flag list, every blocked reason, the daemon shape, an accessor-backed
@@ -404,8 +415,13 @@ The embedding
 start plan and its supervisor hand-off are delivered above; the caller that actually starts and
 supervises that second process is the M6 index binding, its first consumer, and the wizard itself ships
 no process. That binding must smoke-start the pinned `b12426` archive with `EMBEDDING_SERVER_ARGS` before
-it relies on them, and add the matching `-b 8192` to the same frozen constant: at `b12426` the default
-`-b 2048` clamps the effective ubatch, so `-ub 8192` alone starts cleanly but batches at 2048. Offering
+it relies on them. The frozen constant pins `-c 8192`, `-b 8192` and `-ub 8192`: at `b12426`
+`--ctx-size` defaults to 0 so an unpinned server would take the trained 32768-token context,
+`llama_context` sizes the physical batch as `min(n_batch, n_ubatch)`, clamps the logical batch to
+the context for a causal model, and the default `--batch-size` of 2048 would otherwise clamp the
+requested ubatch, so `-ub 8192` alone starts cleanly but batches at 2048. The `-c` value is the
+hardware probe's `RECOMMENDED_EMBEDDING_CONTEXT_TOKENS`, so the estimate the wizard shows and the
+server it describes count the same context. Offering
 the same discovered daemon in the B5 provider setup panel is M2
 work. A real extension-host smoke of the panel and a rebuilt-app screenshot remain M6/M12 integration
 work.

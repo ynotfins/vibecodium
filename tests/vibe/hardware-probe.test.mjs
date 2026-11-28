@@ -407,6 +407,28 @@ test('the pinned catalog recommendation is the shipped chat and embedding models
   assert.equal(plan.notices.indexOf('low-memory'), -1);
 });
 
+test('the embedding estimate counts the context the recorded embedding plan pins', () => {
+  // The first-run wizard pins EMBEDDING_SERVER_ARGS' -c to this constant, so the estimate and the
+  // server it describes agree: the pinned catalog's embedding weights carry a 32768-token trained
+  // context, and the policy caps it at the 8192 batch the plan records instead of inheriting 32768.
+  assert.equal(RECOMMENDED_EMBEDDING_CONTEXT_TOKENS, 8192);
+  const plan = recommendRuntime(hardware({ totalMemoryBytes: 16 * GIB }), MODELS);
+  assert.equal(
+    plan.estimatedEmbeddingMemoryBytes,
+    EMBED.sizeBytes + 512 * MIB + RECOMMENDED_EMBEDDING_CONTEXT_TOKENS * 16 * 1024,
+  );
+  assert.ok(plan.estimatedEmbeddingMemoryBytes < estimateModelMemoryBytes(EMBED.sizeBytes, EMBED.contextTokens));
+
+  // A smaller trained context is used as-is, not padded to the cap.
+  const smallEmbed = { id: 'embed-4k', role: 'embedding', sizeBytes: 100 * MIB, contextTokens: 4096 };
+  const small = recommendRuntime(hardware({ totalMemoryBytes: 16 * GIB }), [CHAT, smallEmbed]);
+  assert.equal(small.models.embedding, 'embed-4k');
+  assert.equal(
+    small.estimatedEmbeddingMemoryBytes,
+    smallEmbed.sizeBytes + 512 * MIB + 4096 * 16 * 1024,
+  );
+});
+
 test('recommendRuntime rejects a malformed hardware descriptor without invoking a getter', () => {
   const base = hardware();
   const bad = [

@@ -51,6 +51,7 @@ if (log) {
   writeFileSync(log, JSON.stringify({
     pid: process.pid,
     args,
+    envKeys: Object.keys(process.env).sort(),
     env: {
       PATH: process.env.PATH ?? '',
       SystemRoot: process.env.SystemRoot ?? '',
