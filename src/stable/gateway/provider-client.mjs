@@ -417,7 +417,10 @@ function parseChatResponse(payload) {
   const content = choice.message.content;
   if (content !== null && typeof content !== 'string') fail('invalid-response', 'provider chat content is invalid');
   const calls = choice.message.tool_calls;
-  if (calls !== undefined && (!Array.isArray(calls) || calls.length > MAX_TOOL_CALLS)) {
+  // OpenAI-compatible servers send `tool_calls: null` when a message carries none (DeepInfra
+  // does, verified live 2026-11-28), exactly as they send `content: null` for a tool-only turn, so
+  // null means "absent", never "invalid".
+  if (calls !== undefined && calls !== null && (!Array.isArray(calls) || calls.length > MAX_TOOL_CALLS)) {
     fail('invalid-response', 'provider tool calls are invalid');
   }
   const toolCalls = (calls ?? []).map((call) => {
@@ -446,7 +449,10 @@ function parseChatStream(payload, state) {
     state.text += delta.content;
     if (state.text.length > MAX_MESSAGE_CHARS) fail('response-too-large', 'provider content exceeded the size limit');
   }
-  if (delta.tool_calls !== undefined) {
+  // A streamed delta carries `tool_calls: null` on every chunk that is not a tool call (DeepInfra
+  // sends it on each reasoning and content delta, verified live 2026-11-28); only an actual array
+  // is a tool-call delta.
+  if (delta.tool_calls !== undefined && delta.tool_calls !== null) {
     if (!Array.isArray(delta.tool_calls) || delta.tool_calls.length > MAX_TOOL_CALLS) {
       fail('invalid-response', 'provider stream tool calls are invalid');
     }

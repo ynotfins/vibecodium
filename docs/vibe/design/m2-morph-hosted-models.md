@@ -17,8 +17,8 @@ adapter, Fast Apply, WarpGrep and Compact are delivered elsewhere and are not to
 This slice is data only. It adds one frozen table of the chat rows Morph publishes, a tier map, a
 default model for the preset and a validated map builder for the B6 direct policy. It creates no
 client, reads no environment variable, holds no credential and performs no network I/O. Enabling
-the approval-gated rows in a product flow, pricing calls in the budget ledger and live smoke tests
-remain open.
+the approval-gated rows in a product flow and pricing calls in the budget ledger remain open; live
+provider smoke ships separately as the opt-in `vibe/tools/provider-smoke.mjs`.
 
 ## Source and evidence
 
@@ -94,7 +94,13 @@ map that `createMorphDirectPolicy` expects:
 
 `embeddingModel` is required and fails as `missing-embedding-model` when absent, because Morph's
 Fast Models list has no embedding model; the caller names one explicitly instead of the product
-inventing an id. `tierModels` may re-point any tier at another ungated hosted row.
+inventing an id. The endpoint agrees: `POST https://api.morphllm.com/v1/embeddings` answers
+`404 model_not_found` and names `morph-embedding-v4` and `morph-rerank-v4` as retired (verified
+live 2026-11-28), so the `morph` preset no longer advertises `embeddings`. Because
+`createMorphDirectPolicy` names the `morph` provider for every class, the `embed` class now has no
+working route and a non-Morph model id would still be sent to Morph; reaching another embedding
+service needs a policy change (recorded follow-up). `tierModels` may re-point any tier at another
+ungated hosted row.
 
 `morphHostedModel(id)` returns the frozen row for an ungated hosted chat model and `undefined` for
 anything else, including a gated row, an apply model, the decision model and a floating alias.

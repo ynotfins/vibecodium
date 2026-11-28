@@ -135,7 +135,7 @@ test('the helper builds the complete six-class policy with morph as the determin
   assertNoClientOrSecret(policy, 'policy');
 });
 
-test('a stopped omniroute endpoint completes chat and embeddings on morph in the same call', async (t) => {
+test('a stopped omniroute endpoint completes chat and embeddings on the mocked direct provider in the same call', async (t) => {
   const mock = await startMorphMock(t);
   const stoppedPort = await closedLoopbackPort(t);
   const omniroute = createProviderClient('omniroute', {
@@ -151,6 +151,11 @@ test('a stopped omniroute endpoint completes chat and embeddings on morph in the
     apiKey: MORPH_SECRET,
     env: {},
     timeoutMs: 2000,
+    // The shipped preset stopped advertising embeddings when Morph retired morph-embedding-v4 and
+    // morph-rerank-v4 (live 404, 2026-11-28). This fixture re-declares the capability on the mock so
+    // the B6 direct policy's embed route and the fallback path stay covered; provider-presets.test
+    // and provider-smoke.test assert the production capability list.
+    settings: { providers: { morph: { capabilities: ['chat', 'stream', 'tools', 'embeddings'] } } },
   });
   const router = createProviderRouter({
     policy: createMorphDirectPolicy(validOptions()),

@@ -52,6 +52,9 @@ test('the provider details match the verified contracts', () => {
   assert.equal(byId.get('kie').baseUrl, 'https://api.kie.ai/codex/v1');
   assert.equal(byId.get('kie').defaultModel, 'gpt-6-1-sol');
   assert.deepEqual(byId.get('kie').capabilities, ['chat', 'stream', 'tools']);
+  // Morph retired its embedding and rerank models: https://api.morphllm.com/v1/embeddings answers
+  // 404 model_not_found for morph-embedding-v4 and morph-rerank-v4 (verified live 2026-11-28).
+  assert.deepEqual(byId.get('morph').capabilities, ['chat', 'stream', 'tools']);
   assert.equal(byId.get('abliteration').baseUrl, 'https://api.abliteration.ai/v1');
   assert.equal(byId.get('abliteration').defaultModel, 'abliterated-model-large-v2');
   assert.equal(byId.get('openrouter').baseUrl, 'https://openrouter.ai/api/v1');

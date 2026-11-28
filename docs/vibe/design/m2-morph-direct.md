@@ -1,6 +1,6 @@
 # M2 B6 direct second option (first acceptance)
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-25
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-28
 >
 > The B3 policy constructor for the direct second option. It lives in
 > [morph-direct.mjs](../../../src/stable/gateway/morph-direct.mjs), with its acceptance tests in
@@ -15,8 +15,12 @@ embeddings paths through real B1 clients, B2 failover and the B3 router against 
 
 The helper is data-only. It creates no client, reads no environment variable, holds no credential
 and performs no network I/O. It does not implement Fast Apply, WarpGrep, Compact, the Router,
-Morph-hosted models, the approval-gated abliterated model, Bifrost or live provider calls; those
-remain B6 work after this first acceptance.
+Morph-hosted models, the approval-gated abliterated model, Bifrost or live provider calls. Later
+slices delivered Fast Apply, WarpGrep, Compact, the Router and the Morph-hosted model rows, and the
+opt-in [`vibe/tools/provider-smoke.mjs`](../../../vibe/tools/provider-smoke.mjs) now smokes the
+direct provider's chat, stream and tool path live (see
+[m2-provider-smoke.md](m2-provider-smoke.md)); the approval-gated abliterated rows, Bifrost and a
+non-Morph route for the `embed` class remain open.
 
 ## Policy contract
 
@@ -90,7 +94,8 @@ are rejected before any client is constructed.
 
 `node --test tests/vibe/morph-direct.test.mjs` covers the six-class policy, exact route order,
 explicit models and caps, a stopped OmniRoute endpoint falling through to chat and embeddings in
-the same call, `servedBy` and `routedBy`, bounded attempt metadata, secret and endpoint
+the same call (the fixture re-declares `embeddings` on its mock, because production Morph retired its
+embedding models), `servedBy` and `routedBy`, bounded attempt metadata, secret and endpoint
 non-exposure, malformed and missing options, missing and extra classes, reserved keys, accessor and
 proxy trap failure or duplicate-key rejection without invoking a getter, class-backed maps, invalid models
 and caps, and non-exposure of clients or secrets from the helper. `node vibe/tools/verify.mjs

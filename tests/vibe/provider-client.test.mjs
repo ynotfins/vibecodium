@@ -475,3 +475,59 @@ test('a caller abort is reported as aborted', async () => {
     (error) => error instanceof ProviderClientError && error.code === 'aborted',
   );
 });
+
+// DeepInfra answers every chat message with `tool_calls: null` when no tool was called and every
+// streamed delta with `tool_calls: null` (verified live 2026-11-28). Null means absent.
+test('a null tool_calls field is an absent tool call, not an invalid one', async () => {
+  const client = createProviderClient('openai-compatible', {
+    baseUrl: urlFor(1, '/v1'),
+    model: 'm',
+    env: {},
+    policy: { allowExternalProviders: true },
+    fetch: async () => jsonResponse({
+      choices: [{ message: { role: 'assistant', content: 'pong', reasoning_content: 'thinking', tool_calls: null }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+    }),
+  });
+  const answer = await client.chat({ messages: MESSAGES });
+  assert.equal(answer.text, 'pong');
+  assert.equal(answer.toolCalls.length, 0);
+  assert.equal(answer.usage.totalTokens, 4);
+});
+
+test('a null content and a null tool_calls field make an empty answer, not an error', async () => {
+  const client = createProviderClient('openai-compatible', {
+    baseUrl: urlFor(1, '/v1'),
+    model: 'm',
+    env: {},
+    policy: { allowExternalProviders: true },
+    fetch: async () => jsonResponse({
+      choices: [{ message: { role: 'assistant', content: null, tool_calls: null }, finish_reason: 'stop' }],
+    }),
+  });
+  const answer = await client.chat({ messages: MESSAGES });
+  assert.equal(answer.text, '');
+  assert.equal(answer.toolCalls.length, 0);
+});
+
+test('a streamed null tool_calls delta does not stop the text deltas', async () => {
+  const events = [
+    'data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":null,"tool_calls":null},"finish_reason":null}]}',
+    'data: {"choices":[{"index":0,"delta":{"content":"","reasoning_content":"thinking","tool_calls":null},"finish_reason":null}]}',
+    'data: {"choices":[{"index":0,"delta":{"content":"Hello","tool_calls":null},"finish_reason":null}]}',
+    'data: {"choices":[{"index":0,"delta":{"content":" world","tool_calls":null},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}',
+    'data: [DONE]',
+  ];
+  const client = createProviderClient('openai-compatible', {
+    baseUrl: urlFor(1, '/v1'),
+    model: 'm',
+    env: {},
+    policy: { allowExternalProviders: true },
+    fetch: async () => jsonResponse(events.join('\n\n') + '\n\n'),
+  });
+  const answer = await client.chat({ messages: MESSAGES, stream: true });
+  assert.equal(answer.text, 'Hello world');
+  assert.equal(answer.toolCalls.length, 0);
+  assert.equal(answer.finishReason, 'stop');
+  assert.equal(answer.usage.totalTokens, 5);
+});

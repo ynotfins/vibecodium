@@ -257,7 +257,10 @@ export const PROVIDER_PRESETS = Object.freeze([
     // tier map and the prices), so a provider definition has a pinnable model without a second
     // choice having to be invented. A caller can still name another hosted row explicitly.
     defaultModel: 'morph-dsv41flash',
-    capabilities: ['chat', 'stream', 'tools', 'embeddings'],
+    // No `embeddings`: Morph retired morph-embedding-v4 and morph-rerank-v4, and its live
+    // `/v1/embeddings` answers 404 model_not_found with that retirement message (verified with the
+    // shipped client on 2026-11-28). The embed task class must use another provider's model.
+    capabilities: ['chat', 'stream', 'tools'],
   }),
   definePreset({
     id: 'kie',

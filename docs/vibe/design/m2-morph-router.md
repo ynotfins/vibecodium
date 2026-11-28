@@ -144,6 +144,9 @@ live provider call.
    releases on an adapter throw and keeps the charge on a malformed answer. Deciding when to
    classify and passing the result as a hint in a live turn remains M6 integration work.
 - `/v1/router/multimodel` (a candidate model from a caller policy) arrives when a caller needs it.
-- A live smoke test against the direct provider remains M2 work, as it does for the other
-   direct-provider tools.
+- The direct provider's chat, stream and tool path now has a live smoke: the opt-in
+   [`vibe/tools/provider-smoke.mjs`](../../../vibe/tools/provider-smoke.mjs) asks one chat turn,
+   the same turn streamed and one tool definition on the `morph` preset (see
+   [m2-provider-smoke.md](m2-provider-smoke.md)). A live `POST /v1/router/classify` call remains
+   M2 work.
 - The provider's `ambiguity` and `domain` classes may later refine B3 classes beyond difficulty.

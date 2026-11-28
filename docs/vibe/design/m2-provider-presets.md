@@ -1,6 +1,6 @@
 # M2 B1 provider presets and request client
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-27
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-28
 >
 > The dependency-free provider catalog and request client that M2 builds on. The catalog lives in
 > [provider-presets.mjs](../../../src/stable/gateway/provider-presets.mjs), the client in
@@ -25,7 +25,7 @@ environment-variable name, an `apiKeyRequired` flag, a frozen capability list an
 | id | transport | endpoint | credential | default model | capabilities |
 |---|---|---|---|---|---|
 | `omniroute` | `openai-chat` | `OMNIROUTE_BASE_URL` | `OMNIROUTE_API_KEY` (optional) | none | chat, stream, tools, embeddings |
-| `morph` | `openai-chat` | `https://api.morphllm.com/v1` | `MORPH_API_KEY` | none | chat, stream, tools, embeddings |
+| `morph` | `openai-chat` | `https://api.morphllm.com/v1` | `MORPH_API_KEY` | `morph-dsv41flash` | chat, stream, tools |
 | `kie` | `openai-responses` | `https://api.kie.ai/codex/v1` | `KIE_API_KEY` | `gpt-6-1-sol` | chat, stream, tools |
 | `deepinfra` | `openai-chat` | `https://api.deepinfra.com/v1/openai` | `DEEPINFRA_API_KEY` | none | chat, stream, tools, embeddings |
 | `abliteration` | `openai-chat` | `https://api.abliteration.ai/v1` | `ABLITERATION_API_KEY` | `abliterated-model-large-v2` | chat, stream, tools, embeddings |
@@ -41,6 +41,14 @@ that requires a key must name the environment variable that holds it; a local pr
 no key requirement. A local preset can still authenticate as `bearer`: since M3 the `llama-cpp`
 preset is `auth: 'bearer'` with `apiKeyRequired: false`, so a client given the supervisor's
 `auth().apiKey` sends it while a plain unkeyed `llama-server` still works.
+
+`morph` advertises only `chat`, `stream` and `tools`: Morph retired its embedding and rerank
+models, and `POST https://api.morphllm.com/v1/embeddings` answers `404 model_not_found` naming
+`morph-embedding-v4` and `morph-rerank-v4` (verified live 2026-11-28). A caller that needs
+embeddings from Morph's hosted service cannot get them, so the capability list no longer claims
+them; the `embed` task class takes the caller's embedding model through
+[m2-morph-hosted-models.md](m2-morph-hosted-models.md). The live smoke that found this is
+[m2-provider-smoke.md](m2-provider-smoke.md).
 
 ## Settings JSON
 
