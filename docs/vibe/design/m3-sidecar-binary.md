@@ -104,11 +104,20 @@ read own descriptors too.
 
 ## Transfer
 
-`installSidecar(sidecar, options)` accepts `{ targetDir, platformKey?, fetchImpl?, onProgress?,
-signal?, idleTimeoutMs?, totalTimeoutMs? }`. `targetDir` is an absolute local directory that need not
-exist; it is created only after the nearest existing ancestor has been proven a real, non-symlink
-directory, then resolved with `realpathSync.native`. A relative, traversal, drive-relative, UNC,
-control/bidi or Win32-invalid path fails as `invalid-destination`.
+`installSidecar(sidecar, options)` accepts `{ targetDir, ownedRoot, platformKey?, fetchImpl?, onProgress?,
+signal?, idleTimeoutMs?, totalTimeoutMs? }`. Exactly one of `targetDir` and `ownedRoot` is required.
+With `ownedRoot` the caller names only the application data root (for example `%LOCALAPPDATA%\Vibecodium`)
+and the installer derives the single directory for this pin,
+`<root>/runtime/<platformKey>/<id>-<version>`, through `src/stable/runtime/app-data.mjs`: the root is
+resolved from own data descriptors and may itself be a platform application data root from
+`resolveAppDataRoot`; the derived directory is then proven to stay strictly inside the canonical root
+after symlinks and junctions are resolved. A caller-supplied path can therefore never reach a write.
+The legacy `targetDir` path stays for a host that already owns an installed runtime. `targetDir` is an
+absolute local directory that need not exist; it is created only after the nearest existing ancestor
+has been proven a real, non-symlink directory, then resolved with `realpathSync.native`. A relative,
+traversal, drive-relative, UNC, control/bidi or Win32-invalid path fails as `invalid-destination`;
+`targetDir` together with `ownedRoot`, or neither, fails as `invalid-options`, and an `ownedRoot` the
+installer cannot prove it owns fails as `invalid-destination` without echoing it.
 
 The archive is requested with `accept: application/zip`, no credential, `redirect: 'follow'` and an
 idle deadline and a total deadline that cover the body. The final response URL must again be HTTPS, or plain HTTP on loopback
@@ -146,9 +155,10 @@ again after its parent exists: the real parent must equal the resolved parent an
 target directory, so a planted junction cannot redirect a nested write. The archive is read once
 and that same buffer is hashed and parsed, so a hash/read swap cannot mix files.
 
-`verifySidecarInstall(sidecar, { targetDir, platformKey? })` performs the same inspection without the
-network and returns a frozen `{ verified: true, executablePath, version, files, sizeBytes }`, or
-`{ verified: false, reason, version }` with `missing`, `size`, `checksum` or `unsafe-path`. A
+`verifySidecarInstall(sidecar, { targetDir, ownedRoot, platformKey? })` performs the same inspection
+without the network and returns a frozen `{ verified: true, executablePath, version, files, sizeBytes }`,
+or `{ verified: false, reason, version }` with `missing`, `size`, `checksum` or `unsafe-path`. It resolves
+an owned root through the same derivation, so verification and install always agree on the directory. A
 directory whose files already match the pin makes `installSidecar` return
 `{ verified: true, installed: false, skipped: true, ... }` without sending a request, so the wizard
 can call it offline.
@@ -195,20 +205,40 @@ two application instances are not serialized and one can unlink the other's part
 re-verified, so integrity holds). `publishedAt` is format-checked only: the seven-day adoption rule is a
 process control (radar review), not enforced at load. `source` is recorded but not tied to the URL host.
 `targetDir` is a trusted caller surface (any absolute local directory, including a drive root) and
-`verifySidecarInstall` resolves it through the same helper, which creates the directory. On POSIX the
-executable `chmod` runs after the re-hash and follows a symlink; the Windows target is unaffected.
+`verifySidecarInstall` resolves it through the same helper, which creates the directory. The owned path
+narrows this: with `ownedRoot` the installer derives and proves the directory itself, so no caller path
+reaches a write. The containment compare folds with `toLowerCase`, which is wider than the NTFS upcase
+table, so a caller-supplied directory containing a non-ASCII lookalike of a root component would compare
+inside; the derived path always shares the canonical root prefix, so the product path cannot hit it, and
+a host that ever passes an independent directory must compare the canonical strings byte-wise first. That
+owner is a process caller, not yet an authenticated one: a host that passes an
+arbitrary `ownedRoot` still chooses where inside that root the runtime lands, and the manifest remains
+unsigned. `ownedRoot` is therefore the safe surface for the host to use, not a substitute for the
+authenticated-manifest gate. Nothing in the product supplies a root yet: `resolveAppDataRoot` has no
+product caller, and the wizard uses the legacy `<destinationDir>/runtime` default unless its host passes
+`sidecar.appDataRoot`, which is M6/M12 wiring. On POSIX the executable `chmod` runs after the re-hash and
+follows a symlink; the Windows target is unaffected.
 
 The gates before enabling the installer by default or bundling the binary: an authenticated manifest
 (or a `source`-to-URL binding plus an enforced seven-day rule) because the digest protects only the
-pinned URL; an installer-owned `targetDir` under the application data root, never a webview-supplied
-path; and, for multi-process or POSIX use, a cross-process lock and a descriptor-bound part-file read.
+pinned URL; and, for multi-process or POSIX use, a cross-process lock and a descriptor-bound part-file
+read. The installer-owned directory capability is delivered as code: `app-data.mjs` resolves the root,
+derives `<root>/runtime/<platformKey>/<id>-<version>` and proves containment, the sidecar installer
+accepts `ownedRoot` and refuses a caller `targetDir` alongside it, and the wizard accepts
+`sidecar.appDataRoot` and hands both effects `{ ownedRoot, platformKey }` (the installer also gets its
+existing `signal` and `onProgress` controls). The gate itself stays open until
+the wired product path supplies that root (M6/M12) instead of the legacy `<destinationDir>/runtime`
+default; the Windows location also needs the M12 reconciliation with `ARCHITECTURE.md` section 4, whose
+table records user data at `%APPDATA%/Vibecodium` and sidecars under `resources/app/vibe/bin`.
 
 ## Verification
 
 `node --test tests/vibe/sidecar.test.mjs` covers the shipped pin and its 23 files, every rejected
 manifest field and path class, accessor and Proxy behaviour, the empty, sized and checksummed install,
 the symlink refusal, a complete install against a loopback server and against an injected fetch,
-idempotent skip with no request, archive and entry digest/size failures, a missing entry, HTTP status,
+idempotent skip with no request, the installer-owned `ownedRoot` derivation, verification through
+`ownedRoot`, the `ownedRoot`/`targetDir` exclusion and an unownable root or a `runtime` junction
+escape, archive and entry digest/size failures, a missing entry, HTTP status,
 insecure redirect, an internal literal final host (including the embedded-IPv4 IPv6 forms and the
 `fe80::/10`, `fc00::/7` and `ff00::/8` ranges), a symlinked target or nested parent, ZIP64,
 multi-disk, encrypted and unsafe archive names, missing body, stall, total timeout, caller abort, the busy guard, invalid options,
