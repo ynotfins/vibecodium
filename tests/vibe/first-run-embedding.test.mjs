@@ -143,6 +143,17 @@ test('the embedding plan is not-ready before a check and disposed after disposal
   assert.deepEqual(wizard.embeddingRuntimeOptions(), { available: false, reason: 'disposed' });
 });
 
+test('the embedding flags raise the logical batch so the pinned default cannot clamp the ubatch', () => {
+  // At `b12426` the default `-b 2048` clamps an `-ub 8192`, so the pair must travel together and the
+  // batch must not sit below the ubatch. The order also keeps the plan readable: batch, then ubatch.
+  const batch = EMBEDDING_SERVER_ARGS.indexOf('-b');
+  const ubatch = EMBEDDING_SERVER_ARGS.indexOf('-ub');
+  assert.ok(batch > 0, 'the logical batch flag is present');
+  assert.ok(ubatch > batch, 'the ubatch flag follows the logical batch');
+  assert.equal(EMBEDDING_SERVER_ARGS[batch + 1], '8192');
+  assert.equal(EMBEDDING_SERVER_ARGS[ubatch + 1], '8192');
+});
+
 test('a ready pinned machine exposes the recorded embedding flags and the supervisor option bag', async (t) => {
   const { wizard, root, runtime } = readyWizard(t);
   const view = await wizard.refresh();
@@ -154,13 +165,13 @@ test('a ready pinned machine exposes the recorded embedding flags and the superv
     kind: 'llama-server',
     executablePath: runtime,
     modelPath: path.join(root, 'models', embeddingEntry.file),
-    commandArgs: ['--embedding', '--pooling', 'last', '-ub', '8192'],
+    commandArgs: ['--embedding', '--pooling', 'last', '-b', '8192', '-ub', '8192'],
     restart: DEFAULT_POLICY,
   });
   assert.equal(Object.isFrozen(plan), true);
   assert.equal(Object.isFrozen(plan.commandArgs), true);
   // The recorded flags are one frozen constant, not a copy rebuilt per call.
-  assert.deepEqual(EMBEDDING_SERVER_ARGS, ['--embedding', '--pooling', 'last', '-ub', '8192']);
+  assert.deepEqual(EMBEDDING_SERVER_ARGS, ['--embedding', '--pooling', 'last', '-b', '8192', '-ub', '8192']);
   assert.equal(Object.isFrozen(EMBEDDING_SERVER_ARGS), true);
   assert.equal(plan.commandArgs, EMBEDDING_SERVER_ARGS);
   // The chat path is untouched: it still plans the chat weights with the recommendation flags.
@@ -298,7 +309,7 @@ test('the embedding hand-off ignores caller-supplied flags, a port or a ubatch o
   assert.deepEqual(Object.keys(handOff.options), ['executablePath', 'modelPath', 'commandArgs', 'restart']);
   // The shared recorded flags survive; a caller override is not merged into the option bag.
   assert.equal(handOff.options.commandArgs, EMBEDDING_SERVER_ARGS);
-  assert.deepEqual(handOff.options.commandArgs, ['--embedding', '--pooling', 'last', '-ub', '8192']);
+  assert.deepEqual(handOff.options.commandArgs, ['--embedding', '--pooling', 'last', '-b', '8192', '-ub', '8192']);
   assert.equal(handOff.options.port, undefined);
   assert.equal(handOff.options.contextSize, undefined);
   assert.equal(Object.isFrozen(handOff.options), true);

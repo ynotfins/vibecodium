@@ -1,6 +1,6 @@
 # M3 first-run wizard
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-27
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-28
 >
 > The first-run setup experience. The headless controller lives in
 > [first-run.mjs](../../../src/stable/runtime/first-run.mjs), the webview panel in
@@ -186,7 +186,7 @@ panel's start action still installs it through `start()`). On a ready pinned mac
 
 `executablePath` is the same validated runtime path the chat plan uses, `modelPath` joins
 `destinationDir` and the catalog's embedding entry `file`, `commandArgs` is the exported frozen
-`EMBEDDING_SERVER_ARGS` (`--embedding`, `--pooling`, `last`, `-ub`, `8192`), and `restart` is the same
+`EMBEDDING_SERVER_ARGS` (`--embedding`, `--pooling`, `last`, `-b`, `8192`, `-ub`, `8192`), and `restart` is the same
 effective policy `startPlan()` reports. While the discovered daemon is the selected runtime and its
 summary carries an embedding model the plan is `{ available: true, kind: 'ollama', baseUrl, model }`
 where `baseUrl` and `model` are the validated loopback URL and embedding model; a daemon that reports
@@ -404,8 +404,9 @@ The embedding
 start plan and its supervisor hand-off are delivered above; the caller that actually starts and
 supervises that second process is the M6 index binding, its first consumer, and the wizard itself ships
 no process. That binding must smoke-start the pinned `b12426` archive with `EMBEDDING_SERVER_ARGS` before
-it relies on them, and add the matching `-b 8192` to the same frozen constant: at `b12426` the default
-`-b 2048` clamps the effective ubatch, so `-ub 8192` alone starts cleanly but batches at 2048. Offering
+it relies on them. The pair now carries `-b 8192` beside `-ub 8192` (delivered 2026-11-27): at `b12426`
+the default `-b 2048` clamps the effective ubatch, so `-ub 8192` alone starts cleanly but batches at
+2048, and the frozen constant keeps the logical batch ahead of the ubatch. Offering
 the same discovered daemon in the B5 provider setup panel is M2
 work. A real extension-host smoke of the panel and a rebuilt-app screenshot remain M6/M12 integration
 work.

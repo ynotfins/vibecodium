@@ -659,6 +659,17 @@ test('options fail closed without spawning', (t) => {
     { env: { LLAMA_API_KEY: 'x' } },
     { env: { llama_api_key: 'x' } },
     { env: { Llama_Api_Key: 'x' } },
+    // The pinned build resolves its own config files from these profile roots before argv, and a
+    // config file can set a remote model or projector source past every argument denial above.
+    { env: { APPDATA: 'C:\\Users\\probe\\AppData\\Roaming' } },
+    { env: { appdata: 'C:\\Users\\probe\\AppData\\Roaming' } },
+    { env: { APPDATA: '' } },
+    { env: { PROGRAMDATA: 'C:\\ProgramData' } },
+    { env: { programdata: 'C:\\ProgramData' } },
+    { env: { XDG_CONFIG_HOME: '/home/probe/.config' } },
+    { env: { xdg_config_home: '/home/probe/.config' } },
+    { env: { HOME: '/home/probe' } },
+    { env: { home: '/home/probe' } },
   ]) {
     assert.throws(() => createLlamaServer({ ...valid, ...overrides }), (error) => error instanceof LlamaServerError);
   }
@@ -738,10 +749,41 @@ test('the child environment is an allowlist plus caller overrides', async (t) =>
   }
   assert.equal(argv.env.HAS_LEAK, 'absent', 'the parent leak variable never reaches the child');
   assert.equal(readFileSync(log + '.leak', 'utf8'), '');
+  // `b12426` applies a user- or machine-level `config.ini` from these roots before argv, so they must
+  // never reach the child; the parent process does have them on Windows. The fixture logs every key it
+  // actually received, so an absent key is proof rather than a name the fixture never printed.
+  const childEnvKeys = argv.envKeys.map((name) => name.toLowerCase());
+  for (const profileKey of ['APPDATA', 'PROGRAMDATA', 'XDG_CONFIG_HOME', 'HOME']) {
+    assert.ok(
+      !childEnvKeys.includes(profileKey.toLowerCase()),
+      profileKey + ' never reaches the child',
+    );
+  }
+  if (process.platform === 'win32') {
+    assert.equal(typeof process.env.APPDATA, 'string', 'the parent has a profile root to leak');
+    assert.notEqual(process.env.APPDATA, '', 'the parent profile root is populated');
+  }
   for (const value of [server.status(), server.config]) {
     assert.ok(!JSON.stringify(value).includes('override-secret'));
     assert.ok(!JSON.stringify(value).includes('process-secret'));
   }
+});
+
+test('an env override cannot reintroduce the pinned build profile config roots', (t) => {
+  const { modelPath } = makeModel(t);
+  const valid = { executablePath: NODE, modelPath };
+  const marker = 'PROFILEMARKER';
+  for (const name of ['APPDATA', 'ProgramData', 'XDG_CONFIG_HOME', 'Home']) {
+    assert.throws(
+      () => createLlamaServer({ ...valid, env: { [name]: marker } }),
+      (error) => error instanceof LlamaServerError
+        && error.code === 'invalid-env'
+        && !error.message.includes(marker),
+      name + ' is refused and its value is never echoed',
+    );
+  }
+  // An ordinary override is still trusted; only the profile config roots are refused.
+  assert.doesNotThrow(() => createLlamaServer({ ...valid, env: { VIBE_PROBE: marker } }));
 });
 
 test('the parent PATH is not inherited without an explicit override', async (t) => {

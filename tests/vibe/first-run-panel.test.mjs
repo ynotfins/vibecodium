@@ -852,7 +852,7 @@ test('the panel renders the escaped embedding plan and every blocked reason', ()
       kind: 'llama-server',
       executablePath: 'C:/runtime/llama-server.exe',
       modelPath: 'C:/models/embedding.gguf',
-      commandArgs: ['--embedding', '--pooling', 'last', '-ub', '8192'],
+      commandArgs: ['--embedding', '--pooling', 'last', '-b', '8192', '-ub', '8192'],
       restart: { maxRestarts: 3, baseDelayMs: 1000, maxDelayMs: 30000, stableMs: 60000 },
     },
   });
@@ -860,7 +860,7 @@ test('the panel renders the escaped embedding plan and every blocked reason', ()
   assert.match(html, /<h2>Embedding server<\/h2>/);
   assert.match(html, /C:\/models\/embedding.gguf/);
   assert.match(html, /C:\/runtime\/llama-server.exe/);
-  assert.match(html, /--embedding --pooling last -ub 8192/);
+  assert.match(html, /--embedding --pooling last -b 8192 -ub 8192/);
 
   const hostile = renderFirstRunHtml(baseView({
     installed: true,

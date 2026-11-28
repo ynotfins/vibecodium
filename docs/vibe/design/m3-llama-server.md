@@ -1,6 +1,6 @@
 # M3 local llama-server supervisor
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-27
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-28
 >
 > The process supervisor for the local runtime. The module lives in
 > [llama-server.mjs](../../../src/stable/runtime/llama-server.mjs), its fake-server fixture in
@@ -141,7 +141,10 @@ Caller overrides are validated (bounded name and value, no NUL, bounded key coun
 reserved keys refused) and may not set loader or system-resolution names: `NODE_OPTIONS`,
 `NODE_PATH`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT`, `DYLD_INSERT_LIBRARIES`,
 `DYLD_LIBRARY_PATH`, `DYLD_FRAMEWORK_PATH` and the `DYLD_*` fallback paths, `SystemRoot`,
-`GGML_BACKEND_PATH` or any `LLAMA_ARG_*` name are rejected, case-insensitively. `LLAMA_API_KEY` is
+`GGML_BACKEND_PATH` or any `LLAMA_ARG_*` name are rejected, case-insensitively. The profile config
+roots are rejected for the same reason: `APPDATA`, `PROGRAMDATA`, `XDG_CONFIG_HOME` and `HOME` are
+refused in any casing, because the pinned build applies its own `config.ini` from those roots before
+argv (see the residual risks below). `LLAMA_API_KEY` is
 the supervisor's own: an `env` override named `llama_api_key` in any casing is refused, and the
 validated key is written last, so it is never read from the parent process or inherited by accident.
 Provider keys and
@@ -249,16 +252,29 @@ Residual risks:
    implemented because nothing reads it yet.
 - `commandArgs` and `env` are a trusted caller surface. Only the supervisor's own flags, the key
    name, shared-port, agent/MCP, remote-model and loader/system values are refused; every other
-   llama-server flag a caller passes is trusted and literal.
-- The denied list covers argv and the `LLAMA_ARG_*` environment names, not the pinned build's own
-   `config.ini` files (`%PROGRAMDATA%\llama.cpp\config.ini` and `%APPDATA%\llama.cpp\config.ini` at
-   `b12426`), which llama.cpp applies before argv with unknown keys ignored. A machine- or
-   user-level config could therefore still set a remote model or projector source for the child; it
-   is outside `commandArgs` and this card, and is recorded as an M3 follow-up: `b12426` registers no
-   config-disable switch or environment variable, so the follow-up must pin a build that has one or
-   isolate the user profile (the machine-wide path is only read when `PROGRAMDATA` is in the child
-   environment, which the supervisor's allowlist does not copy, though a caller `env` override could
-   add it).
+   llama-server flag a caller passes is trusted and literal. Two router-mode flags stay trusted even
+   though they widen the file surface: `--models-dir` and `--models-preset <INI>` read model entries,
+   including `hf-repo` presets, from a path the caller chooses, so an INI can name a remote source
+   that the argv denials never see. Refusing both (with a test) is recorded as the next M3
+   follow-up rather than silently widening this slice. The pin also reads `LLAMA_CACHE`,
+   `LOCALAPPDATA` and `XDG_CACHE_HOME` for its cache directory and `MTMD_BACKEND_DEVICE` for the
+   projector device; a caller can set them through `env`, but they select a cache or device, not a
+   remote source.
+- The denied list covers argv and the `LLAMA_ARG_*` environment names, and now the profile roots the
+   pinned build resolves its own `config.ini` from. At `b12426` the server applies
+   `%PROGRAMDATA%\llama.cpp\config.ini` and `%APPDATA%\llama.cpp\config.ini` before argv (and
+   `/etc/llama.cpp/config.ini` and `${XDG_CONFIG_HOME:-~/.config}/llama.cpp/config.ini` elsewhere),
+   and `common_params_apply_system_config` reads the Windows paths with `getenv`, so a config file
+   could set a remote model or projector source before the argument checks run. The child environment
+   never copies `PROGRAMDATA`, `APPDATA`, `XDG_CONFIG_HOME` or `HOME` from the parent, and an `env`
+   override naming any of them is refused as `invalid-env` (delivered 2026-11-27), so the delivered
+   Windows child resolves neither profile root. A POSIX or macOS host stays partly open: the pin
+   still applies `/etc/llama.cpp/config.ini` unconditionally, and without `XDG_CONFIG_HOME` it derives
+   the user config directory from the passwd entry (`getpwuid`), so `~/.config/llama.cpp/config.ini`
+   is read even though `HOME` is absent. The pin registers no config-disable switch or variable, so
+   the residual exposure is those two paths, a future change that adds one of the names to the child
+   allowlist, or a build that resolves a config path without the environment; a pin with a
+   config-disable switch would close it structurally.
 
 ## Verification
 
@@ -304,7 +320,7 @@ remote presets (`--embd-gemma-default`, `--fim-qwen-*`, `--gpt-oss-*-default`, `
 and the peer
 tunnel `--connect`, with representative case and underscore spellings and the `=` form of each
 value-taking long switch) and refuses an
-`LLAMA_API_KEY` environment override, while a non-reserved flag such as `--chat_template` still passes
+`LLAMA_API_KEY` environment override and any `env` override of the profile config roots (`APPDATA`, `PROGRAMDATA`, `XDG_CONFIG_HOME`, `HOME`, in any casing, without echoing the value), while a non-reserved flag such as `--chat_template` still passes
 in either spelling and the numeric tuning flags `-b`, `-ub`, `-t`, `-c` and `-ngl`, the local draft
 `-md`, the draft tuning flags `--spec-draft-threads`/`--spec-draft-ngl` and the ngram-only
 `--spec-default` remain accepted. The living `llama-cpp` preset contract is covered by
