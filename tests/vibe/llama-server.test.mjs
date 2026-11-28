@@ -560,6 +560,49 @@ test('options fail closed without spawning', (t) => {
     { commandArgs: ['-hf', 'owner/repo'] },
     { commandArgs: ['--hf-repo', 'owner/repo'] },
     { commandArgs: ['--hf_repo', 'owner/repo'] },
+    // Every short alias the pinned b12426 source registers for the Hugging Face switches: `-hfr`
+    // is a second spelling of `--hf-repo` beside `-hf`, and `-hff`/`-hft` are the file and token
+    // switches. Without these, a remote GGUF could be downloaded past the remote-model refusal.
+    { commandArgs: ['-hfr', 'owner/repo'] },
+    { commandArgs: ['-HFR', 'owner/repo'] },
+    { commandArgs: ['-hff', 'model.gguf'] },
+    { commandArgs: ['-hft', 'token'] },
+    { commandArgs: ['--hf-file', 'model.gguf'] },
+    { commandArgs: ['--hf_file', 'model.gguf'] },
+    { commandArgs: ['--hf-file=model.gguf'] },
+    { commandArgs: ['--hf-token=token'] },
+    { commandArgs: ['--hf_token', 'token'] },
+    // The draft model and the projector are separate remote sources at the same pin. b12426
+    // registers `--spec-draft-hf` with the short aliases `-hfd` and `-hfrd` (plus
+    // `--hf-repo-draft`) for a remote draft GGUF, and `--mmproj-url`/`-mmu` for a remote projector.
+    { commandArgs: ['--spec-draft-hf', 'owner/repo'] },
+    { commandArgs: ['--spec_draft_hf', 'owner/repo'] },
+    { commandArgs: ['--spec-draft-hf=owner/repo'] },
+    { commandArgs: ['-hfd', 'model.gguf'] },
+    { commandArgs: ['-HFd', 'model.gguf'] },
+    { commandArgs: ['-hfrd', 'owner/repo'] },
+    { commandArgs: ['--hf-repo-draft', 'owner/repo'] },
+    { commandArgs: ['--mmproj-url', 'https://example.invalid/mmproj.gguf'] },
+    { commandArgs: ['--mmproj_url', 'https://example.invalid/mmproj.gguf'] },
+    { commandArgs: ['--mmproj-url=https://example.invalid/mmproj.gguf'] },
+    { commandArgs: ['-mmu', 'https://example.invalid/mmproj.gguf'] },
+    { commandArgs: ['-MMU', 'https://example.invalid/mmproj.gguf'] },
+    // Value-less presets at the same pin also write a remote model (and, for the two `-spec`
+    // presets, a remote draft); the server then downloads it and replaces the validated local path.
+    // b12426 registers exactly these eleven writers of `params.model.hf_repo` outside the hf flags.
+    { commandArgs: ['--embd-gemma-default'] },
+    { commandArgs: ['--fim-qwen-1.5b-default'] },
+    { commandArgs: ['--fim-qwen-3b-default'] },
+    { commandArgs: ['--fim-qwen-7b-default'] },
+    { commandArgs: ['--fim-qwen-30b-default'] },
+    { commandArgs: ['--fim-qwen-7b-spec'] },
+    { commandArgs: ['--fim-qwen-14b-spec'] },
+    { commandArgs: ['--gpt-oss-20b-default'] },
+    { commandArgs: ['--gpt-oss-120b-default'] },
+    { commandArgs: ['--vision-gemma-4b-default'] },
+    { commandArgs: ['--vision-gemma-12b-default'] },
+    { commandArgs: ['--gpt_oss_20b_default'] },
+    { commandArgs: ['--EMBD-GEMMA-DEFAULT'] },
     { commandArgs: ['-dr', 'owner/repo'] },
     { commandArgs: ['--docker-repo', 'owner/repo'] },
     { commandArgs: ['--connect', 'peer.invalid:50052'] },
@@ -623,6 +666,14 @@ test('options fail closed without spawning', (t) => {
   // the refusal, it must not refuse legitimate flags such as `--chat_template`.
   for (const commandArgs of [
     ['--chat_template', 'x'], ['--chat-template', 'x'], ['--lora_init', 'x'], ['--keep', '8'],
+    // The local-model refusal must not widen to the numeric and sampling flags a caller legitimately
+    // tunes, including the batch flags the embedding plan relies on.
+    ['-b', '8192'], ['-ub', '8192'], ['-t', '4'], ['-c', '4096'], ['-ngl', '0'],
+    // Denying remote draft/projector sources must not refuse the local draft path or the draft
+    // tuning flags (only the remote download spellings are refused), and the ngram-only
+    // `--spec-default` preset is not a remote source, so it stays accepted.
+    ['-md', 'draft.gguf'], ['--spec-draft-threads', '4'], ['--spec-draft-ngl', '0'],
+    ['--spec-default'],
   ]) {
     assert.doesNotThrow(() => createLlamaServer({ ...valid, commandArgs }));
   }

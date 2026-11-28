@@ -311,10 +311,13 @@ offered to that same endpoint, with no secret and no write. The start action ins
 runtime but still only assembles data, so a bug there cannot start a process with unexpected flags or
 an unbounded restart loop; the eventual caller must still pass the options through the supervisor
 rather than building a child itself. The supervisor's `commandArgs` check enumerates the long-form
-`--host`/`--port` forms and the `-ag`/agent/MCP switches; a short-alias gap, if one exists in the pinned
-build, is pre-existing and remains with the supervisor owner, and this plan only ever passes the frozen
-embedding list. An `--embedding` server is still an unauthenticated loopback service, narrower than the
-chat plan because it does not serve completions.
+`--host`/`--port` forms, the `-ag`/agent/MCP switches and every registered spelling of the
+remote-model switches (`-hf`/`-hfr`/`--hf-repo`/`--hf-repo-draft`, `-hff`/`--hf-file`,
+`-hft`/`--hf-token`, `-hfd`/`-hfrd`/`--spec-draft-hf`, `-mmu`/`--mmproj-url`, `-mu`/`--model-url`,
+`-dr`/`--docker-repo`, and the eleven value-less presets that write a remote repository), so the
+short-alias gap this note recorded is closed in the supervisor, and this plan only ever passes the
+frozen embedding list. An `--embedding` server is still an unauthenticated loopback service, narrower
+than the chat plan because it does not serve completions.
 
 ## Verification
 
