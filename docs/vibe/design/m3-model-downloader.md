@@ -1,6 +1,6 @@
 # M3 local model downloader
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-26
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-28
 >
 > First-run model provisioning. The module lives in
 > [model-downloader.mjs](../../../src/stable/runtime/model-downloader.mjs), the pin file in
@@ -29,7 +29,7 @@ models, and every entry carries exactly twelve fields: `id`, `label`, `repo`, `r
 | `repo` | `owner/name`, at most 96 characters |
 | `revision` | 40-character lowercase commit id; a branch or tag is refused |
 | `file` | one plain `*.gguf` name, at most 128 characters, no separator, no `..`, not a Win32 reserved device name, unique in the catalog |
-| `url` | `https`, at most 2048 characters, no credentials, no query, no fragment; plain `http` only on a loopback host |
+| `url` | `https`, at most 2048 characters, no credentials, no query, no fragment; plain `http` only on a loopback host. The pin is bare; the redirect target may carry a signed CDN query (see Transfer and resume) |
 | `sha256` | 64-character lowercase digest of the whole file |
 | `sizeBytes` | whole byte count from 1 to 12 GiB |
 | `license` | one of `apache-2.0`, `mit`, `bsd-2-clause`, `bsd-3-clause` |
@@ -83,8 +83,12 @@ and then resolved with `realpathSync.native`, so a symlinked or junctioned direc
 The transfer requests `entry.url` with no credential, with `redirect: 'follow'`, an `application/octet-stream` accept header (plus the runtime's own standard transport headers) and
 `Range: bytes=<n>-` when a `.part` file already holds `n` bytes. The runtime follows the redirect chain,
 and the final response URL must again be `https` - or plain `http` on loopback only when the pinned URL
-itself is loopback - without credentials, query or fragment; anything else fails as `insecure-redirect`
-before a byte is written. The status is then classified:
+itself is loopback - without credentials or a fragment; anything else fails as `insecure-redirect`
+before a byte is written. A query is allowed on the final hop: Hugging Face answers a `resolve/` pin with
+a redirect to its signed CDN (`*.cdn.hf.co?Policy=…&Signature=…`), so rejecting the query failed every
+real download while the mocked tests passed. The query cannot change what is installed (the bytes still
+have to match the pinned size and digest), the downloader never stores it, and it never appears in an
+error, result or progress event. The status is then classified:
 
 - `200`: the server ignored the range, so the partial file is truncated and the transfer restarts at
    zero (`restarted` is reported). A declared `content-length` on a `200` that answers a non-resume
@@ -127,11 +131,11 @@ rejected value.
 ## Security boundary
 
 The catalog is the trust anchor: a download is installed only when its bytes match the pinned size and
-digest, so a compromised mirror or a redirected response cannot substitute another file. The URL may not
-carry credentials, a query or a fragment, and the catalog format deliberately has no header or token
+digest, so a compromised mirror or a redirected response cannot substitute another file. The pinned URL may
+not carry credentials, a query or a fragment, and the catalog format deliberately has no header or token
 field, so a presigned URL cannot smuggle a secret into the pin file. The final redirect target must be
-`https`, or loopback `http` only when the pinned URL was loopback, and no header from the caller is
-forwarded. A missing destination is created only after the nearest existing ancestor has been resolved
+`https`, or loopback `http` only when the pinned URL was loopback, may carry the CDN's signed query (which
+is never stored or echoed), and no header from the caller is forwarded. A missing destination is created only after the nearest existing ancestor has been resolved
 and confirmed to be a real, non-symlink directory, and the destination, final and partial paths must
 each be real, non-symlink paths when they exist, so a planted junction cannot redirect a create, a
 write or an append; a Win32 reserved device name or a colon segment is refused. The `.part` name is
@@ -155,7 +159,7 @@ no network access. It covers the shipped catalog pin (revision, digest, size and
 malformed JSON and non-object input, every rejected catalog field (unknown version, duplicate id and
 file, uppercase id, traversal and nested file names, non-GGUF file, branch revision, short digest,
 zero and fractional size, disallowed license, plain-http non-loopback URL, userinfo, query and fragment
-URLs, unknown and missing entry keys, accessors, sparse arrays, null-prototype and class-instance
+URLs in the pin, unknown and missing entry keys, accessors, sparse arrays, null-prototype and class-instance
 entries, prototype keys, reserved device names and the model cap), a complete download with ordered
 progress, resume with an exact `Range` request, a server that ignores `Range`, checksum mismatch, a short
 and a dropped body that keep the partial file, an oversized body, an already verified file with no
@@ -163,19 +167,26 @@ request, replacement of an existing invalid file, caller cancellation followed b
 an already aborted signal, a stalled connection, bounded HTTP failures without body leakage, a complete
 partial file that installs without a request even when the server would reject a range, an incomplete
 partial file that keeps its bytes, an insufficient-space probe that stops before any request, invalid
-destinations and options, the concurrent-download guard, a followed redirect, final-URL checks, a
+destinations and options, the concurrent-download guard, a followed redirect, final-URL checks (a fragment
+or userinfo refused, a signed CDN query accepted), a
 throwing progress callback, `verifyInstalledModel`, credential-free error
 messages, creatable nested destinations, a symlinked destination, partial file or final file where the
 host allows creating one, a junction above a missing destination, a reserved Win32 destination name, a
 loopback plain-http downgrade, and a transfer that outlives the shared total deadline.
 
 The full acceptance uses `node vibe/tools/verify.mjs --strict` and
-`node vibe/tools/docs-check.mjs --strict`.
+`node vibe/tools/docs-check.mjs --strict`. The live path is proven separately by
+[`node vibe/tools/local-runtime-smoke.mjs`](../../../vibe/tools/local-runtime-smoke.mjs): on 2026-11-28
+it downloaded `qwen2.5-coder-1.5b-q4-k-m` (1,117,320,768 bytes, 121.5 s) and
+`qwen3-embedding-0.6b-q8-0` (639,150,592 bytes, 69.4 s) from the shipped pins, each verified by size and
+SHA-256, inside a full `SMOKE_RESULT=PASS` run. That run is what exposed the redirect defect: before the
+fix, the very first live download failed as `insecure-redirect`.
 
 ## Next steps
 
 The hardware probe, the first-run wizard, Ollama detection and the pin plus verified installer
-(`vibe/sidecars.json`, `src/stable/runtime/sidecar.mjs`) are delivered in their own design notes.
+(`vibe/sidecars.json`, `src/stable/runtime/sidecar.mjs`) are delivered in their own design notes, and the
+live download path is verified by [m3-local-smoke.md](m3-local-smoke.md).
 Bundling the binary, signing the manifest and copying the catalog into the packaged application remain
 M3/M12 work. The Apache-2.0 text these models carry is delivered with the sidecar notice in
 [m3-third-party-notices.md](m3-third-party-notices.md).

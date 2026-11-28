@@ -1,6 +1,6 @@
 # M3 pinned runtime sidecar
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-27
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-28
 
 >
 > Pins the llama.cpp `llama-server` release and installs its files only after a size and digest
@@ -303,7 +303,9 @@ Copy the installed files and `vibe/models/catalog.json` into the packaged applic
 manifest, place the generated third-party notice beside the installed files and the application (see
 [m3-third-party-notices.md](m3-third-party-notices.md)), add the
 Microsoft VC++ 2015-2022 x64 redistributable to the radar and pin it,
-supply the Microsoft VC++ runtime, and run one live install/start smoke on a clean Windows machine.
+supply the Microsoft VC++ runtime, and run the install/start smoke on a clean Windows machine (the live
+loopback install/start proof on a development host is recorded in
+[m3-local-smoke.md](m3-local-smoke.md)).
 The first-run start action now calls `installSidecar` when no host-supplied `runtimePath` exists (see
 [m3-first-run-wizard.md](m3-first-run-wizard.md)), so the installer is no longer only a library. Keep the pin current from the radar, and
 re-check the seven-day rule and the per-file digests whenever the nightly advances. The loader
