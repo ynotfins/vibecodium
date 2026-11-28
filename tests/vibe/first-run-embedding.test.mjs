@@ -143,17 +143,6 @@ test('the embedding plan is not-ready before a check and disposed after disposal
   assert.deepEqual(wizard.embeddingRuntimeOptions(), { available: false, reason: 'disposed' });
 });
 
-test('the embedding flags raise the logical batch so the pinned default cannot clamp the ubatch', () => {
-  // At `b12426` the default `-b 2048` clamps an `-ub 8192`, so the pair must travel together and the
-  // batch must not sit below the ubatch. The order also keeps the plan readable: batch, then ubatch.
-  const batch = EMBEDDING_SERVER_ARGS.indexOf('-b');
-  const ubatch = EMBEDDING_SERVER_ARGS.indexOf('-ub');
-  assert.ok(batch > 0, 'the logical batch flag is present');
-  assert.ok(ubatch > batch, 'the ubatch flag follows the logical batch');
-  assert.equal(EMBEDDING_SERVER_ARGS[batch + 1], '8192');
-  assert.equal(EMBEDDING_SERVER_ARGS[ubatch + 1], '8192');
-});
-
 test('a ready pinned machine exposes the recorded embedding flags and the supervisor option bag', async (t) => {
   const { wizard, root, runtime } = readyWizard(t);
   const view = await wizard.refresh();
@@ -171,7 +160,10 @@ test('a ready pinned machine exposes the recorded embedding flags and the superv
   assert.equal(Object.isFrozen(plan), true);
   assert.equal(Object.isFrozen(plan.commandArgs), true);
   // The recorded flags are one frozen constant, not a copy rebuilt per call.
-  assert.deepEqual(EMBEDDING_SERVER_ARGS, ['--embedding', '--pooling', 'last', '-b', '8192', '-ub', '8192']);
+  assert.deepEqual(
+    EMBEDDING_SERVER_ARGS,
+    ['--embedding', '--pooling', 'last', '-b', '8192', '-ub', '8192'],
+  );
   assert.equal(Object.isFrozen(EMBEDDING_SERVER_ARGS), true);
   assert.equal(plan.commandArgs, EMBEDDING_SERVER_ARGS);
   // The chat path is untouched: it still plans the chat weights with the recommendation flags.
@@ -309,8 +301,26 @@ test('the embedding hand-off ignores caller-supplied flags, a port or a ubatch o
   assert.deepEqual(Object.keys(handOff.options), ['executablePath', 'modelPath', 'commandArgs', 'restart']);
   // The shared recorded flags survive; a caller override is not merged into the option bag.
   assert.equal(handOff.options.commandArgs, EMBEDDING_SERVER_ARGS);
-  assert.deepEqual(handOff.options.commandArgs, ['--embedding', '--pooling', 'last', '-b', '8192', '-ub', '8192']);
+  assert.deepEqual(
+    handOff.options.commandArgs,
+    ['--embedding', '--pooling', 'last', '-b', '8192', '-ub', '8192'],
+  );
   assert.equal(handOff.options.port, undefined);
   assert.equal(handOff.options.contextSize, undefined);
   assert.equal(Object.isFrozen(handOff.options), true);
+});
+
+test('the recorded embedding flags raise the logical and physical batch to the same 8192', () => {
+  // At the pinned b12426 build llama_context sizes the physical batch as
+  // min(n_batch, n_ubatch) (src/llama-context.cpp) and the pinned archive's help text gives
+  // --batch-size a default of 2048, so asking for an 8192 ubatch alone still batches at 2048.
+  const batch = EMBEDDING_SERVER_ARGS.indexOf('-b');
+  const ubatch = EMBEDDING_SERVER_ARGS.indexOf('-ub');
+  assert.notEqual(batch, -1, 'the plan sets the logical batch');
+  assert.notEqual(ubatch, -1, 'the plan sets the physical batch');
+  assert.ok(batch < ubatch, 'the logical batch precedes the physical batch');
+  assert.equal(EMBEDDING_SERVER_ARGS[batch + 1], '8192');
+  assert.equal(EMBEDDING_SERVER_ARGS[ubatch + 1], '8192');
+  assert.equal(EMBEDDING_SERVER_ARGS[batch + 1], EMBEDDING_SERVER_ARGS[ubatch + 1]);
+  assert.equal(Object.isFrozen(EMBEDDING_SERVER_ARGS), true);
 });

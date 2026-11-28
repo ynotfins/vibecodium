@@ -186,8 +186,11 @@ panel's start action still installs it through `start()`). On a ready pinned mac
 
 `executablePath` is the same validated runtime path the chat plan uses, `modelPath` joins
 `destinationDir` and the catalog's embedding entry `file`, `commandArgs` is the exported frozen
-`EMBEDDING_SERVER_ARGS` (`--embedding`, `--pooling`, `last`, `-b`, `8192`, `-ub`, `8192`), and `restart` is the same
-effective policy `startPlan()` reports. While the discovered daemon is the selected runtime and its
+`EMBEDDING_SERVER_ARGS` (`--embedding`, `--pooling`, `last`, `-b`, `8192`, `-ub`, `8192`), and
+`restart` is the same effective policy `startPlan()` reports. Both batch switches carry 8192 on
+purpose: at the pinned `b12426` build `llama_context` sizes the physical batch as
+`min(n_batch, n_ubatch)` and `--batch-size` defaults to 2048, so `-ub 8192` alone would start cleanly
+but batch at 2048. While the discovered daemon is the selected runtime and its
 summary carries an embedding model the plan is `{ available: true, kind: 'ollama', baseUrl, model }`
 where `baseUrl` and `model` are the validated loopback URL and embedding model; a daemon that reports
 only a chat model stays `no-embedding-model`, and switching back to `usePinned()` restores the pinned
@@ -200,7 +203,7 @@ plan. `view().embedding` carries the same plan.
 executable, the model, every flag (the pinned flags set no bind host or port and enable no agent or MCP
 switch) and the policy. A daemon plan is returned as-is because a daemon is not spawnable, and a blocked
 plan is the same `{ available: false, reason }` value. The wizard never spawns an embedding server, and
-the plan never accepts caller-supplied flags, a port or a ubatch override.
+the plan never accepts caller-supplied flags, a port or a batch or ubatch override.
 
 ### Ollama detection and selection
 
@@ -404,9 +407,10 @@ The embedding
 start plan and its supervisor hand-off are delivered above; the caller that actually starts and
 supervises that second process is the M6 index binding, its first consumer, and the wizard itself ships
 no process. That binding must smoke-start the pinned `b12426` archive with `EMBEDDING_SERVER_ARGS` before
-it relies on them. The pair now carries `-b 8192` beside `-ub 8192` (delivered 2026-11-27): at `b12426`
-the default `-b 2048` clamps the effective ubatch, so `-ub 8192` alone starts cleanly but batches at
-2048, and the frozen constant keeps the logical batch ahead of the ubatch. Offering
+it relies on them. The frozen constant sets both `-b 8192` and `-ub 8192`: at `b12426`
+`llama_context` sizes the physical batch as `min(n_batch, n_ubatch)` and the default
+`--batch-size` of 2048 would otherwise clamp the requested ubatch, so `-ub 8192` alone starts cleanly
+but batches at 2048. Offering
 the same discovered daemon in the B5 provider setup panel is M2
 work. A real extension-host smoke of the panel and a rebuilt-app screenshot remain M6/M12 integration
 work.
