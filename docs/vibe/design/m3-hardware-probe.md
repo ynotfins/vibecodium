@@ -1,6 +1,6 @@
 # M3 hardware probe and local runtime recommendation
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-26
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-27
 >
 > First-run hardware detection. The module lives in
 > [hardware-probe.mjs](../../../src/stable/runtime/hardware-probe.mjs) and the acceptance tests in

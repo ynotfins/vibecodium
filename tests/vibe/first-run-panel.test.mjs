@@ -842,3 +842,136 @@ test('the panel calls the wizard start action and reports its outcome', async (t
   assert.equal(calls, 2);
   assert.match(controller.html(), /could not be installed/);
 });
+
+test('the panel renders the escaped embedding plan and every blocked reason', () => {
+  const ready = baseView({
+    installed: true,
+    phase: 'ready',
+    embedding: {
+      available: true,
+      kind: 'llama-server',
+      executablePath: 'C:/runtime/llama-server.exe',
+      modelPath: 'C:/models/embedding.gguf',
+      commandArgs: ['--embedding', '--pooling', 'last', '-ub', '8192'],
+      restart: { maxRestarts: 3, baseDelayMs: 1000, maxDelayMs: 30000, stableMs: 60000 },
+    },
+  });
+  const html = renderFirstRunHtml(ready);
+  assert.match(html, /<h2>Embedding server<\/h2>/);
+  assert.match(html, /C:\/models\/embedding.gguf/);
+  assert.match(html, /C:\/runtime\/llama-server.exe/);
+  assert.match(html, /--embedding --pooling last -ub 8192/);
+
+  const hostile = renderFirstRunHtml(baseView({
+    installed: true,
+    phase: 'ready',
+    embedding: {
+      available: true,
+      kind: 'llama-server',
+      executablePath: '"><svg onload=alert(3)>',
+      modelPath: '"><img src=x onerror=alert(1)>',
+      commandArgs: ['--embedding', '"><script>alert(2)</script>'],
+    },
+  }));
+  assert.equal(hostile.includes('<img src=x'), false);
+  assert.equal(hostile.includes('<script>alert(2)</script>'), false);
+  assert.equal(hostile.includes('<svg onload'), false);
+  assert.match(hostile, /&lt;img src=x/);
+  assert.match(hostile, /&lt;script&gt;alert\(2\)/);
+  assert.match(hostile, /&lt;svg onload/);
+
+  for (const [reason, message] of [
+    ['runtime-not-bundled', /runtime is not installed yet/],
+    ['no-embedding-model', /no embedding model/],
+    ['not-ready', /Finish the setup steps/],
+    ['disposed', /setup wizard is closed/],
+  ]) {
+    assert.match(renderFirstRunHtml(baseView({ embedding: { available: false, reason } })), message);
+  }
+
+  const daemon = renderFirstRunHtml(baseView({
+    phase: 'ready',
+    source: 'ollama',
+    embedding: {
+      available: true,
+      kind: 'ollama',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      model: 'nomic-embed-text:latest',
+    },
+  }));
+  assert.match(daemon, /nomic-embed-text:latest/);
+  assert.match(daemon, /127\.0\.0\.1:11434/);
+
+  // A hostile accessor on the plan, and a hostile array entry, are never invoked.
+  let invoked = false;
+  const evil = { available: false };
+  Object.defineProperty(evil, 'reason', {
+    enumerable: true,
+    get() {
+      invoked = true;
+      throw new Error('getter');
+    },
+  });
+  const accessorHtml = renderFirstRunHtml(baseView({ embedding: evil }));
+  assert.equal(invoked, false);
+  assert.match(accessorHtml, /Finish the setup steps/);
+
+  const evilArgs = ['--embedding'];
+  Object.defineProperty(evilArgs, '1', {
+    enumerable: true,
+    get() {
+      invoked = true;
+      throw new Error('getter');
+    },
+  });
+  const argsHtml = renderFirstRunHtml(baseView({
+    installed: true,
+    phase: 'ready',
+    embedding: { available: true, kind: 'llama-server', modelPath: 'C:/models/embedding.gguf', commandArgs: evilArgs },
+  }));
+  assert.equal(invoked, false);
+  assert.match(argsHtml, /--embedding/);
+
+  // An older view without the plan still renders and says the plan is not ready.
+  assert.match(renderFirstRunHtml(baseView()), /<h2>Embedding server<\/h2>/);
+});
+
+test('the embedding flags are capped at sixteen data values and a malformed list renders none', () => {
+  const flags = [];
+  for (let index = 0; index < 20; index += 1) flags.push('flag-' + index);
+  const bounded = renderFirstRunHtml(baseView({
+    installed: true,
+    phase: 'ready',
+    embedding: {
+      available: true, kind: 'llama-server', modelPath: 'C:/models/embedding.gguf', commandArgs: flags,
+    },
+  }));
+  assert.match(bounded, /flag-15/);
+  // The seventeenth entry and everything after it is dropped, not rendered.
+  assert.equal(bounded.includes('flag-16'), false);
+  assert.equal(bounded.includes('flag-19'), false);
+
+  // A non-array, a revoked Proxy and a Proxy carrying traps render no flags and run no trap.
+  const revoked = Proxy.revocable(['--embedding'], {});
+  revoked.revoke();
+  let trapped = false;
+  const hostile = new Proxy(['--embedding'], {
+    get() { trapped = true; throw new Error('getter'); },
+    ownKeys() { trapped = true; throw new Error('keys'); },
+  });
+  for (const commandArgs of ['--embedding --pooling last', revoked.proxy, hostile]) {
+    const html = renderFirstRunHtml(baseView({
+      installed: true,
+      phase: 'ready',
+      embedding: { available: true, kind: 'llama-server', modelPath: 'C:/models/embedding.gguf', commandArgs },
+    }));
+    assert.equal(html.includes('Flags:'), false);
+    assert.match(html, /C:\/models\/embedding.gguf/);
+  }
+  assert.equal(trapped, false);
+
+  // An unknown or hostile reason still renders the fixed bounded sentence, never the value.
+  const unknown = renderFirstRunHtml(baseView({ embedding: { available: false, reason: '"><img src=x>' } }));
+  assert.equal(unknown.includes('<img'), false);
+  assert.match(unknown, /Finish the setup steps/);
+});

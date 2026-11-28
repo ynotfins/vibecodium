@@ -15,8 +15,9 @@ on loopback, it proves that the delivered B1 `llama-cpp` preset serves chat, str
 embeddings through it, and it offers an opt-in bounded restart/back-off policy for a child that dies
 while serving. It does not bundle or download llama.cpp or any weights, probe the hardware, render the
 first-run wizard, proxy chat itself or manage descendants. The model downloader is a sibling slice that
-supplies the weights; the first-run wizard now hands this module its start options through
-`runtimeOptions()`, the hardware probe is a sibling module, and the pin and verified installer
+supplies the weights; the first-run wizard now hands this module its chat start options through
+`runtimeOptions()` and a separate embedding start through `embeddingRuntimeOptions()`, the hardware
+probe is a sibling module, and the pin and verified installer
 are delivered in [m3-sidecar-binary.md](m3-sidecar-binary.md).
 
 ## Contract

@@ -48,6 +48,10 @@ export const DEFAULT_FIRST_RUN_RESTART_POLICY = Object.freeze({
   maxDelayMs: 30_000,
   stableMs: 60_000,
 });
+// The recorded flags for the second, embedding-only llama-server process: last-token pooling over an
+// 8192-token batch, so the pinned embedding weights serve `/v1/embeddings` instead of chat. One frozen
+// array is shared by the plan, the view and the supervisor hand-off, so no caller rebuilds the flags.
+export const EMBEDDING_SERVER_ARGS = Object.freeze(['--embedding', '--pooling', 'last', '-ub', '8192']);
 
 const RESERVED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const CONTROL_OR_BIDI = /[\u0000-\u001F\u007F-\u009F\p{Cf}\p{Zl}\p{Zp}]/u;
@@ -675,6 +679,59 @@ export function createFirstRunWizard(options) {
     });
   }
 
+  function embeddingBlocker() {
+    if (disposed) return Object.freeze({ available: false, reason: 'disposed' });
+    if (state.phase !== 'ready' || state.plan === null) {
+      return Object.freeze({ available: false, reason: 'not-ready' });
+    }
+    if (effectiveSource() === 'ollama') {
+      if (state.ollama.embeddingModel === null) {
+        return Object.freeze({ available: false, reason: 'no-embedding-model' });
+      }
+      return null;
+    }
+    if (runtimePath === null) return Object.freeze({ available: false, reason: 'runtime-not-bundled' });
+    return null;
+  }
+
+  function embeddingPlan() {
+    const blocked = embeddingBlocker();
+    if (blocked !== null) return blocked;
+    if (effectiveSource() === 'ollama') {
+      return Object.freeze({
+        available: true,
+        kind: 'ollama',
+        baseUrl: state.ollama.providerOptions.baseUrl,
+        model: state.ollama.embeddingModel,
+      });
+    }
+    const embedding = findRole('embedding');
+    return Object.freeze({
+      available: true,
+      kind: 'llama-server',
+      executablePath: runtimePath,
+      modelPath: path.join(destinationDir, embedding.entry.file),
+      commandArgs: EMBEDDING_SERVER_ARGS,
+      restart: restartPolicy,
+    });
+  }
+
+  // The embedding hand-off to the supervisor. A daemon plan is not spawnable and is returned as-is;
+  // a pinned plan becomes exactly the options `createLlamaServer` accepts, frozen at both levels.
+  function embeddingRuntimeOptions() {
+    const plan = embeddingPlan();
+    if (plan.available !== true || plan.kind === 'ollama') return plan;
+    return Object.freeze({
+      available: true,
+      options: Object.freeze({
+        executablePath: plan.executablePath,
+        modelPath: plan.modelPath,
+        commandArgs: plan.commandArgs,
+        restart: plan.restart,
+      }),
+    });
+  }
+
   function ollamaUsable() {
     return state.ollama !== null
       && state.ollama.available === true
@@ -785,6 +842,7 @@ export function createFirstRunWizard(options) {
       progress: state.progress === null ? null : Object.freeze(Object.assign({}, state.progress)),
       error: state.error === null ? null : Object.freeze(Object.assign({}, state.error)),
       start: startPlan(),
+      embedding: embeddingPlan(),
       steps: buildSteps(),
       ollama: state.ollama,
       runtime: Object.freeze({
@@ -1126,6 +1184,8 @@ export function createFirstRunWizard(options) {
     start: start,
     startPlan: startPlan,
     runtimeOptions: runtimeOptions,
+    embeddingPlan: embeddingPlan,
+    embeddingRuntimeOptions: embeddingRuntimeOptions,
     checkOllama: checkOllama,
     useOllama: useOllama,
     usePinned: usePinned,
