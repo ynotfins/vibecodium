@@ -1,6 +1,6 @@
 # M2 B6 Router difficulty adapter
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-26
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-28
 >
 > The bounded adapter around the direct provider's Router. It lives in
 > [morph-router.mjs](../../../src/stable/gateway/morph-router.mjs), and its acceptance tests live in
@@ -134,9 +134,15 @@ live provider call.
 
 ## Follow-ups
 
-- B3 wiring: map `cheap`, `standard` and `powerful` to provider/model routes per task class and
-   decide whether the Router hint may override a class's fixed route. The classify call costs
-   $0.005, so it should not run for every keystroke and its cost belongs in the budget model.
+- B3 wiring: delivered 2026-11-28 in `provider-router.mjs`. A policy route may tag the tiers it
+   serves and a chat request may carry one `tier` hint; the hint only reorders the class's own
+   routes (tagged-for-the-tier first, then untagged, then routes tagged for other tiers, each group
+   in policy order, and the policy order when nothing matches), so every route stays reachable as a
+   fallback and the Router can never override a class's fixed route or reach a model outside the
+   validated policy. `router.classify(taskId, prompt)` charges the billed call against the same task
+   and UTC-day ledger with a conservative bound before dispatch, settles with reported usage,
+   releases on an adapter throw and keeps the charge on a malformed answer. Deciding when to
+   classify and passing the result as a hint in a live turn remains M6 integration work.
 - `/v1/router/multimodel` (a candidate model from a caller policy) arrives when a caller needs it.
 - A live smoke test against the direct provider remains M2 work, as it does for the other
    direct-provider tools.
