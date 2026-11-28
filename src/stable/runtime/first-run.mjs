@@ -11,6 +11,7 @@ import path from 'node:path';
 import { types } from 'node:util';
 
 import { probeHardware, recommendRuntime } from './hardware-probe.mjs';
+import { ownedRuntimeDirectory } from './app-data.mjs';
 import {
   downloadModel as defaultDownloadModel,
   findCatalogModel,
@@ -61,7 +62,7 @@ const OPTION_KEYS = new Set([
   'discoverOllama', 'restart', 'sidecar', 'installSidecar', 'verifySidecar',
 ]);
 const INSTALL_OPTION_KEYS = new Set(['signal']);
-const SIDECAR_OPTION_KEYS = new Set(['manifest', 'id', 'targetDir', 'platformKey']);
+const SIDECAR_OPTION_KEYS = new Set(['manifest', 'id', 'targetDir', 'appDataRoot', 'platformKey']);
 const PLATFORM_KEY = /^(?:win32|linux|darwin)-(?:x64|arm64)$/;
 const PROBE_RESULT_KEYS = new Set(['version', 'hardware', 'notices']);
 
@@ -172,9 +173,10 @@ function requireDestination(value, code, label) {
 }
 
 // The sidecar configuration belongs to the host, never to the webview: the manifest is validated
-// once, the id must name one of its entries, the target directory must be an absolute local path the
-// installer can own, and the platform must have a pinned target. Resolving the target here means the
-// start action cannot fail for a reason the settings already prove.
+// once, the id must name one of its entries, the platform must have a pinned target, and the install
+// directory is either derived from a host-owned application data root (the preferred path, so the
+// installer proves the directory is its own) or an absolute local path the installer can own. Resolving
+// the target here means the start action cannot fail for a reason the settings already prove.
 function resolveSidecarConfig(value, destinationDir) {
   if (value === undefined) return null;
   const own = readOwnData(value, 'sidecar options', SIDECAR_OPTION_KEYS, 'invalid-sidecar');
@@ -198,9 +200,6 @@ function resolveSidecarConfig(value, destinationDir) {
   } catch {
     fail('invalid-sidecar', 'sidecar id is not in the manifest');
   }
-  const targetDir = own.targetDir === undefined
-    ? path.join(destinationDir, 'runtime')
-    : requireDestination(own.targetDir, 'invalid-sidecar', 'sidecar targetDir');
   let platformKey;
   if (own.platformKey !== undefined) {
     if (typeof own.platformKey !== 'string' || !PLATFORM_KEY.test(own.platformKey)) {
@@ -216,13 +215,48 @@ function resolveSidecarConfig(value, destinationDir) {
   } catch {
     fail('invalid-sidecar', 'the sidecar has no target for this platform');
   }
+  let ownedRoot = null;
+  let targetDir;
+  if (own.appDataRoot !== undefined) {
+    // The host-owned root: the installer derives and proves the directory itself, so a webview can
+    // never supply an install path. A caller directory alongside it is refused rather than ignored.
+    if (own.targetDir !== undefined) {
+      fail('invalid-sidecar', 'sidecar targetDir cannot be combined with appDataRoot');
+    }
+    requireDestination(own.appDataRoot, 'invalid-sidecar', 'sidecar appDataRoot');
+    let owned;
+    try {
+      owned = ownedRuntimeDirectory(own.appDataRoot, {
+        id,
+        version: sidecar.version,
+        platformKey: resolved.platformKey,
+      });
+    } catch {
+      fail('invalid-sidecar', 'sidecar appDataRoot must be an application data directory');
+    }
+    ownedRoot = owned.root;
+    targetDir = owned.directory;
+  } else {
+    targetDir = own.targetDir === undefined
+      ? path.join(destinationDir, 'runtime')
+      : requireDestination(own.targetDir, 'invalid-sidecar', 'sidecar targetDir');
+  }
   return Object.freeze({
     sidecar,
     id,
     targetDir,
+    ownedRoot,
     platformKey: resolved.platformKey,
     sizeBytes: resolved.target.sizeBytes,
   });
+}
+
+// The option bag the installer and the offline verifier receive: an owned root (derived internally)
+// when the host configured one, otherwise the legacy absolute target directory.
+function sidecarDirectoryOptions(config) {
+  return config.ownedRoot === null
+    ? { targetDir: config.targetDir, platformKey: config.platformKey }
+    : { ownedRoot: config.ownedRoot, platformKey: config.platformKey };
 }
 
 function isAbortSignal(value) {
@@ -903,10 +937,7 @@ export function createFirstRunWizard(options) {
     // missing, unreadable or hostile check is advisory and leaves the start action to install.
     if (sidecarConfig !== null && runtimePath === null) {
       try {
-        const checked = await verifySidecar(sidecarConfig.sidecar, {
-          targetDir: sidecarConfig.targetDir,
-          platformKey: sidecarConfig.platformKey,
-        });
+        const checked = await verifySidecar(sidecarConfig.sidecar, sidecarDirectoryOptions(sidecarConfig));
         if (checked !== null && typeof checked === 'object' && !types.isProxy(checked) &&
           readDataField(checked, 'verified').value === true) {
           const executable = readDataField(checked, 'executablePath');
@@ -1065,8 +1096,7 @@ export function createFirstRunWizard(options) {
       runtime.progress = null;
       try {
         const result = await installSidecar(sidecarConfig.sidecar, {
-          targetDir: sidecarConfig.targetDir,
-          platformKey: sidecarConfig.platformKey,
+          ...sidecarDirectoryOptions(sidecarConfig),
           signal: signal,
           onProgress: function (progress) {
             const total = sidecarConfig.sizeBytes;
