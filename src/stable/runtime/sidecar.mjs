@@ -48,6 +48,9 @@ export const MAX_TOTAL_TIMEOUT_MS = 3_600_000;
 export const DEFAULT_TOTAL_TIMEOUT_MS = 600_000;
 export const HASH_CHUNK_BYTES = 1024 * 1024;
 export const MAX_ZIP_ENTRIES = 4096;
+// ADR-0011 decision 2/7: a nightly must be public for at least this long before we adopt it; the intake
+// policy, the installer and the `sidecar-intake` verify step enforce the wait, not the radar review.
+export const INTAKE_MIN_PUBLIC_DAYS = 7;
 export const ALLOWED_LICENSES = Object.freeze([
   'mit',
   'apache-2.0',
@@ -68,8 +71,11 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const TARGET_KEY = /^(win32|linux|darwin)-(x64|arm64)$/;
 const DIGEST = /^[0-9a-fA-F]{64}$/;
 const FILE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+// A GitHub release asset name: one plain file in the release directory, never a nested path.
+const RELEASE_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.zip$/;
 const RESERVED_DEVICE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 const LOOPBACK_HOSTS = Object.freeze([['127', '0', '0', '1'].join('.'), '[::1]']);
+const DAY_MS = 86_400_000;
 
 const MANIFEST_KEYS = new Set(['version', 'sidecars']);
 const SIDECAR_KEYS = new Set(['id', 'version', 'licenses', 'publishedAt', 'source', 'targets']);
@@ -80,6 +86,7 @@ const INSTALL_OPTION_KEYS = new Set([
   'totalTimeoutMs',
 ]);
 const VERIFY_OPTION_KEYS = new Set(['targetDir', 'ownedRoot', 'platformKey']);
+const INTAKE_OPTION_KEYS = new Set(['now']);
 
 const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_SIGNATURE = 0x02014b50;
@@ -293,7 +300,23 @@ function assertRemoteUrl(value, label) {
   const secure = parsed.protocol === 'https:';
   const local = parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname);
   if (!secure && !local) fail('invalid-manifest', label + ' must use https, or http on a loopback host');
-  return value;
+  return parsed;
+}
+
+// The digest protects one URL, so the manifest also has to bind that URL to the recorded source and
+// tag: `https://github.com/<source>/releases/download/<version>/<file>.zip`. Otherwise a rewritten
+// manifest could keep the same digests and point the installer at a different repository. A loopback
+// HTTP pin is the local test seam (`assertRemoteUrl` already proved it is `http:` on a loopback host),
+// so it is exempt; every remote pin must match exactly, including the canonical spelling.
+function assertReleaseBinding(parsed, value, source, version) {
+  if (parsed.protocol === 'http:') return;
+  const file = value.slice(value.lastIndexOf('/') + 1);
+  if (!RELEASE_FILE.test(file)) {
+    fail('invalid-manifest', 'target url is not bound to the sidecar source and version');
+  }
+  if (value !== 'https://github.com/' + source + '/releases/download/' + version + '/' + file) {
+    fail('invalid-manifest', 'target url is not bound to the sidecar source and version');
+  }
 }
 
 function assertSafeRelativePath(value, label) {
@@ -333,12 +356,14 @@ function validateTargetFile(value) {
   return Object.freeze({ path: filePath, sha256, sizeBytes: own.sizeBytes });
 }
 
-function validateTarget(value, platformKey) {
+function validateTarget(value, platformKey, source, version) {
   const own = readOwnData(value, 'target', TARGET_KEYS);
   for (const key of TARGET_KEYS) {
     if (own[key] === undefined) fail('invalid-manifest', 'target is missing the ' + key + ' field');
   }
-  const url = assertRemoteUrl(own.url, 'target url');
+  const parsedUrl = assertRemoteUrl(own.url, 'target url');
+  assertReleaseBinding(parsedUrl, own.url, source, version);
+  const url = own.url;
   const sha256 = normalizeDigest(own.sha256, 'target sha256');
   if (!Number.isSafeInteger(own.sizeBytes) || own.sizeBytes < 1 || own.sizeBytes > MAX_ARCHIVE_BYTES) {
     fail('invalid-manifest', 'target sizeBytes is outside the supported range');
@@ -399,7 +424,7 @@ function validateSidecar(value) {
   const targets = {};
   for (const targetKey of targetKeysList) {
     if (!TARGET_KEY.test(targetKey)) fail('invalid-manifest', 'target key must be <platform>-<arch>');
-    targets[targetKey] = validateTarget(targetValues[targetKey], targetKey);
+    targets[targetKey] = validateTarget(targetValues[targetKey], targetKey, own.source, own.version);
   }
   return Object.freeze({
     id: own.id,
@@ -439,6 +464,33 @@ export function validateSidecarManifest(value) {
     if (error instanceof SidecarError && error.code === 'invalid-manifest') throw error;
     fail('invalid-manifest', 'manifest is malformed');
   }
+}
+
+function eligibleAt(sidecar) {
+  return Date.parse(sidecar.publishedAt + 'T00:00:00Z') + INTAKE_MIN_PUBLIC_DAYS * DAY_MS;
+}
+
+// ADR-0011 decision 2 recorded the seven-day wait as a review-time control and left it unenforced; the
+// decision-7 gate now makes `assertIntakePolicy` and `installSidecar` enforce it, so a re-pin without a
+// review fails closed instead of relying on the radar row. `publishedAt` is already a real calendar date by this point.
+function assertPinEligible(sidecar, now) {
+  if (now.getTime() < eligibleAt(sidecar)) {
+    fail('intake-too-recent', 'sidecar ' + sidecar.id + ' ' + sidecar.version + ' is younger than the ' + INTAKE_MIN_PUBLIC_DAYS + '-day intake window');
+  }
+}
+
+// The gate the repo tooling and the installer share: validate the whole manifest, then refuse every pin
+// that has not been public for `INTAKE_MIN_PUBLIC_DAYS`. `now` is injectable so a check can be run
+// against a recorded date; otherwise the caller's clock decides.
+export function assertIntakePolicy(value, options = {}) {
+  const own = readOwnData(options, 'options', INTAKE_OPTION_KEYS, 'invalid-options');
+  const now = own.now === undefined ? new Date() : own.now;
+  if (!(now instanceof Date) || Number.isNaN(now.getTime())) {
+    fail('invalid-options', 'now must be a valid Date');
+  }
+  const manifest = validateSidecarManifest(value);
+  for (const sidecar of manifest.sidecars) assertPinEligible(sidecar, now);
+  return manifest;
 }
 
 export function loadSidecarManifest(text) {
@@ -1148,6 +1200,7 @@ export async function verifySidecarInstall(sidecar, options = {}) {
 
 export async function installSidecar(sidecar, options = {}) {
   const validated = validateSidecar(sidecar);
+  assertPinEligible(validated, new Date());
   const own = readOwnData(options, 'options', INSTALL_OPTION_KEYS, 'invalid-options');
   const platformKey = own.platformKey ?? process.platform + '-' + process.arch;
   const resolved = resolveSidecarTarget(validated, platformKey);
