@@ -154,17 +154,22 @@ ordinary names are trusted. A Windows child may still carry a few OS-added ident
 inheritance property is that no arbitrary parent variable or provider key reaches the child.
 
 Caller prefix arguments are a trusted surface, but the supervisor's own posture is not: `-m`,
-`--host`/`--port`/`--model` (and their `=` forms), every `--api-key*` spelling, the web-UI flags, the
-CORS flags and `--allow-unauthenticated-tools` must not be set (the `=` form of each boolean flag is
-refused too); `--reuse-port`, `--agent`/`-ag`/
+`--host`/`--port`/`--model` (and their `=` forms; the model reservation is the exact name and its `=`
+form, so the pin's `-md` second spelling `--model-draft` stays accepted), every `--api-key*` spelling,
+the web-UI flags, the CORS flags and `--allow-unauthenticated-tools` must not be set (the `=` form of
+each boolean flag is refused too); `--reuse-port`, `--agent`/`-ag`/
 `--ui-agent`, `--tools`, `--mcp-*` and `--ui-mcp-proxy` are refused because they would weaken the
-loopback-only, authenticated or no-tools guarantee, and the remote-model sources `-mu`/`--model-url`,
+loopback-only, authenticated or no-tools guarantee, the remote-model sources `-mu`/`--model-url`,
 `-hf`/`-hfr`/`--hf-repo`/`--hf-repo-draft`, `-hff`/`--hf-file`, `-hft`/`--hf-token`,
 `-hfd`/`-hfrd`/`--spec-draft-hf`, `-mmu`/`--mmproj-url`,
 `-dr`/`--docker-repo`, the eleven value-less presets that write a remote repository
 (`--embd-gemma-default`, the `--fim-qwen-*` presets, `--gpt-oss-*-default` and the
 `--vision-gemma-*` presets) and the peer tunnel `--connect` are refused so `commandArgs` cannot point the
-child at a remote GGUF, remote draft or remote projector, or at a peer. At the pin `b12426` `-hfr` is
+child at a remote GGUF, remote draft or remote projector, or at a peer, and the pin's router-mode
+model catalogs (`--models-dir`, `--models-preset` and the rest of the `--models-` family:
+`--models-max`, `--models-memory-margin`, `--models-autoload`) are refused so `commandArgs` cannot
+hand the server a caller-chosen directory of model files or a preset INI that names its own model or
+`hf-repo`. At the pin `b12426` `-hfr` is
 a second registered short alias of `--hf-repo` beside `-hf`, `-hff` and `-hft` are the short forms of
 the file and token switches, `-hfd`/`-hfrd` belong to `--spec-draft-hf`, `-mmu` belongs to
 `--mmproj-url`, and each preset sets a Hugging Face repository (two also a remote draft) that the
@@ -251,12 +256,19 @@ Residual risks:
 - The retained stdout/stderr tail is bounded in memory and never exposed; redaction is not
    implemented because nothing reads it yet.
 - `commandArgs` and `env` are a trusted caller surface. Only the supervisor's own flags, the key
-   name, shared-port, agent/MCP, remote-model and loader/system values are refused; every other
-   llama-server flag a caller passes is trusted and literal. Two router-mode flags stay trusted even
-   though they widen the file surface: `--models-dir` and `--models-preset <INI>` read model entries,
-   including `hf-repo` presets, from a path the caller chooses, so an INI can name a remote source
-   that the argv denials never see. Refusing both (with a test) is recorded as the next M3
-   follow-up rather than silently widening this slice. The pin also reads `LLAMA_CACHE`,
+   name, shared-port, agent/MCP, router-mode model catalogs, remote-model and loader/system values are
+   refused; every other llama-server flag a caller passes is trusted and literal. The pin's two
+   router-mode loader flags are refused explicitly (`b12426`: `--models-dir` turns every model file
+   under a caller-chosen directory into a preset in `tools/server/server-models.cpp`, and
+   `--models-preset <INI>` loads a caller-chosen INI through `common_preset_context::load_from_ini`,
+   which accepts every option key the program registers, `--hf-repo` included), together with the
+   router-only `--models-max`, `--models-memory-margin` and `--models-autoload`. The pin enters
+   router mode only when no model, Hugging Face repo or docker repo is set (`server_role_detect` in
+   `tools/server/server.cpp`), and the supervisor always appends `--model`, so those flags are inert
+   in the delivered child; the refusal keeps the single-model posture from resting on that. The
+   reservation on the model flag itself is exactly `--model` and its `=` form, so the local draft
+   alias `--model-draft` (the pin's second spelling of `-md`/`--spec-draft-model`) stays accepted.
+   The pin also reads `LLAMA_CACHE`,
    `LOCALAPPDATA` and `XDG_CACHE_HOME` for its cache directory and `MTMD_BACKEND_DEVICE` for the
    projector device; a caller can set them through `env`, but they select a cache or device, not a
    remote source.
@@ -316,13 +328,13 @@ received the `Authorization: Bearer` header; and the fail-closed option matrix r
 `--allow-unauthenticated-tools`, the remote-model sources `-mu`/`--model-url`,
 `-hf`/`-hfr`/`--hf-repo`/`--hf-repo-draft`, `-hff`/`--hf-file`, `-hft`/`--hf-token`,
 `-hfd`/`-hfrd`/`--spec-draft-hf`, `-mmu`/`--mmproj-url`, `-dr`/`--docker-repo`, the eleven
-remote presets (`--embd-gemma-default`, `--fim-qwen-*`, `--gpt-oss-*-default`, `--vision-gemma-*`)
-and the peer
-tunnel `--connect`, with representative case and underscore spellings and the `=` form of each
-value-taking long switch) and refuses an
+remote presets (`--embd-gemma-default`, `--fim-qwen-*`, `--gpt-oss-*-default`, `--vision-gemma-*`),
+the router-mode catalogs (`--models-dir`, `--models-preset`, `--models-max`,
+`--models-memory-margin`, `--models-autoload`) and the peer tunnel `--connect`, with representative
+case and underscore spellings and the `=` form of each value-taking long switch) and refuses an
 `LLAMA_API_KEY` environment override and any `env` override of the profile config roots (`APPDATA`, `PROGRAMDATA`, `XDG_CONFIG_HOME`, `HOME`, in any casing, without echoing the value), while a non-reserved flag such as `--chat_template` still passes
 in either spelling and the numeric tuning flags `-b`, `-ub`, `-t`, `-c` and `-ngl`, the local draft
-`-md`, the draft tuning flags `--spec-draft-threads`/`--spec-draft-ngl` and the ngram-only
+`-md`/`--model-draft`, the draft tuning flags `--spec-draft-threads`/`--spec-draft-ngl` and the ngram-only
 `--spec-default` remain accepted. The living `llama-cpp` preset contract is covered by
 `node --test tests/vibe/provider-presets.test.mjs`.
 
