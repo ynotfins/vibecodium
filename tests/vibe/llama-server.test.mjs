@@ -540,6 +540,9 @@ test('options fail closed without spawning', (t) => {
     { env: { LD_AUDIT: '/tmp/evil.so' } },
     { env: { DYLD_FALLBACK_LIBRARY_PATH: '/tmp/evil' } },
     { env: { LLAMA_ARG_HOST: 'x' } },
+    // The router's model switches have their own LLAMA_ARG_* names; the existing prefix refuses them.
+    { env: { LLAMA_ARG_MODELS_DIR: 'C:\\models' } },
+    { env: { LLAMA_ARG_MODELS_PRESET: 'preset.ini' } },
     { env: { GGML_BACKEND_PATH: '/tmp/evil.so' } },
     { env: { ['__PROTO__']: 'x' } },
     { env: { ['K'.repeat(65)]: 'v' } },
@@ -607,6 +610,27 @@ test('options fail closed without spawning', (t) => {
     { commandArgs: ['--docker-repo', 'owner/repo'] },
     { commandArgs: ['--connect', 'peer.invalid:50052'] },
     { commandArgs: ['--connect=peer.invalid:50052'] },
+    // The pinned b12426 server registers a router family that the supervisor never uses: it starts
+    // exactly one validated local model. `--models-dir` scans a caller-chosen directory for GGUFs and
+    // `--models-preset <INI>` applies an INI's keys as server options, so an `hf-repo` entry can name
+    // a remote model the argv denials never see. The rest of the family only tunes router mode, and
+    // refusing the whole `--models-` / `--no-models-` prefix keeps the single-model posture structural.
+    { commandArgs: ['--models-dir', 'C:\\models'] },
+    { commandArgs: ['--models_dir', 'C:\\models'] },
+    { commandArgs: ['--models-dir=C:\\models'] },
+    { commandArgs: ['--MODELS-DIR', 'C:\\models'] },
+    { commandArgs: ['--models-preset', 'preset.ini'] },
+    { commandArgs: ['--models_preset', 'preset.ini'] },
+    { commandArgs: ['--models-preset=preset.ini'] },
+    { commandArgs: ['--MODELS-PRESET=preset.ini'] },
+    { commandArgs: ['--models-max', '4'] },
+    { commandArgs: ['--models-max=4'] },
+    { commandArgs: ['--models_memory_margin', '512'] },
+    { commandArgs: ['--models-memory-margin=512'] },
+    { commandArgs: ['--models-autoload'] },
+    { commandArgs: ['--no-models-autoload'] },
+    { commandArgs: ['--no_models_autoload'] },
+    { commandArgs: ['--NO-MODELS-AUTOLOAD'] },
     { commandArgs: ['--api-key', 'x'] },
     { commandArgs: ['--api_key', 'x'] },
     { commandArgs: ['--api-key=secret'] },
@@ -685,8 +709,30 @@ test('options fail closed without spawning', (t) => {
     // `--spec-default` preset is not a remote source, so it stays accepted.
     ['-md', 'draft.gguf'], ['--spec-draft-threads', '4'], ['--spec-draft-ngl', '0'],
     ['--spec-default'],
+    // Both first-run plans hand the supervisor a frozen list of these flags, so refusing the router
+    // family must not refuse them.
+    ['--embedding', '--pooling', 'last', '-c', '8192', '-b', '8192', '-ub', '8192'],
   ]) {
     assert.doesNotThrow(() => createLlamaServer({ ...valid, commandArgs }));
+  }
+  // The router refusal must not echo the caller's value, like every other command-argument failure;
+  // the reserved `--model` prefix already caught the positive spellings incidentally, while the
+  // negative `--no-models-*` spelling is the one that family did not cover.
+  for (const commandArgs of [
+    ['--models-dir', 'C:\\router-marker-7c1e'],
+    ['--models-preset', 'preset-marker-7c1e.ini'],
+    ['--models-max', 'marker-7c1e'],
+    ['--models-memory-margin', 'marker-7c1e'],
+    ['--models-autoload=marker-7c1e'],
+    ['--no-models-autoload=marker-7c1e'],
+  ]) {
+    try {
+      createLlamaServer({ ...valid, commandArgs });
+      assert.fail('expected a rejection');
+    } catch (error) {
+      assert.equal(error.code, 'invalid-command-args');
+      assert.ok(!error.message.includes('marker-7c1e'));
+    }
   }
   const accessor = { ...valid };
   Object.defineProperty(accessor, 'modelPath', {

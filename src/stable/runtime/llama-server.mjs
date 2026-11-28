@@ -141,6 +141,14 @@ const DENIED_SERVER_ARG_PREFIXES = Object.freeze([
   // `--hf-repo` already covers the draft alias `--hf-repo-draft`.
   '--model-url', '--hf-repo', '--hf-file', '--hf-token', '--spec-draft-hf', '--mmproj-url',
   '--docker-repo', '--connect',
+  // The b12426 server's router mode adds its own model sources (`--models-dir` scans a caller-chosen
+  // directory for GGUFs; `--models-preset <INI>` applies an INI's keys as server options, so an
+  // `hf-repo` entry downloads a remote model the argv denials never see) and the rest of the family
+  // only tunes that mode (`--models-max`, `--models-memory-margin`, `--models-autoload`,
+  // `--no-models-autoload`). The supervisor starts exactly one validated local model, so no router
+  // switch has a legitimate use; refusing the whole family makes the single-model posture structural
+  // instead of depending on the supervisor's own `--model` always being present.
+  '--models-', '--no-models-',
 ]);
 const MAX_ENV_NAME_CHARS = 64;
 const MAX_ENV_TOTAL_CHARS = 32_768;
@@ -339,7 +347,7 @@ function validateCommandArgs(value) {
       fail('invalid-command-args', 'commandArgs must not set the bind host, port, model, API key, CORS or web UI');
     }
     if (DENIED_SERVER_ARGS.has(normalised) || DENIED_SERVER_ARG_PREFIXES.some((prefix) => normalised.startsWith(prefix))) {
-      fail('invalid-command-args', 'commandArgs must not enable shared ports, agent tools, MCP tools, remote model sources or peer connections');
+      fail('invalid-command-args', 'commandArgs must not enable shared ports, agent tools, MCP tools, remote model sources, router model switches or peer connections');
     }
     out.push(arg);
   }

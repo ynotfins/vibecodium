@@ -164,7 +164,10 @@ loopback-only, authenticated or no-tools guarantee, and the remote-model sources
 `-dr`/`--docker-repo`, the eleven value-less presets that write a remote repository
 (`--embd-gemma-default`, the `--fim-qwen-*` presets, `--gpt-oss-*-default` and the
 `--vision-gemma-*` presets) and the peer tunnel `--connect` are refused so `commandArgs` cannot point the
-child at a remote GGUF, remote draft or remote projector, or at a peer. At the pin `b12426` `-hfr` is
+child at a remote GGUF, remote draft or remote projector, or at a peer. The server's router-mode model
+family is refused too (`--models-dir`, `--models-preset`, `--models-max`, `--models-memory-margin`,
+`--models-autoload`, `--no-models-autoload`), because the supervisor starts exactly one validated local
+model and a preset INI can name a remote repository. At the pin `b12426` `-hfr` is
 a second registered short alias of `--hf-repo` beside `-hf`, `-hff` and `-hft` are the short forms of
 the file and token switches, `-hfd`/`-hfrd` belong to `--spec-draft-hf`, `-mmu` belongs to
 `--mmproj-url`, and each preset sets a Hugging Face repository (two also a remote draft) that the
@@ -251,12 +254,20 @@ Residual risks:
 - The retained stdout/stderr tail is bounded in memory and never exposed; redaction is not
    implemented because nothing reads it yet.
 - `commandArgs` and `env` are a trusted caller surface. Only the supervisor's own flags, the key
-   name, shared-port, agent/MCP, remote-model and loader/system values are refused; every other
-   llama-server flag a caller passes is trusted and literal. Two router-mode flags stay trusted even
-   though they widen the file surface: `--models-dir` and `--models-preset <INI>` read model entries,
-   including `hf-repo` presets, from a path the caller chooses, so an INI can name a remote source
-   that the argv denials never see. Refusing both (with a test) is recorded as the next M3
-   follow-up rather than silently widening this slice. The pin also reads `LLAMA_CACHE`,
+   name, shared-port, agent/MCP, remote-model, router-mode model switches and loader/system values are
+   refused; every other llama-server flag a caller passes is trusted and literal. The router family is
+   refused as a whole (`--models-dir`, `--models-preset`, `--models-max`, `--models-memory-margin`,
+   `--models-autoload` and `--no-models-autoload`, so the whole `--models-`/`--no-models-` prefix):
+   `--models-dir` makes the router scan a caller-chosen directory for GGUFs, `--models-preset <INI>`
+   loads an INI whose keys are resolved back to server options and applied to the parameters, so an
+   `hf-repo` entry names a remote source the argv denials never see, and the remaining switches only
+   tune that router. At `b12426` the router is entered only by a server with no model
+   (`tools/server/server.cpp`), so the supervisor's own `--model` currently makes them inert. The
+   reserved `--model` prefix already refused the positive `--models-*` spellings incidentally, while
+   the negative `--no-models-autoload` spelling was accepted; the explicit family refusal makes the
+   single-model posture structural and regression-tested rather than incidental (delivered
+   2026-11-28).
+   The pin also reads `LLAMA_CACHE`,
    `LOCALAPPDATA` and `XDG_CACHE_HOME` for its cache directory and `MTMD_BACKEND_DEVICE` for the
    projector device; a caller can set them through `env`, but they select a cache or device, not a
    remote source.
@@ -316,14 +327,16 @@ received the `Authorization: Bearer` header; and the fail-closed option matrix r
 `--allow-unauthenticated-tools`, the remote-model sources `-mu`/`--model-url`,
 `-hf`/`-hfr`/`--hf-repo`/`--hf-repo-draft`, `-hff`/`--hf-file`, `-hft`/`--hf-token`,
 `-hfd`/`-hfrd`/`--spec-draft-hf`, `-mmu`/`--mmproj-url`, `-dr`/`--docker-repo`, the eleven
-remote presets (`--embd-gemma-default`, `--fim-qwen-*`, `--gpt-oss-*-default`, `--vision-gemma-*`)
-and the peer
+remote presets (`--embd-gemma-default`, `--fim-qwen-*`, `--gpt-oss-*-default`, `--vision-gemma-*`),
+the router-mode model family (`--models-dir`, `--models-preset`, `--models-max`,
+`--models-memory-margin`, `--models-autoload`, `--no-models-autoload`) and the peer
 tunnel `--connect`, with representative case and underscore spellings and the `=` form of each
 value-taking long switch) and refuses an
 `LLAMA_API_KEY` environment override and any `env` override of the profile config roots (`APPDATA`, `PROGRAMDATA`, `XDG_CONFIG_HOME`, `HOME`, in any casing, without echoing the value), while a non-reserved flag such as `--chat_template` still passes
 in either spelling and the numeric tuning flags `-b`, `-ub`, `-t`, `-c` and `-ngl`, the local draft
-`-md`, the draft tuning flags `--spec-draft-threads`/`--spec-draft-ngl` and the ngram-only
-`--spec-default` remain accepted. The living `llama-cpp` preset contract is covered by
+`-md`, the draft tuning flags `--spec-draft-threads`/`--spec-draft-ngl`, the ngram-only
+`--spec-default` and the frozen embedding plan (`--embedding --pooling last -c 8192 -b 8192 -ub 8192`)
+remain accepted. The living `llama-cpp` preset contract is covered by
 `node --test tests/vibe/provider-presets.test.mjs`.
 
 The restart policy has its own cases in the same file, with the fixture counting boots through

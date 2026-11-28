@@ -322,10 +322,15 @@ rather than building a child itself. The supervisor's `commandArgs` check enumer
 `--host`/`--port` forms, the `-ag`/agent/MCP switches and every registered spelling of the
 remote-model switches (`-hf`/`-hfr`/`--hf-repo`/`--hf-repo-draft`, `-hff`/`--hf-file`,
 `-hft`/`--hf-token`, `-hfd`/`-hfrd`/`--spec-draft-hf`, `-mmu`/`--mmproj-url`, `-mu`/`--model-url`,
-`-dr`/`--docker-repo`, and the eleven value-less presets that write a remote repository), so the
-short-alias gap this note recorded is closed in the supervisor, and this plan only ever passes the
-frozen embedding list. An `--embedding` server is still an unauthenticated loopback service, narrower
-than the chat plan because it does not serve completions.
+`-dr`/`--docker-repo`, and the eleven value-less presets that write a remote repository), and the
+server's router-mode model family (`--models-dir`/`--models-preset` with the `--models-max`,
+`--models-memory-margin` and `--models-autoload`/`--no-models-autoload` switches, refused through the
+`--models-`/`--no-models-` prefix because a preset INI can name an `hf-repo` and a directory can hold
+any model), so the short-alias gap this note recorded is closed in the supervisor, and this plan only
+ever passes the frozen embedding list. An `--embedding` server is narrower than the chat plan because it does
+not serve completions, but it runs under the same supervisor contract: `createLlamaServer` always sets
+`LLAMA_API_KEY` (its own generated key or a validated caller key, written into the child environment last),
+so `/props` requires the bearer key and a caller without it cannot drive the process.
 
 ## Verification
 
