@@ -139,9 +139,14 @@ host, not the webview, owns both surfaces.
 `startPlan()` returns frozen data only when the phase is `ready`. The two shapes are:
 
 ```
-{ available: true, kind: 'llama-server', executablePath, modelPath, embeddingModelPath, contextSize, threads, gpuLayers, restart }
+{ available: true, kind: 'llama-server', executablePath, modelPath, model, embeddingModelPath, contextSize, threads, gpuLayers, restart }
 { available: true, kind: 'ollama', baseUrl, model, embeddingModel }
 ```
+
+The pinned shape's `model` is the catalog chat entry's `id`, the B1 model name the host sends with a
+request; the supervisor still receives the weights as `modelPath`, not as a name. It is the one field the
+local provider host reads from this plan (see [m3-local-provider.md](m3-local-provider.md)) so it does
+not have to map the installed file back to a provider model.
 
 The daemon shape is returned while the discovered daemon is the selected runtime and its summary
 still carries validated `providerOptions`; its `baseUrl` and `model` are exactly the overrides the
@@ -158,7 +163,8 @@ object the supervisor will receive. The wizard never spawns the process.
 `runtimeOptions()` is the hand-off to the supervisor. When the pinned path is available it returns
 `{ available: true, options }` where `options` contains exactly the `createLlamaServer` fields
 `executablePath`, `modelPath`, `contextSize`, `threads`, `gpuLayers` and `restart`; it omits `kind`,
-the wizard-only `embeddingModelPath` and `available`, a port and a `fetch` implementation. A caller can
+the plan-only `model` and `embeddingModelPath`, plus `available`, a port and a `fetch`
+implementation. A caller can
 therefore write `createLlamaServer(wizard.runtimeOptions().options)` and the supervisor re-validates
 the executable, the model path, every flag and the policy. While a daemon is selected it returns the
 daemon start plan instead (there are no supervisor options), and otherwise it returns the same
