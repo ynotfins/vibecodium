@@ -50,9 +50,14 @@ export const DEFAULT_FIRST_RUN_RESTART_POLICY = Object.freeze({
   stableMs: 60_000,
 });
 // The recorded flags for the second, embedding-only llama-server process: last-token pooling over an
-// 8192-token batch, so the pinned embedding weights serve `/v1/embeddings` instead of chat. One frozen
-// array is shared by the plan, the view and the supervisor hand-off, so no caller rebuilds the flags.
-export const EMBEDDING_SERVER_ARGS = Object.freeze(['--embedding', '--pooling', 'last', '-ub', '8192']);
+// 8192-token batch, so the pinned embedding weights serve `/v1/embeddings` instead of chat. Both the
+// logical (`-b`) and physical (`-ub`) batch are raised: at the pinned `b12426` build
+// `llama_context` sizes the physical batch as `min(n_batch, n_ubatch)` and `--batch-size` defaults
+// to 2048, so `-ub 8192` alone would still batch at 2048. One frozen array is shared by the plan,
+// the view and the supervisor hand-off, so no caller rebuilds the flags.
+export const EMBEDDING_SERVER_ARGS = Object.freeze([
+  '--embedding', '--pooling', 'last', '-b', '8192', '-ub', '8192',
+]);
 
 const RESERVED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const CONTROL_OR_BIDI = /[\u0000-\u001F\u007F-\u009F\p{Cf}\p{Zl}\p{Zp}]/u;

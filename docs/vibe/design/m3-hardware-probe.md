@@ -1,6 +1,6 @@
 # M3 hardware probe and local runtime recommendation
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-27
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-28
 >
 > First-run hardware detection. The module lives in
 > [hardware-probe.mjs](../../../src/stable/runtime/hardware-probe.mjs) and the acceptance tests in
@@ -161,5 +161,5 @@ The full acceptance uses `node vibe/tools/verify.mjs --strict` and
 The first-run wizard is delivered in [m3-first-run-wizard.md](m3-first-run-wizard.md); its start
 action now installs the pinned `llama-server` binary and passes the validated executable into the
 start plan. The remaining runtime work is to copy `vibe/models/catalog.json` into the packaged
-application (with `--embedding --pooling last -ub 8192` for the pinned embedding weights). Ollama
+application (with `--embedding --pooling last -b 8192 -ub 8192` for the pinned embedding weights). Ollama
 detection and the supervisor's opt-in restart/back-off policy have since been delivered.
