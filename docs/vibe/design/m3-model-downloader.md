@@ -85,7 +85,7 @@ The transfer requests `entry.url` with no credential, with `redirect: 'follow'`,
 and the final response URL must again be `https` - or plain `http` on loopback only when the pinned URL
 itself is loopback - without credentials or a fragment; anything else fails as `insecure-redirect`
 before a byte is written. A query is allowed on the final hop: Hugging Face answers a `resolve/` pin with
-a redirect to its signed CDN (`*.cdn.hf.co?Policy=…&Signature=…`), so rejecting the query failed every
+a redirect to its signed CDN (`*.cdn.hf.co?Policy=...&Signature=...`), so rejecting the query failed every
 real download while the mocked tests passed. The query cannot change what is installed (the bytes still
 have to match the pinned size and digest), the downloader never stores it, and it never appears in an
 error, result or progress event. The status is then classified:

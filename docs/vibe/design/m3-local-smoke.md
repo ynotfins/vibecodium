@@ -24,24 +24,24 @@ of drift again.
 ## Contract
 
 - **Opt-in only.** It is not part of `node vibe/tools/verify.mjs`: it needs the network, about 1.8 GB
-  of free disk and a few minutes. `verify` stays hermetic.
+   of free disk and a few minutes. `verify` stays hermetic.
 - **Steps, not a blob.** Each step prints one line, `PASS <name> <seconds> <json>` or
-  `FAIL <name> <seconds> <json>`, and the last line is `SMOKE_RESULT=PASS|FAIL <seconds>`. A failing
-  step marks the run FAIL and aborts the remaining steps, except the two stop steps, which run once a
-  server object has been created (in `finally`) and only mark the run FAIL; a failure prints its `code`,
-  and the CLI exits 1.
+   `FAIL <name> <seconds> <json>`, and the last line is `SMOKE_RESULT=PASS|FAIL <seconds>`. A failing
+   step marks the run FAIL and aborts the remaining steps, except the two stop steps, which run once a
+   server object has been created (in `finally`) and only mark the run FAIL; a failure prints its `code`,
+   and the CLI exits 1.
 - **Worst step first.** The sidecar install and the chat download happen before the first server
-  starts, and the chat server is stopped before the embedding model downloads, so a network problem
-  never leaves a stray process behind.
+   starts, and the chat server is stopped before the embedding model downloads, so a network problem
+   never leaves a stray process behind.
 - **Nothing secret in the output.** The generated model key is used for the auth, chat and embedding
-  calls but never printed, and the signed CDN URL is neither stored nor logged.
+   calls but never printed, and the signed CDN URL is neither stored nor logged.
 - **Its own directory.** `--dir` must be missing or carry the `.vibecodium-local-smoke` marker this
-  tool writes when it creates a directory; an existing unmarked directory is refused even when empty,
-  and a symlink, junction or non-directory path is refused, so a mistyped path is never adopted. After
-  a PASS the tool removes only its own `runtime`, `models` and marker entries, not the directory tree,
-  unless `--keep` is given; a FAIL always keeps them for inspection.
+   tool writes when it creates a directory; an existing unmarked directory is refused even when empty,
+   and a symlink, junction or non-directory path is refused, so a mistyped path is never adopted. After
+   a PASS the tool removes only its own `runtime`, `models` and marker entries, not the directory tree,
+   unless `--keep` is given; a FAIL always keeps them for inspection.
 - **Idempotent.** An installed sidecar and a verified model are reused, so a second run takes seconds
-  instead of minutes.
+   instead of minutes.
 
 ## Steps
 
@@ -111,15 +111,15 @@ rest of that directory untouched. The transcript above predates that hardening; 
 ## Bounds and known limits
 
 - The pinned artifact is the CPU build (`llama-b12426-bin-win-cpu-x64.zip`), so the smoke starts every
-  server with `gpuLayers: 0`. A GPU build is M3/M12 packaging work.
+   server with `gpuLayers: 0`. A GPU build is M3/M12 packaging work.
 - It needs the Microsoft VC++ runtime that `llama-server` links against. That dependency is present on
-  this machine but bundling it for a clean machine is parked with the owner (see `docs/vibe/STATUS.md`).
+   this machine but bundling it for a clean machine is parked with the owner (see `docs/vibe/STATUS.md`).
 - It is a manual pre-release check, not a CI job: a hosted runner has neither the disk nor the time
-  budget, and the pinned downloads are large.
+   budget, and the pinned downloads are large.
 - One model pair is covered. Adding a catalog entry means running the smoke with `--chat-model` or
-  `--embedding-model` before the pin is trusted. The `embeddings` step asserts the pinned embedding
-  model's 1024 dimensions, so a substitute `--embedding-model` with another width needs that
-  assertion updated with the pin.
+   `--embedding-model` before the pin is trusted. The `embeddings` step asserts the pinned embedding
+   model's 1024 dimensions, so a substitute `--embedding-model` with another width needs that
+   assertion updated with the pin.
 
 ## Next steps
 
