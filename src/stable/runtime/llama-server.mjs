@@ -76,10 +76,13 @@ const API_KEY_PATTERN = /^[\x21-\x7E]+$/u;
 // cannot be rewritten by a caller.
 const RESERVED_SERVER_ARGS = new Set([
   '--host', '--port', '--no-webui', '--webui', '--ui', '--no-ui',
-  '--cors-credentials', '--no-cors-credentials', '--allow-unauthenticated-tools', '-m',
+  '--cors-credentials', '--no-cors-credentials', '--allow-unauthenticated-tools', '-m', '--model',
 ]);
 const RESERVED_SERVER_ARG_PREFIXES = Object.freeze([
-  '--host=', '--port=', '--api-key', '--model', '--cors-origins', '--cors-methods', '--cors-headers',
+  // The model prefix stops at the `=` spelling on purpose. A bare `--model` prefix would also catch
+  // the pin's `--models-*` router family and `--model-draft`, which are judged by their own rules:
+  // router-mode model catalogs are denied below and the local draft alias is legitimate.
+  '--host=', '--port=', '--api-key', '--model=', '--cors-origins', '--cors-methods', '--cors-headers',
   // A boolean flag takes no value in llama.cpp, but refusing the `=` spelling too keeps the rule
   // uniform and survives a future release that starts accepting one.
   '--no-webui=', '--webui=', '--ui=', '--no-ui=', '--cors-credentials=', '--no-cors-credentials=',
@@ -141,6 +144,13 @@ const DENIED_SERVER_ARG_PREFIXES = Object.freeze([
   // `--hf-repo` already covers the draft alias `--hf-repo-draft`.
   '--model-url', '--hf-repo', '--hf-file', '--hf-token', '--spec-draft-hf', '--mmproj-url',
   '--docker-repo', '--connect',
+  // The pin's router-mode model catalogs: `--models-dir` turns every model file under a
+  // caller-chosen directory into a preset and `--models-preset` loads a caller-chosen INI whose
+  // sections may set `hf-repo`, so either can name a model, or a remote source, the supervisor
+  // never validated. The delivered child always gets `--model`, so the pin starts as an instance
+  // and these are inert today; refusing them keeps the single-model posture explicit instead of
+  // resting on that. `-md`/`--model-draft` stay the local draft and are not in this family.
+  '--models-',
 ]);
 const MAX_ENV_NAME_CHARS = 64;
 const MAX_ENV_TOTAL_CHARS = 32_768;
@@ -339,7 +349,7 @@ function validateCommandArgs(value) {
       fail('invalid-command-args', 'commandArgs must not set the bind host, port, model, API key, CORS or web UI');
     }
     if (DENIED_SERVER_ARGS.has(normalised) || DENIED_SERVER_ARG_PREFIXES.some((prefix) => normalised.startsWith(prefix))) {
-      fail('invalid-command-args', 'commandArgs must not enable shared ports, agent tools, MCP tools, remote model sources or peer connections');
+      fail('invalid-command-args', 'commandArgs must not enable shared ports, agent tools, MCP tools, router-mode model catalogs, remote model sources or peer connections');
     }
     out.push(arg);
   }

@@ -540,6 +540,12 @@ test('options fail closed without spawning', (t) => {
     { env: { LD_AUDIT: '/tmp/evil.so' } },
     { env: { DYLD_FALLBACK_LIBRARY_PATH: '/tmp/evil' } },
     { env: { LLAMA_ARG_HOST: 'x' } },
+    // The same `llama_arg_` prefix covers the pin's router-mode loader names; asserted explicitly
+    // so the two flags below cannot be reintroduced through the environment.
+    { env: { LLAMA_ARG_MODELS_DIR: 'C:\\models' } },
+    { env: { llama_arg_models_dir: 'C:\\models' } },
+    { env: { LLAMA_ARG_MODELS_PRESET: 'presets.ini' } },
+    { env: { Llama_Arg_Models_Preset: 'presets.ini' } },
     { env: { GGML_BACKEND_PATH: '/tmp/evil.so' } },
     { env: { ['__PROTO__']: 'x' } },
     { env: { ['K'.repeat(65)]: 'v' } },
@@ -607,6 +613,27 @@ test('options fail closed without spawning', (t) => {
     { commandArgs: ['--docker-repo', 'owner/repo'] },
     { commandArgs: ['--connect', 'peer.invalid:50052'] },
     { commandArgs: ['--connect=peer.invalid:50052'] },
+    // The pinned b12426 build's router-mode model catalog flags. `--models-dir` turns every model
+    // file under a caller-chosen directory into a model preset (tools/server/server-models.cpp) and
+    // `--models-preset` loads a caller-chosen INI whose sections may set `hf-repo`, because
+    // common/preset.cpp accepts every option key the program registers. The supervisor always
+    // appends `--model`, so the pin starts as an instance and both flags are inert today; refusing
+    // them keeps the single-model posture from opening if that ever stops being true. Neither has a
+    // short alias at the pin, and `-md` stays the local `--spec-draft-model`.
+    { commandArgs: ['--models-dir', 'C:\\models'] },
+    { commandArgs: ['--models-dir=C:\\models'] },
+    { commandArgs: ['--models_dir', 'C:\\models'] },
+    { commandArgs: ['--MODELS-DIR', 'C:\\models'] },
+    { commandArgs: ['--models-preset', 'presets.ini'] },
+    { commandArgs: ['--models-preset=presets.ini'] },
+    { commandArgs: ['--models_preset', 'presets.ini'] },
+    { commandArgs: ['--MODELS-PRESET', 'presets.ini'] },
+    // The whole `--models-` family is refused, so a later pin that adds another router loader
+    // cannot slip in through the naming convention; the two tuning flags are only meaningful in
+    // router mode, which the appended `--model` never allows here.
+    { commandArgs: ['--models-max', '2'] },
+    { commandArgs: ['--models-autoload'] },
+    { commandArgs: ['--models-memory-margin', '1024'] },
     { commandArgs: ['--api-key', 'x'] },
     { commandArgs: ['--api_key', 'x'] },
     { commandArgs: ['--api-key=secret'] },
@@ -673,6 +700,24 @@ test('options fail closed without spawning', (t) => {
   ]) {
     assert.throws(() => createLlamaServer({ ...valid, ...overrides }), (error) => error instanceof LlamaServerError);
   }
+  // The `llama_arg_` prefix is the only rule that refuses the pin's router-mode loader names through
+  // the environment, so assert the env refusal and its non-echoing directly instead of relying on
+  // the generic loop above.
+  for (const env of [
+    { LLAMA_ARG_MODELS_DIR: 'ENVDIRMARKER' },
+    { llama_arg_models_dir: 'ENVDIRMARKER' },
+    { LLAMA_ARG_MODELS_PRESET: 'ENVINIMARKER' },
+    { Llama_Arg_Models_Preset: 'ENVINIMARKER' },
+  ]) {
+    try {
+      createLlamaServer({ ...valid, env });
+      assert.fail('expected a rejection');
+    } catch (error) {
+      assert.equal(error.code, 'invalid-env');
+      assert.ok(!error.message.includes('ENVDIRMARKER'));
+      assert.ok(!error.message.includes('ENVINIMARKER'));
+    }
+  }
   // A non-reserved flag is still accepted in either spelling: underscore normalisation only widens
   // the refusal, it must not refuse legitimate flags such as `--chat_template`.
   for (const commandArgs of [
@@ -685,6 +730,10 @@ test('options fail closed without spawning', (t) => {
     // `--spec-default` preset is not a remote source, so it stays accepted.
     ['-md', 'draft.gguf'], ['--spec-draft-threads', '4'], ['--spec-draft-ngl', '0'],
     ['--spec-default'],
+    // The router-mode refusal above must not catch the local draft's other pin spellings either:
+    // b12426 registers `--model-draft` and `-md` on `--spec-draft-model`, and those load a local file.
+    ['--spec-draft-model', 'draft.gguf'], ['--model-draft', 'draft.gguf'],
+    ['--model_draft', 'draft.gguf'],
   ]) {
     assert.doesNotThrow(() => createLlamaServer({ ...valid, commandArgs }));
   }
@@ -722,6 +771,40 @@ test('options fail closed without spawning', (t) => {
   } catch (error) {
     assert.equal(error.code, 'invalid-command-args');
     assert.ok(!error.message.includes(marker));
+  }
+
+  // Every router-mode loader spelling named in the task card is refused with the same bounded code,
+  // and the message names the router-mode reason rather than the reserved-model one, so the
+  // correction cannot regress silently. A caller's directory or INI name is never echoed.
+  for (const commandArgs of [
+    ['--models-dir', 'DIRMARKER'], ['--models-dir=DIRMARKER'], ['--models_dir', 'DIRMARKER'],
+    ['--MODELS-DIR', 'DIRMARKER'],
+    ['--models-preset', 'INIMARKER.ini'], ['--models-preset=INIMARKER.ini'],
+    ['--models_preset', 'INIMARKER.ini'], ['--MODELS-PRESET', 'INIMARKER.ini'],
+    ['--models-max', '2'], ['--models-memory-margin', '1024'], ['--models-autoload'],
+  ]) {
+    try {
+      createLlamaServer({ ...valid, commandArgs });
+      assert.fail('expected a rejection');
+    } catch (error) {
+      assert.equal(error.code, 'invalid-command-args');
+      assert.match(error.message, /router-mode model catalogs/u);
+      assert.ok(!error.message.includes('DIRMARKER'));
+      assert.ok(!error.message.includes('INIMARKER'));
+    }
+  }
+
+  // The reserved model flag keeps its own reason and still refuses the bare and `=` spellings, so
+  // narrowing the prefix did not turn `--model` into a trusted argument.
+  for (const commandArgs of [['--model', 'MODELMARKER.gguf'], ['--model=MODELMARKER.gguf'], ['--MODEL=MODELMARKER.gguf']]) {
+    try {
+      createLlamaServer({ ...valid, commandArgs });
+      assert.fail('expected a rejection');
+    } catch (error) {
+      assert.equal(error.code, 'invalid-command-args');
+      assert.match(error.message, /bind host, port, model/u);
+      assert.ok(!error.message.includes('MODELMARKER'));
+    }
   }
 });
 
