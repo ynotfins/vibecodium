@@ -10,7 +10,7 @@
 import path from 'node:path';
 import { types } from 'node:util';
 
-import { probeHardware, recommendRuntime } from './hardware-probe.mjs';
+import { probeHardware, recommendRuntime, RECOMMENDED_EMBEDDING_CONTEXT_TOKENS } from './hardware-probe.mjs';
 import { ownedRuntimeDirectory } from './app-data.mjs';
 import {
   downloadModel as defaultDownloadModel,
@@ -50,13 +50,19 @@ export const DEFAULT_FIRST_RUN_RESTART_POLICY = Object.freeze({
   stableMs: 60_000,
 });
 // The recorded flags for the second, embedding-only llama-server process: last-token pooling over an
-// 8192-token batch, so the pinned embedding weights serve `/v1/embeddings` instead of chat. Both the
-// logical (`-b`) and physical (`-ub`) batch are raised: at the pinned `b12426` build
-// `llama_context` sizes the physical batch as `min(n_batch, n_ubatch)` and `--batch-size` defaults
-// to 2048, so `-ub 8192` alone would still batch at 2048. One frozen array is shared by the plan,
-// the view and the supervisor hand-off, so no caller rebuilds the flags.
+// 8192-token context and batch, so the pinned embedding weights serve `/v1/embeddings` instead of
+// chat. The context is pinned to the policy cap the memory estimate counts: at the pinned `b12426`
+// build `--ctx-size` defaults to 0 and `llama_context` then takes the model's trained context, which
+// is 32768 for the pinned weights, so an unpinned server would allocate a much larger KV cache than
+// the wizard shows. Both the logical (`-b`) and physical (`-ub`) batch are raised to match: the same
+// build sizes the physical batch as `min(n_batch, n_ubatch)` and clamps the logical batch to the
+// context for a causal model, while `--batch-size` defaults to 2048, so `-ub 8192` alone would still
+// batch at 2048 (or at a context below 8192). One frozen array is shared by the plan, the view and
+// the supervisor hand-off, so no caller rebuilds the flags.
 export const EMBEDDING_SERVER_ARGS = Object.freeze([
-  '--embedding', '--pooling', 'last', '-b', '8192', '-ub', '8192',
+  '--embedding', '--pooling', 'last',
+  '-c', String(RECOMMENDED_EMBEDDING_CONTEXT_TOKENS),
+  '-b', '8192', '-ub', '8192',
 ]);
 
 const RESERVED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);

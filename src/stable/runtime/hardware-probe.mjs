@@ -48,7 +48,13 @@ export const GPU_LAYERS_OFF = 0;
 export const MAX_RECOMMENDED_THREADS = 16;
 export const RESERVED_CPU_CORES = 2;
 export const RECOMMENDED_CONTEXT_TOKENS = 8192;
-export const RECOMMENDED_EMBEDDING_CONTEXT_TOKENS = 2048;
+// The embedding plan in `first-run.mjs` pins `-c` to this same cap, so the estimate and the server it
+// describes agree. The pinned embedding weights are trained at 32768 tokens; at the pinned `b12426`
+// build `--ctx-size` defaults to 0 and `llama_context` then takes the trained context, so an unpinned
+// server would size a 32768-token KV cache while the shown estimate counted a fraction of that. The
+// plan also keeps this cap at or above its 8192 batch, because the same build clamps the logical
+// batch to the context for a causal model.
+export const RECOMMENDED_EMBEDDING_CONTEXT_TOKENS = 8192;
 export const MIN_MEMORY_BYTES = 8 * GIB;
 export const LOW_MEMORY_BYTES = 16 * GIB;
 

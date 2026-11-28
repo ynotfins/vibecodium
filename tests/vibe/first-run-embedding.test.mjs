@@ -11,6 +11,7 @@ import {
   createFirstRunWizard,
 } from '../../src/stable/runtime/first-run.mjs';
 import { createLlamaServer } from '../../src/stable/runtime/llama-server.mjs';
+import { RECOMMENDED_EMBEDDING_CONTEXT_TOKENS } from '../../src/stable/runtime/hardware-probe.mjs';
 
 const GIB = 1024 * 1024 * 1024;
 const PLATFORM_KEY = 'win32-x64';
@@ -154,7 +155,7 @@ test('a ready pinned machine exposes the recorded embedding flags and the superv
     kind: 'llama-server',
     executablePath: runtime,
     modelPath: path.join(root, 'models', embeddingEntry.file),
-    commandArgs: ['--embedding', '--pooling', 'last', '-b', '8192', '-ub', '8192'],
+    commandArgs: ['--embedding', '--pooling', 'last', '-c', '8192', '-b', '8192', '-ub', '8192'],
     restart: DEFAULT_POLICY,
   });
   assert.equal(Object.isFrozen(plan), true);
@@ -162,7 +163,7 @@ test('a ready pinned machine exposes the recorded embedding flags and the superv
   // The recorded flags are one frozen constant, not a copy rebuilt per call.
   assert.deepEqual(
     EMBEDDING_SERVER_ARGS,
-    ['--embedding', '--pooling', 'last', '-b', '8192', '-ub', '8192'],
+    ['--embedding', '--pooling', 'last', '-c', '8192', '-b', '8192', '-ub', '8192'],
   );
   assert.equal(Object.isFrozen(EMBEDDING_SERVER_ARGS), true);
   assert.equal(plan.commandArgs, EMBEDDING_SERVER_ARGS);
@@ -303,7 +304,7 @@ test('the embedding hand-off ignores caller-supplied flags, a port or a ubatch o
   assert.equal(handOff.options.commandArgs, EMBEDDING_SERVER_ARGS);
   assert.deepEqual(
     handOff.options.commandArgs,
-    ['--embedding', '--pooling', 'last', '-b', '8192', '-ub', '8192'],
+    ['--embedding', '--pooling', 'last', '-c', '8192', '-b', '8192', '-ub', '8192'],
   );
   assert.equal(handOff.options.port, undefined);
   assert.equal(handOff.options.contextSize, undefined);
@@ -323,4 +324,26 @@ test('the recorded embedding flags raise the logical and physical batch to the s
   assert.equal(EMBEDDING_SERVER_ARGS[ubatch + 1], '8192');
   assert.equal(EMBEDDING_SERVER_ARGS[batch + 1], EMBEDDING_SERVER_ARGS[ubatch + 1]);
   assert.equal(Object.isFrozen(EMBEDDING_SERVER_ARGS), true);
+});
+
+test('the recorded embedding context is the recommendation cap and is not below the batch', () => {
+  // The wizard's memory estimate (hardware-probe.mjs) counts the policy's embedding context, so the
+  // recorded plan must pin the same number: at the pinned b12426 build --ctx-size defaults to 0 and
+  // llama_context then uses the model's trained context, which the delivered catalog records as
+  // 32768 for the pinned embedding weights, while the estimate would count a fraction of that.
+  // llama_context also clamps n_batch to n_ctx for a causal model, so a context below the batch would
+  // silently shrink the batch the batch slice records.
+  const context = EMBEDDING_SERVER_ARGS.indexOf('-c');
+  const batch = EMBEDDING_SERVER_ARGS.indexOf('-b');
+  assert.notEqual(context, -1, 'the plan pins the embedding context');
+  assert.equal(EMBEDDING_SERVER_ARGS[context + 1], String(RECOMMENDED_EMBEDDING_CONTEXT_TOKENS));
+  assert.equal(EMBEDDING_SERVER_ARGS[context + 1], '8192');
+  assert.ok(context < batch, 'the context precedes the batch flags');
+  assert.ok(
+    Number(EMBEDDING_SERVER_ARGS[context + 1]) >= Number(EMBEDDING_SERVER_ARGS[batch + 1]),
+    'the recorded context is not below the recorded batch',
+  );
+  // Exactly one context and one pooling switch: the plan cannot set conflicting values.
+  assert.equal(EMBEDDING_SERVER_ARGS.filter((value) => value === '-c').length, 1);
+  assert.equal(EMBEDDING_SERVER_ARGS.filter((value) => value === '--pooling').length, 1);
 });
