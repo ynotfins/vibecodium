@@ -1,6 +1,6 @@
 # Vibecodium Technology Radar
 
-> Doc class: living · Owner: tech-scout · Last reviewed: 2026-11-28
+> Doc class: living - Owner: tech-scout - Last reviewed: 2026-11-28
 
 Maintained by the `tech-scout` sub-agent. Every component the product ships or the build depends on has one row. A row is reviewed by its "Next review" date, at every milestone start, and whenever its component changes. The docs check warns on overdue rows; a new dependency without a row fails the drift check.
 
@@ -34,7 +34,7 @@ Rings: `adopt` (in use, keep), `trial` (in use, under evaluation), `assess` (wat
 | Autonomous lane | OpenHands Agent Canvas | 1.43.0 stable, `main` edge (workstation) | 1.46.0 (2026-11-25, adoptable 2026-12-02; GitHub `v1.46.0` and npm `@openhands/agent-canvas` agree) | 2026-11-27 | - | trial | 2026-12-04 |
 | Installer | Inno Setup | VSCodium default | 7.1.1 (`is-7_1_1`, 2026-10-28) is the latest release | 2026-11-27 | WiX v6+ (fee EULA), MSIX | adopt | 2026-12-11 |
 | CI platform | GitHub Actions on `ubuntu-latest` (preinstalled Node) | - | - | 2026-11-20 | - | adopt | 2026-12-04 |
-| CI action: checkout | `actions/checkout` pinned by SHA `3d3c42e5…` | v7.0.1 (same pin as upstream VSCodium workflows) | v7.0.1 (2026-07-20) is the latest release, so the SHA pin is current | 2026-11-27 | - | adopt | 2026-12-11 |
+| CI action: checkout | `actions/checkout` pinned by SHA `3d3c42e5...` | v7.0.1 (same pin as upstream VSCodium workflows) | v7.0.1 (2026-07-20) is the latest release, so the SHA pin is current | 2026-11-27 | - | adopt | 2026-12-11 |
 | Build toolchain: Git | Git for Windows (Git Bash runs the build scripts) | 2.55.0.windows.5 | - | 2026-11-20 | - | adopt | 2026-12-04 |
 | Build toolchain: jq | jq | 1.8.2 | 1.8.2 | 2026-11-20 | - | adopt | 2026-12-04 |
 | Build toolchain: 7-Zip | 7-Zip | installed (Program Files) | - | 2026-11-20 | - | adopt | 2026-12-04 |
