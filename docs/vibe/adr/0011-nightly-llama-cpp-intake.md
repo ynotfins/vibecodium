@@ -64,10 +64,15 @@ review decide the pin instead.
    `https://github.com/<source>/releases/download/<version>/<file>.zip`; a loopback `http` pin is the
    local test seam and is exempt) and the enforced seven-day rule are delivered in
    `src/stable/runtime/sidecar.mjs` and `vibe/tools/sidecar-intake.mjs`, which `verify` runs as its own
-   step, so the manifest branch of this gate is met by the binding plus the enforced rule, while the
-   cross-process lock remains open. A signed or authenticated manifest remains an optional hardening
-   route that would also stop a rewritten manifest from naming another canonical asset and rewriting its
-   digest; the signing route stays owner-parked and the notices file ships. The
+   step, so the manifest branch of this gate is met by the binding plus the enforced rule. Amended
+   2026-11-27 (same day): the cross-process lock and the descriptor-bound part-file read are delivered
+   in `src/stable/runtime/sidecar.mjs` — an exclusive-create `.vibecodium-install.lock` per target
+   directory with a bounded wait of about 1 s, pid/timestamp staleness and token-checked release, and a `wx+`
+   part file whose bytes are read back, hashed and parsed through the descriptor that received them —
+   so the manifest, cross-process lock and descriptor-bound part-file branches of this gate are now met
+   as code, while the installer-owned directory wiring stays open (M6/M12). A signed or authenticated manifest remains an
+   optional hardening route that would also stop a rewritten manifest from naming another canonical
+   asset and rewriting its digest; the signing route stays owner-parked and the notices file ships. The
    owned-directory capability is now delivered as code (`../design/m3-sidecar-binary.md`,
    `src/stable/runtime/app-data.mjs`): the installer derives and proves `<root>/runtime/<platformKey>/<id>-<version>`
    from an `ownedRoot` and the wizard accepts `sidecar.appDataRoot`; the gate stays open until the wired
@@ -101,7 +106,7 @@ review decide the pin instead.
    review is 2026-12-03, when the `v1.1.0` build (`b12774`) becomes eligible if its digests verify; the
    review must still update the radar row with the seven-day evidence, because the row is the readable
    record, while the intake policy and the installer now refuse a pin younger than seven days on their own.
-- The signing route, the manifest-authentication route, the Microsoft runtime pin, the host wiring that
-   supplies the installer-owned application-data root and the cross-process lock with its
-   descriptor-bound part-file read remain open M3/M12 work, with the signing route parked for the owner.
-   The notices file ships.
+- The signing route, the manifest-authentication route, the Microsoft runtime pin and the host wiring
+   that supplies the installer-owned application-data root remain open M3/M12 work, with the signing
+   route parked for the owner. The cross-process lock and the descriptor-bound part-file read are
+   delivered in `src/stable/runtime/sidecar.mjs`. The notices file ships.

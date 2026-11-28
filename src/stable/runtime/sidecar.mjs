@@ -2,9 +2,11 @@
 //
 // Installs the `llama-server` files from a pinned archive: the manifest in `vibe/sidecars.json`
 // fixes the archive URL, byte size and SHA-256 and every runtime file's path, byte size and digest.
-// A transfer into a `.part` file is bounded by an idle and a total deadline, the archive digest is
-// checked before it is parsed, only the allowlisted entries of a plain ZIP are extracted, each file
-// is verified again before it is installed, and nothing is ever executed.
+// One install per target directory runs at a time across processes through an exclusive-create lock
+// file, a transfer into a `.part` file is bounded by an idle and a total deadline, the archive is
+// read back through the same descriptor that received it instead of by path, its digest is checked
+// before it is parsed, only the allowlisted entries of a plain ZIP are extracted, each file is
+// verified again before it is installed, and nothing is ever executed.
 //
 // The install is idempotent: a target directory whose files already match the pin is reported as
 // skipped without opening a socket, so the first-run wizard can call it offline.
@@ -12,15 +14,23 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
   chmodSync,
+  closeSync,
+  constants,
   createReadStream,
-  createWriteStream,
+  existsSync,
+  fsyncSync,
+  fstatSync,
+  linkSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   realpathSync,
   renameSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs';
 import path from 'node:path';
 import { inflateRawSync } from 'node:zlib';
@@ -48,6 +58,18 @@ export const MAX_TOTAL_TIMEOUT_MS = 3_600_000;
 export const DEFAULT_TOTAL_TIMEOUT_MS = 600_000;
 export const HASH_CHUNK_BYTES = 1024 * 1024;
 export const MAX_ZIP_ENTRIES = 4096;
+
+// One install per directory is serialized across processes: the loser waits this long for a live
+// holder, then fails `busy`. The hard stale bound only matters when a holder died and its recorded pid
+// cannot be checked (a reused pid or a corrupted record); it exceeds the largest bounded install.
+export const LOCK_WAIT_MS = 1_000;
+export const LOCK_STALE_MS = 2 * 60 * 60 * 1000;
+const LOCK_RETRY_MS = 100;
+const LOCK_MAX_RECORD_BYTES = 1024;
+const LOCK_FILE_NAME = '.vibecodium-install.lock';
+// Open the record read-only and, where the platform supports it, refuse to follow a symlink at open and
+// to block on a FIFO swap; the opened handle is what is stat'ed and read.
+const LOCK_OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 // ADR-0011 decision 2/7: a nightly must be public for at least this long before we adopt it; the intake
 // policy, the installer and the `sidecar-intake` verify step enforce the wait, not the radar review.
 export const INTAKE_MIN_PUBLIC_DAYS = 7;
@@ -1018,47 +1040,203 @@ function validateInteger(value, label, minimum, maximum, fallback) {
   return value;
 }
 
-function waitForDrain(stream, signal) {
-  return new Promise((resolve, reject) => {
-    if (stream.destroyed || stream.writableEnded) {
-      reject(new Error('write failed'));
-      return;
-    }
-    const settle = () => {
-      stream.removeListener('drain', onDrain);
-      stream.removeListener('error', onError);
-      stream.removeListener('close', onClose);
-      if (signal) {
-        try { signal.removeEventListener('abort', onAbort); } catch { /* ignore */ }
-      }
-    };
-    const onDrain = () => { settle(); resolve(); };
-    const onError = () => { settle(); reject(new Error('write failed')); };
-    const onClose = () => { settle(); reject(new Error('write closed')); };
-    const onAbort = () => { settle(); reject(new Error('write aborted')); };
-    stream.once('drain', onDrain);
-    stream.once('error', onError);
-    stream.once('close', onClose);
-    if (signal) {
-      if (signal.aborted) {
-        onAbort();
-        return;
-      }
-      signal.addEventListener('abort', onAbort, { once: true });
-    }
-  });
+// --- Cross-process install lock ---
+//
+// The lock is an exclusive-create file in the target directory, so two application instances (and
+// two processes) cannot install into one runtime directory at the same time. The record carries the
+// writer pid, its creation time and a random token, and only a lock that is provably stale is broken:
+// a recorded pid that is no longer alive, a record that names this process (a leftover or a reused
+// pid), or a record and file whose timestamps are both older than LOCK_STALE_MS.
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function closeWriter(writer) {
-  return new Promise((resolve, reject) => {
-    if (writer.closed) {
-      resolve();
-      return;
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return Boolean(error) && error.code !== 'ESRCH';
+  }
+}
+
+function readLockRecord(lockPath) {
+  let before;
+  try {
+    before = lstatSync(lockPath);
+  } catch (error) {
+    return { missing: Boolean(error) && error.code === 'ENOENT' };
+  }
+  if (before.isSymbolicLink() || !before.isFile() || before.size > LOCK_MAX_RECORD_BYTES) {
+    return { regular: false, mtimeMs: before.mtimeMs };
+  }
+  let fd;
+  try {
+    fd = openSync(lockPath, LOCK_OPEN_FLAGS);
+  } catch {
+    return { regular: false, mtimeMs: before.mtimeMs };
+  }
+  try {
+    const info = fstatSync(fd);
+    if (!info.isFile() || info.size > LOCK_MAX_RECORD_BYTES) return { regular: false, mtimeMs: info.mtimeMs };
+    const buffer = Buffer.alloc(LOCK_MAX_RECORD_BYTES);
+    const length = readSync(fd, buffer, 0, LOCK_MAX_RECORD_BYTES, 0);
+    if (length !== info.size) return { regular: false, mtimeMs: info.mtimeMs };
+    let record = null;
+    try {
+      record = JSON.parse(buffer.toString('utf8', 0, length));
+    } catch {
+      record = null;
     }
-    writer.once('close', resolve);
-    writer.once('error', reject);
-    writer.end();
-  });
+    const token = record && typeof record === 'object' && typeof record.token === 'string' && /^[0-9a-f]{16}$/.test(record.token)
+      ? record.token
+      : null;
+    return { regular: true, record, token, mtimeMs: info.mtimeMs };
+  } catch {
+    return { regular: false, mtimeMs: before.mtimeMs };
+  } finally {
+    try { closeSync(fd); } catch { /* already closed */ }
+  }
+}
+
+function readLockState(lockPath) {
+  const found = readLockRecord(lockPath);
+  if (found.missing) return { missing: true, stale: false, token: null, regular: false, mtimeMs: null };
+  const base = { missing: false, stale: false, token: found.regular ? found.token : null, regular: Boolean(found.regular), mtimeMs: found.mtimeMs };
+  const age = Date.now() - found.mtimeMs;
+  if (!Number.isFinite(age)) return base;
+  if (!found.regular) {
+    // Never follow a planted link or read an oversized record; such a lock is held until the age bound.
+    return { ...base, stale: age > LOCK_STALE_MS };
+  }
+  const record = found.record;
+  const created = record && Number.isSafeInteger(record.createdAt) && record.createdAt > 0
+    ? record.createdAt
+    : found.mtimeMs;
+  const oldest = Math.max(created, found.mtimeMs);
+  if (Number.isFinite(oldest) && Date.now() - oldest > LOCK_STALE_MS) return { ...base, stale: true };
+  const pid = record && record.pid;
+  if (!Number.isSafeInteger(pid) || pid <= 0 || pid > 0x7fffffff) return base;
+  return { ...base, stale: pid === process.pid || !isProcessAlive(pid) };
+}
+
+async function acquireInstallLock(dir) {
+  const lockPath = path.join(dir, LOCK_FILE_NAME);
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    if (Date.now() >= deadline) fail('busy', 'this sidecar directory is already installing');
+    const token = randomBytes(8).toString('hex');
+    let fd;
+    try {
+      fd = openSync(lockPath, 'wx', 0o600);
+    } catch (error) {
+      if (!error || error.code !== 'EEXIST') fail('write-failed', 'the install lock cannot be created');
+    }
+    if (fd !== undefined) {
+      let failure = null;
+      try {
+        writeSync(fd, JSON.stringify({ pid: process.pid, createdAt: Date.now(), token }));
+        fsyncSync(fd);
+      } catch (error) {
+        failure = error;
+      } finally {
+        try { closeSync(fd); } catch { /* already closed */ }
+      }
+      if (failure !== null) {
+        // Do not leave an empty or half-written record behind: it would read as held for the age bound.
+        removeQuietly(lockPath);
+        fail('write-failed', 'the install lock cannot be created');
+      }
+      return { lockPath, token };
+    }
+    const state = readLockState(lockPath);
+    if (state.missing) {
+      await delay(LOCK_RETRY_MS);
+      continue;
+    }
+    if (state.stale) {
+      // One atomic rename takes the stale record out of the way, so exactly one waiter can win the
+      // break; the renamed file is then inspected, and a live lock that slipped in is put back unless
+      // another instance has created the lock path first.
+      const breakPath = `${lockPath}.break-${state.token ?? randomBytes(8).toString('hex')}`;
+      try {
+        renameSync(lockPath, breakPath);
+      } catch {
+        await delay(LOCK_RETRY_MS);
+        continue;
+      }
+      const taken = readLockRecord(breakPath);
+      const same = !taken.missing
+        && Boolean(taken.regular) === state.regular
+        && (state.token === null ? taken.mtimeMs === state.mtimeMs : taken.token === state.token);
+      if (same) {
+        removeQuietly(breakPath);
+        continue;
+      }
+      try {
+        if (!existsSync(lockPath)) {
+          linkSync(breakPath, lockPath);
+          removeQuietly(breakPath);
+        } else {
+          removeQuietly(breakPath);
+        }
+      } catch {
+        removeQuietly(breakPath);
+      }
+      await delay(LOCK_RETRY_MS);
+      continue;
+    }
+    await delay(LOCK_RETRY_MS);
+  }
+}
+
+function releaseInstallLock(lock) {
+  const found = readLockRecord(lock.lockPath);
+  if (found.missing || !found.regular) return;
+  const record = found.record;
+  if (record && typeof record === 'object' && record.token === lock.token) removeQuietly(lock.lockPath);
+}
+
+// The transfer and the digest both go through one descriptor: the `wx+` part file is read back by
+// offset from the very handle that received the bytes, so a host that swaps the path underneath the
+// installer cannot substitute a different archive between the write and the check.
+function writeAll(fd, bytes) {
+  let offset = 0;
+  while (offset < bytes.length) {
+    let written;
+    try {
+      written = writeSync(fd, bytes, offset, bytes.length - offset, null);
+    } catch {
+      fail('write-failed', 'the partial archive could not be written');
+    }
+    if (!Number.isSafeInteger(written) || written <= 0) fail('write-failed', 'the partial archive could not be written');
+    offset += written;
+  }
+}
+
+function readArchive(fd, expectedBytes) {
+  const buffer = Buffer.alloc(expectedBytes);
+  let offset = 0;
+  while (offset < expectedBytes) {
+    let read;
+    try {
+      read = readSync(fd, buffer, offset, expectedBytes - offset, offset);
+    } catch {
+      fail('invalid-archive', 'the downloaded archive cannot be read');
+    }
+    if (read === 0) fail('network-error', 'the download ended before the pinned size');
+    offset += read;
+  }
+  const probe = Buffer.alloc(1);
+  let extra = 0;
+  try {
+    extra = readSync(fd, probe, 0, 1, expectedBytes);
+  } catch {
+    extra = 0;
+  }
+  if (extra !== 0) fail('size-mismatch', 'the server sent more bytes than the pinned archive');
+  return buffer;
 }
 
 async function downloadArchive(target, partPath, options) {
@@ -1081,7 +1259,7 @@ async function downloadArchive(target, partPath, options) {
     idle = setTimeout(() => stop('stalled'), options.idleTimeoutMs);
   };
   const totalTimer = setTimeout(() => stop('timeout'), options.totalTimeoutMs);
-  let writer = null;
+  let fd = null;
   let received = 0;
   try {
     touch();
@@ -1117,20 +1295,16 @@ async function downloadArchive(target, partPath, options) {
         options.onProgress(Object.freeze({ received: 0, total: target.sizeBytes }));
       } catch { /* a progress display must not break the transfer */ }
     }
-    writer = createWriteStream(partPath, { flags: 'wx' });
-    writer.on('error', () => {});
+    try {
+      fd = openSync(partPath, 'wx+');
+    } catch {
+      fail('write-failed', 'the partial archive file cannot be created');
+    }
     for await (const chunk of body) {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       received += bytes.length;
       if (received > target.sizeBytes) fail('size-mismatch', 'the server sent more bytes than the pinned archive');
-      if (!writer.write(bytes)) {
-        try {
-          await waitForDrain(writer, controller.signal);
-        } catch {
-          if (controller.signal.aborted) fail(reason ?? 'aborted', 'the download was interrupted');
-          fail('write-failed', 'the partial archive could not be written');
-        }
-      }
+      writeAll(fd, bytes);
       touch();
       if (options.onProgress) {
         try {
@@ -1138,31 +1312,28 @@ async function downloadArchive(target, partPath, options) {
         } catch { /* a progress display must not break the transfer */ }
       }
     }
-    await closeWriter(writer);
-    writer = null;
     if (received !== target.sizeBytes) fail('network-error', 'the download ended before the pinned size');
+    try {
+      fsyncSync(fd);
+    } catch {
+      fail('write-failed', 'the partial archive could not be written');
+    }
+    const archive = readArchive(fd, target.sizeBytes);
+    closeSync(fd);
+    fd = null;
+    return archive;
   } catch (error) {
-    if (writer) {
-      const closing = writer;
-      writer = null;
-      await new Promise((resolve) => {
-        if (closing.closed) {
-          resolve();
-          return;
-        }
-        try {
-          closing.once('close', resolve);
-          closing.once('error', resolve);
-          closing.end();
-        } catch {
-          resolve();
-        }
-      });
+    if (fd !== null) {
+      try { closeSync(fd); } catch { /* already closed */ }
+      fd = null;
     }
     removeQuietly(partPath);
     if (error instanceof SidecarError) throw error;
     fail(reason ?? 'network-error', 'the runtime binary download failed');
   } finally {
+    if (fd !== null) {
+      try { closeSync(fd); } catch { /* already closed */ }
+    }
     if (idle) clearTimeout(idle);
     clearTimeout(totalTimer);
     if (options.signal) {
@@ -1216,32 +1387,34 @@ export async function installSidecar(sidecar, options = {}) {
   const slot = process.platform === 'win32' ? dir.toLowerCase() : dir;
   if (ACTIVE.has(slot)) fail('busy', 'this sidecar directory is already installing');
   ACTIVE.add(slot);
+  let lock = null;
   try {
     return await run();
   } finally {
+    if (lock !== null) releaseInstallLock(lock);
     ACTIVE.delete(slot);
   }
 
   async function run() {
     const existing = await inspectInstall(validated, resolved.target, dir);
     if (existing.verified) return installedSummary(validated, resolved.target, dir, false, true);
+    // The verified-install skip above stays lock-free so an offline refresh never waits; the download,
+    // extraction and install writes happen only after this process owns the directory's lock file.
+    lock = await acquireInstallLock(dir);
+    // A concurrent process may have completed this exact install while this one waited.
+    const raced = await inspectInstall(validated, resolved.target, dir);
+    if (raced.verified) return installedSummary(validated, resolved.target, dir, false, true);
     const partPath = path.join(dir, '.' + validated.id + '-' + validated.version + '.zip.part');
     inspectFile(partPath);
     removeQuietly(partPath);
     try {
-      await downloadArchive(resolved.target, partPath, {
+      const archive = await downloadArchive(resolved.target, partPath, {
         fetchImpl,
         onProgress: own.onProgress,
         signal: own.signal,
         idleTimeoutMs,
         totalTimeoutMs,
       });
-      let archive;
-      try {
-        archive = readFileSync(partPath);
-      } catch {
-        fail('invalid-archive', 'the downloaded archive cannot be read');
-      }
       if (createHash('sha256').update(archive).digest('hex') !== resolved.target.sha256) {
         fail('checksum-mismatch', 'the downloaded archive did not match the pinned digest');
       }

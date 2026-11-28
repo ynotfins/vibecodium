@@ -126,8 +126,10 @@ GitHub's release CDN signs it); anything else fails as `insecure-redirect`. Only
 size, the stream is counted against that size, and the finished 64 MiB-bounded file must hash to the
 pin (`size-mismatch`, `checksum-mismatch`). An idle gap, the total deadline and a caller abort fail as
 `stalled`, `timeout` and `aborted`; the partial file is removed rather than left for a resume that
-this version does not implement. One install per target directory may run at a time within this
-process (`busy`); a concurrent install from another process is not serialized.
+this version does not implement. One install per target directory runs at a time: the process-local
+`busy` guard rejects a second in-process call, and a concurrent install from another process is
+serialized by `.vibecodium-install.lock` (see the threat model below). The verified-install skip runs
+before the lock, so it never waits.
 
 ## Archive extraction
 
@@ -198,11 +200,34 @@ directory), and a hard link is indistinguishable from a regular file. The manife
 signed in this slice, so a caller who can rewrite both the manifest and the files can point the
 installer at anything; signing and an authenticated update path belong to the packaging slice. The
 recursive `mkdir` runs before the realpath check, so a pre-planted junction could create empty
-directories outside the target before the write is refused. The part file is read by path, so a local
-writer could swap it before the read; the same buffer is hashed and parsed, so nothing unverified is
-installed, but the read is not bound to the file that was hashed. The `busy` guard is process-local, so
-two application instances are not serialized and one can unlink the other's part file (every byte is
-re-verified, so integrity holds). `publishedAt` is now enforced, not just format-checked: `assertIntakePolicy`, `installSidecar` and the `sidecar-intake` verify step refuse a pin that has not been public for the seven-day window (`intake-too-recent`), and a pin dated in the future fails closed the same way; an invalid or unusable `now` is refused as `invalid-options` by the policy and the CLI, and a clock set before the pin's eligible date blocks the install rather than admitting a fresh nightly, while a forward-skewed clock (one set past the eligible date) still admits a pin younger than seven days (`installSidecar` takes no injectable `now`, so that skew is a residual risk). `source` and `version` are now bound to every remote archive URL: the loader requires exactly `https://github.com/<source>/releases/download/<version>/<file>.zip` with a plain `.zip` asset name (a loopback `http` pin is the local test seam and is exempt), so a rewritten manifest cannot keep the digests and point the installer at another repository. The binding is a loader-side validator and the window is a policy and installer check, not a signature: a caller who can rewrite the manifest can still name a different canonical upstream asset and rewrite its digest too, so a signed manifest would still close that residual risk, although the decision-7 manifest branch is already met by this binding and the enforced rule.
+directories outside the target before the write is refused. The part file is now written and read through one `wx+` descriptor: the archive is read back by offset
+from the handle that received it and that buffer is hashed and parsed, so a swap at the path cannot
+substitute a different ZIP between the write and the check. A cross-process exclusive-create lock file
+`.vibecodium-install.lock` now serializes installs into one directory: the loser waits `LOCK_WAIT_MS`
+(about 1 s plus one retry) for a live holder and then fails `busy` before any request or installed file (the target directory may be created), a record whose pid is dead,
+whose pid is this process (a leftover or a reused pid), or whose record and file mtime are both older
+than `LOCK_STALE_MS` (2 h) is broken, and a malformed, oversized or symlinked record is never followed
+and is held until that age bound. The record is read through one read-only descriptor capped at 1024
+bytes (`O_NOFOLLOW` where the platform has it) and the opened descriptor - not the path - is what is stat'ed and read, so
+a path swapped after the pre-open check cannot redirect what is read on a platform with `O_NOFOLLOW`;
+on Windows, where that flag is absent, the handle is still the one that is bounded, stat'ed and closed,
+but a swap could point it at another regular file. A FIFO swap cannot block the read because the handle
+is opened non-blocking and the regular-file check refuses it. A stale record is broken
+by one atomic rename into `<lock>.break-<token>` and removed only after the renamed file proves to be
+the same record (type, token and mtime), so exactly one waiter wins the break; a record that changed in
+the gap is restored unless another instance created the lock path first. Only the process whose on-disk token matches releases the lock, and the
+verified-install skip stays lock-free so an offline refresh never waits; a process that waited then
+re-inspects and adopts a runtime another process just installed instead of downloading it again.
+Residuals: the pid liveness check cannot tell a live unrelated process that reused a dead holder's pid
+from the real holder, so such a lock is only broken at the 2 h bound; a wall-clock jump forward past
+2 h during a live install makes the holder look stale, and a jump backwards delays a break by the same
+amount; `LOCK_WAIT_MS` bounds the wait
+rather than guaranteeing progress, so a slow install can make a second instance fail `busy` and the
+wizard retry; a write-capable local process can still delete a live lock and start a second install, and
+can replace installed files after the final hash (every byte is re-verified before it is installed, so
+integrity holds). A record that cannot be written is removed and the install fails `write-failed`; that
+branch is covered by inspection only, because the module binds `node:fs` directly and the suite has no
+seam to induce a write failure on an open handle. `publishedAt` is now enforced, not just format-checked: `assertIntakePolicy`, `installSidecar` and the `sidecar-intake` verify step refuse a pin that has not been public for the seven-day window (`intake-too-recent`), and a pin dated in the future fails closed the same way; an invalid or unusable `now` is refused as `invalid-options` by the policy and the CLI, and a clock set before the pin's eligible date blocks the install rather than admitting a fresh nightly, while a forward-skewed clock (one set past the eligible date) still admits a pin younger than seven days (`installSidecar` takes no injectable `now`, so that skew is a residual risk). `source` and `version` are now bound to every remote archive URL: the loader requires exactly `https://github.com/<source>/releases/download/<version>/<file>.zip` with a plain `.zip` asset name (a loopback `http` pin is the local test seam and is exempt), so a rewritten manifest cannot keep the digests and point the installer at another repository. The binding is a loader-side validator and the window is a policy and installer check, not a signature: a caller who can rewrite the manifest can still name a different canonical upstream asset and rewrite its digest too, so a signed manifest would still close that residual risk, although the decision-7 manifest branch is already met by this binding and the enforced rule.
 `targetDir` is a trusted caller surface (any absolute local directory, including a drive root) and
 `verifySidecarInstall` resolves it through the same helper, which creates the directory. The owned path
 narrows this: with `ownedRoot` the installer derives and proves the directory itself, so no caller path
@@ -221,11 +246,13 @@ follows a symlink; the Windows target is unaffected.
 The gates before enabling the installer by default or bundling the binary: an authenticated manifest
 (or a `source`-to-URL binding plus an enforced seven-day rule) because the digest protects only the
 pinned URL; and, for multi-process or POSIX use, a cross-process lock and a descriptor-bound part-file
-read. The binding and the enforced seven-day rule are delivered as code (amended 2026-11-27): the loader
+read. All three are now delivered as code (amended 2026-11-27): the loader
 binds each remote archive URL to the recorded source and tag, `assertIntakePolicy` and `installSidecar`
-refuse a pin younger than seven days, and `node vibe/tools/sidecar-intake.mjs` runs that check as its own
-`verify` step. A signed or authenticated manifest would additionally stop a rewritten manifest from
-choosing its own canonical asset, while the lock and descriptor-bound read remain open. The
+refuse a pin younger than seven days, `node vibe/tools/sidecar-intake.mjs` runs that check as its own
+`verify` step, `installSidecar` serializes a directory through `.vibecodium-install.lock`, and
+`downloadArchive` reads the archive back through the descriptor that received it. A signed or
+authenticated manifest would additionally stop a rewritten manifest from choosing its own canonical
+asset, so signing stays an optional hardening rather than an open gate. The
 installer-owned directory capability is delivered as code: `app-data.mjs` resolves the root,
 derives `<root>/runtime/<platformKey>/<id>-<version>` and proves containment, the sidecar installer
 accepts `ownedRoot` and refuses a caller `targetDir` alongside it, and the wizard accepts
@@ -245,7 +272,11 @@ idempotent skip with no request, the installer-owned `ownedRoot` derivation, ver
 escape, archive and entry digest/size failures, a missing entry, HTTP status,
 insecure redirect, an internal literal final host (including the embedded-IPv4 IPv6 forms and the
 `fe80::/10`, `fc00::/7` and `ff00::/8` ranges), a symlinked target or nested parent, ZIP64,
-multi-disk, encrypted and unsafe archive names, missing body, stall, total timeout, caller abort, the busy guard, invalid options,
+multi-disk, encrypted and unsafe archive names, missing body, stall, total timeout, caller abort, the
+process-local `busy` guard, invalid options, the cross-process install lock (a live foreign holder, a
+dead holder, the hard stale bound, malformed/oversized/symlinked records failing closed, a real second
+`node` process holding the lock, and release after a failed or aborted install), the descriptor-bound
+archive read against a swapped path, post-lock re-inspection,
 traversal/absolute/backslash/symlink archive entries, duplicate entries, an unsupported method, a
 truncated and a non-ZIP archive, an oversized entry, ignored directory and unlisted entries, bounded
 errors with no URL/body/injected-text echo and the supervisor executable contract.
