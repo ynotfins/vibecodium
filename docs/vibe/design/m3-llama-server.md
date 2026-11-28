@@ -1,6 +1,6 @@
 # M3 local llama-server supervisor
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-27
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-28
 >
 > The process supervisor for the local runtime. The module lives in
 > [llama-server.mjs](../../../src/stable/runtime/llama-server.mjs), its fake-server fixture in

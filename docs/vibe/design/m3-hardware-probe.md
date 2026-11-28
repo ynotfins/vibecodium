@@ -103,7 +103,7 @@ user can compare against a model, while free memory moves with every other open 
 | Apple silicon | `darwin` + `arm64` | unified memory, every layer, no GPU query needed |
 | Integrated or software GPU | any | CPU only, zero layers |
 | Chat pick | largest chat model that fits the chosen budget | otherwise the smallest, verdict `insufficient` (a GPU that cannot hold the smallest chat model first falls back to the RAM budget) |
-| Context | at most 8192 tokens for chat, 2048 for embeddings | larger model contexts are capped |
+| Context | at most 8192 tokens for chat, 8192 for embeddings | larger model contexts are capped; the embedding cap is the same number the first-run embedding plan pins with `-c` |
 | Threads | cores minus two, at least 1 and at most 16 | the editor keeps two cores |
 
 The verdict is `insufficient` when total memory is below 8 GiB or the smallest chat model does not fit
@@ -116,8 +116,9 @@ software adapter is present), `vram-capped`,
 chosen budget, or the embedding estimate exceeds the RAM budget), `context-capped` and `thread-cap`. The first-run wizard will merge them with the probe notices.
 
 The returned plan is frozen data: `version`, `verdict`, `acceleration` (`gpu`, `unified` or `cpu`),
-`gpuLayers`, `threads`, `contextSize` (the chat context; the embedding estimate uses its own 2048
-cap), `models.chat`, `models.embedding`, `estimatedChatMemoryBytes`,
+`gpuLayers`, `threads`, `contextSize` (the chat context; the embedding estimate uses its own cap,
+`RECOMMENDED_EMBEDDING_CONTEXT_TOKENS`, which the first-run embedding plan pins with `-c`),
+`models.chat`, `models.embedding`, `estimatedChatMemoryBytes`,
 `estimatedEmbeddingMemoryBytes`, `availableMemoryBytes` (the budget the
 chat model was measured against: the VRAM budget when offloading, otherwise 75% of total RAM),
 `totalMemoryBytes` and `notices`. The input hardware descriptor and the model list are never mutated
@@ -151,7 +152,10 @@ answers, no shell-out off Windows), the real child runner's absolute PowerShell 
 flags, timeout and output cap, and the policy over discrete, capped, integrated, software, unified,
 CPU-only, low-memory and too-large configurations. It also covers every rejected descriptor and model
 field without invoking a getter, frozen outputs, no input aliasing and a real read-only probe on the
-test host.
+test host. The embedding estimate is pinned to the recorded plan's context: for the catalog embedding
+model `estimatedEmbeddingMemoryBytes` equals `weights + 512 MiB + 8192 * 16 KiB` (1,310,239,232 bytes,
+about 1249.5 MiB), an embedding model trained at a smaller context still uses that smaller context
+rather than the cap, and the chat estimate, chat cap and every verdict and notice are unchanged.
 
 The full acceptance uses `node vibe/tools/verify.mjs --strict` and
 `node vibe/tools/docs-check.mjs --strict`.
@@ -161,5 +165,6 @@ The full acceptance uses `node vibe/tools/verify.mjs --strict` and
 The first-run wizard is delivered in [m3-first-run-wizard.md](m3-first-run-wizard.md); its start
 action now installs the pinned `llama-server` binary and passes the validated executable into the
 start plan. The remaining runtime work is to copy `vibe/models/catalog.json` into the packaged
-application (with `--embedding --pooling last -b 8192 -ub 8192` for the pinned embedding weights). Ollama
+application (with `--embedding --pooling last -c 8192 -b 8192 -ub 8192` for the pinned embedding
+weights, the `-c` value being `RECOMMENDED_EMBEDDING_CONTEXT_TOKENS`). Ollama
 detection and the supervisor's opt-in restart/back-off policy have since been delivered.
