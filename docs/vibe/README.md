@@ -43,6 +43,7 @@ Vibecodium is a standalone, Windows-first AI IDE built on VSCodium. This folder 
 | [design/m3-ollama.md](design/m3-ollama.md) | M3 local Ollama discovery: loopback /api/tags probe, bounded model projection, local chat and embedding selection, and the B1 preset overrides |
 | [design/m3-sidecar-binary.md](design/m3-sidecar-binary.md) | M3 pinned llama.cpp sidecar: the `vibe/sidecars.json` pin, digest-verified archive fetch, allowlisted ZIP extraction, idempotent executable install and the installer-owned `ownedRoot` directory under the application data root |
 | [design/m3-third-party-notices.md](design/m3-third-party-notices.md) | M3 third-party notices: the `vibe/notices.json` license ledger, verbatim texts pinned by SHA-256, and the generated notice document checked by `verify` |
+| [design/m3-local-smoke.md](design/m3-local-smoke.md) | M3 live local-runtime smoke: the opt-in install, download, start, auth, chat, stream, tool-request and embedding proof on a real machine, its safe working directory, its evidence and its bounds |
 | [legal/THIRD-PARTY-NOTICES.md](legal/THIRD-PARTY-NOTICES.md) | Generated third-party notices for the pinned runtime components and models |
 | [CHANGELOG.md](CHANGELOG.md) | User-visible changes per release |
 | [SECURITY.md](SECURITY.md) | Security model and how to report issues |

@@ -274,7 +274,10 @@ The panel is unit-tested against the same fake `vscode` API as the provider setu
 extension-host smoke of this panel and a rebuilt-app screenshot remain M6/M12 integration work; the
 built `Vibecodium.exe` cannot start under this host ACL. The start action can now install the pinned
 runtime, but a real download and start are still a manual smoke because the tests inject the
-installer.
+installer. That manual smoke now exists and passed on 2026-11-28:
+[`node vibe/tools/local-runtime-smoke.mjs`](../../../vibe/tools/local-runtime-smoke.mjs) installs the
+pinned sidecar, downloads both GGUFs, starts the real binary, proves the key, chats, streams, sends a
+tool definition and starts the embedding server (see [m3-local-smoke.md](m3-local-smoke.md)).
 
 ## Security boundary
 
@@ -407,15 +410,17 @@ Copy the installed files and `vibe/models/catalog.json` into the packaged applic
 verified installer and start-action wiring are delivered in
 [m3-sidecar-binary.md](m3-sidecar-binary.md)), place the generated third-party notice beside the
 installed files and the application (see [m3-third-party-notices.md](m3-third-party-notices.md)),
-supply the Microsoft VC++ 2015-2022 x64 runtime, and run one live install/start smoke on a clean Windows
-machine. The installer-owned runtime directory is delivered: the host configures `appDataRoot`, the
-installer derives `<root>/runtime/<platformKey>/<id>-<version>` and refuses a caller `targetDir`
-alongside it, and the wizard still keeps the legacy `targetDir` for a host that already owns a runtime.
-The embedding
-start plan and its supervisor hand-off are delivered above; the caller that actually starts and
-supervises that second process is the M6 index binding, its first consumer, and the wizard itself ships
-no process. That binding must smoke-start the pinned `b12426` archive with `EMBEDDING_SERVER_ARGS` before
-it relies on them. The frozen constant pins `-c 8192`, `-b 8192` and `-ub 8192`: at `b12426`
+supply the Microsoft VC++ 2015-2022 x64 runtime, and run the install/start smoke on a clean Windows
+machine (the loopback install/start proof on a development host is recorded in
+[m3-local-smoke.md](m3-local-smoke.md)). The installer-owned runtime directory is delivered: the host
+configures `appDataRoot`, the installer derives `<root>/runtime/<platformKey>/<id>-<version>` and
+refuses a caller `targetDir` alongside it, and the wizard still keeps the legacy `targetDir` for a host
+that already owns a runtime. The embedding start plan and its supervisor hand-off are delivered above;
+the caller that actually starts and supervises that second process is the M6 index binding, its first
+consumer, and the wizard itself ships no process. The opt-in loopback smoke already starts the pinned
+`b12426` archive with `EMBEDDING_SERVER_ARGS` and checks two vectors
+([m3-local-smoke.md](m3-local-smoke.md)); the M6 binding must still prove that tuple in the product path
+before relying on it. The frozen constant pins `-c 8192`, `-b 8192` and `-ub 8192`: at `b12426`
 `--ctx-size` defaults to 0 so an unpinned server would take the trained 32768-token context,
 `llama_context` sizes the physical batch as `min(n_batch, n_ubatch)`, clamps the logical batch to
 the context for a causal model, and the default `--batch-size` of 2048 would otherwise clamp the

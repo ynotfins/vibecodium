@@ -1,6 +1,6 @@
 # M3 local provider host
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-27
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-28
 >
 > The host bridge from the first-run wizard's validated start plan to the B1 request client. The module
 > lives in [local-provider.mjs](../../../src/stable/runtime/local-provider.mjs), its acceptance tests in
@@ -93,8 +93,10 @@ remote host. A `wizard` is a trusted caller surface in the same class as the sup
    target does, and a non-conforming resolver would be a deployment risk rather than a code path to a
    remote host. An IPv4-mapped loopback literal (`::ffff:127.0.0.1`) is normalised by the URL parser to
    `[::ffff:7f00:1]` and is refused, which is over-strict but fails closed.
-- The host wiring is unit-tested against the loopback fixture, not a real `b12426` binary; the live
-   loopback smoke with the pinned weights is still open (M3).
+- The host wiring is unit-tested against the loopback fixture. The provider client and supervisor now
+   also run against the real pinned `b12426` binary in the opt-in
+   [m3-local-smoke.md](m3-local-smoke.md), but that smoke drives the client directly rather than
+   through `createLocalProvider`, so the host bridge's own live path is still unexercised.
 
 ## Verification
 
