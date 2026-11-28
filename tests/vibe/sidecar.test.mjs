@@ -32,6 +32,11 @@ import {
 const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const SHIPPED = path.join(ROOT, 'vibe', 'sidecars.json');
 
+// The manifest now binds every remote archive URL to its recorded source and tag, so an injected-fetch
+// fixture uses the canonical GitHub release URL of the pinned build instead of an arbitrary host.
+const PINNED_URL = 'https://github.com/ggml-org/llama.cpp/releases/download/b12426/llama.zip';
+const PINNED_SECRET_URL = 'https://github.com/ggml-org/llama.cpp/releases/download/b12426/secret-path.zip';
+
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
@@ -184,7 +189,7 @@ function plainSidecar(overrides = {}) {
 
 function plainTarget(overrides = {}) {
   return {
-    url: 'https://example.com/llama.zip',
+    url: PINNED_URL,
     sha256: 'a'.repeat(64),
     sizeBytes: 10,
     executable: 'llama-server.exe',
@@ -560,7 +565,7 @@ test('installSidecar installs from an injected fetch without a socket', async (t
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
   const sidecar = makeSidecar({
-    url: 'https://example.com/llama.zip',
+    url: PINNED_URL,
     archive,
     files,
   });
@@ -570,7 +575,7 @@ test('installSidecar installs from an injected fetch without a socket', async (t
     targetDir: dir,
     fetchImpl: async (url) => {
       calls += 1;
-      assert.equal(url, 'https://example.com/llama.zip');
+      assert.equal(url, PINNED_URL);
       return {
         status: 200,
         url: 'https://release-assets.example/llama.zip?sp=r&sig=abc123',
@@ -587,7 +592,7 @@ test('installSidecar installs from an injected fetch without a socket', async (t
   assert.deepEqual(readFileSync(path.join(dir, 'llama-server.exe')), Buffer.from(entries[0].data));
 });
 
-function archiveResponse(archive, url = 'https://example.com/llama.zip') {
+function archiveResponse(archive, url = PINNED_URL) {
   return {
     status: 200,
     url,
@@ -618,7 +623,7 @@ test('a corrupt archive digest installs nothing', async (t) => {
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
   const sidecar = makeSidecar({
-    url: 'https://example.com/llama.zip',
+    url: PINNED_URL,
     archive,
     files,
     targetOverrides: { sha256: '0'.repeat(64) },
@@ -639,7 +644,7 @@ test('a pinned entry with a wrong digest or size fails before anything is instal
     Buffer.from(entry.data),
     index === 1 ? { sha256: '0'.repeat(64) } : {},
   ));
-  const digestSidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files: badDigest });
+  const digestSidecar = makeSidecar({ url: PINNED_URL, archive, files: badDigest });
   const dirOne = path.join(tempDir(t), 'digest');
   await expectFailure(installSidecar(digestSidecar, { platformKey: 'win32-x64',
     targetDir: dirOne,
@@ -652,7 +657,7 @@ test('a pinned entry with a wrong digest or size fails before anything is instal
     Buffer.from(entry.data),
     index === 1 ? { sizeBytes: Buffer.from(entry.data).length + 1 } : {},
   ));
-  const sizeSidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files: badSize });
+  const sizeSidecar = makeSidecar({ url: PINNED_URL, archive, files: badSize });
   const dirTwo = path.join(tempDir(t), 'size');
   await expectFailure(installSidecar(sizeSidecar, { platformKey: 'win32-x64',
     targetDir: dirTwo,
@@ -666,7 +671,7 @@ test('a missing allowlisted entry fails closed', async (t) => {
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
   files.push(fileEntry('ggml.dll', Buffer.from('not in the archive')));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
   const dir = path.join(tempDir(t), 'runtime');
   await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
@@ -679,7 +684,7 @@ test('HTTP failures, an insecure redirect and a missing body are bounded', async
   const entries = runtimeFiles('http');
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
   const dir = path.join(tempDir(t), 'runtime');
 
   await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
@@ -723,7 +728,7 @@ test('a stalled transfer, a total timeout and a caller abort are bounded and kee
   const entries = runtimeFiles('stall');
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
   const dir = path.join(tempDir(t), 'runtime');
 
   await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
@@ -758,7 +763,7 @@ test('a second concurrent install of the same directory is refused', async (t) =
   const entries = runtimeFiles('busy');
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
   const dir = path.join(tempDir(t), 'runtime');
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
@@ -783,7 +788,7 @@ test('install options and verification options are validated', async (t) => {
   const entries = runtimeFiles('options');
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
   const dir = path.join(tempDir(t), 'runtime');
 
   await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',}), 'invalid-options');
@@ -811,7 +816,7 @@ test('install options and verification options are validated', async (t) => {
 async function installArchive(t, entries, manifestEntries, code, options = {}) {
   const archive = makeZip(entries);
   const files = manifestEntries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files, ...options });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files, ...options });
   const dir = path.join(tempDir(t), 'runtime');
   await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
@@ -844,7 +849,7 @@ test('duplicate, unsupported, truncated and oversized archives fail closed', asy
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
   const truncated = archive.subarray(0, archive.length - 5);
-  const truncatedSidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive: truncated, files });
+  const truncatedSidecar = makeSidecar({ url: PINNED_URL, archive: truncated, files });
   const truncatedDir = path.join(tempDir(t), 'truncated');
   await expectFailure(installSidecar(truncatedSidecar, { platformKey: 'win32-x64',
     targetDir: truncatedDir,
@@ -852,7 +857,7 @@ test('duplicate, unsupported, truncated and oversized archives fail closed', asy
   }), 'invalid-archive');
   assertNoInstalledFiles(truncatedDir);
   const notZip = Buffer.from('not a zip at all');
-  const notZipSidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive: notZip, files });
+  const notZipSidecar = makeSidecar({ url: PINNED_URL, archive: notZip, files });
   const notZipDir = path.join(tempDir(t), 'not-zip');
   await expectFailure(installSidecar(notZipSidecar, { platformKey: 'win32-x64',
     targetDir: notZipDir,
@@ -874,7 +879,7 @@ test('a directory entry and an unlisted file in the archive are ignored', async 
     { name: 'docs/README.md', data: 'ignored' },
   ]);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
   const dir = path.join(tempDir(t), 'runtime');
   const result = await installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
@@ -888,14 +893,14 @@ test('errors and results never echo the URL, an entry body or the injected error
   const entries = runtimeFiles('leak');
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/secret-path/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_SECRET_URL, archive, files });
   const dir = path.join(tempDir(t), 'runtime');
   let message = '';
   await assert.rejects(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
     fetchImpl: async () => ({
       status: 500,
-      url: 'https://example.com/secret-path/llama.zip',
+      url: PINNED_SECRET_URL,
       headers: { get: () => null },
       body: {
         cancel: async () => {},
@@ -908,7 +913,7 @@ test('errors and results never echo the URL, an entry body or the injected error
     assert.equal(error.status, 500);
     return true;
   });
-  assert.ok(!message.includes('example.com'));
+  assert.ok(!message.includes('github.com'));
   assert.ok(!message.includes('secret-path'));
   assert.ok(!message.includes('SECRET-BODY'));
 
@@ -926,14 +931,14 @@ test('errors and results never echo the URL, an entry body or the injected error
   const good = await (async () => {
     const okArchive = makeZip(entries);
     const okFiles = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-    const okSidecar = makeSidecar({ url: 'https://example.com/secret-path/llama.zip', archive: okArchive, files: okFiles });
+    const okSidecar = makeSidecar({ url: PINNED_SECRET_URL, archive: okArchive, files: okFiles });
     return installSidecar(okSidecar, { platformKey: 'win32-x64',
       targetDir: dir,
-      fetchImpl: async () => archiveResponse(okArchive, 'https://example.com/secret-path/llama.zip'),
+      fetchImpl: async () => archiveResponse(okArchive, PINNED_SECRET_URL),
     });
   })();
   const serialized = JSON.stringify(good);
-  assert.ok(!serialized.includes('example.com'));
+  assert.ok(!serialized.includes('github.com'));
   assert.ok(!serialized.includes('secret-path'));
 });
 
@@ -941,7 +946,7 @@ test('the installed executable satisfies the supervisor path contract', async (t
   const entries = runtimeFiles('contract');
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
   const dir = path.join(tempDir(t), 'runtime');
   const result = await installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
@@ -964,7 +969,7 @@ test('a final URL on an internal literal host is refused when the pin was not lo
   const entries = runtimeFiles('internal');
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
   const dir = path.join(tempDir(t), 'runtime');
   const hosts = [
     'https://' + ['127', '0', '0', '1'].join('.') + '/llama.zip',
@@ -1001,7 +1006,7 @@ test('a symlinked target directory or nested parent is refused', async (t) => {
   const entries = runtimeFiles('symlink-dir');
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
   const root = tempDir(t);
   const real = path.join(root, 'real');
   mkdirSync(real);
@@ -1029,7 +1034,7 @@ test('a symlinked target directory or nested parent is refused', async (t) => {
   const nestedArchive = makeZip(nestedEntries);
   const nestedFiles = nestedEntries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
   const nested = makeSidecar({
-    url: 'https://example.com/llama.zip',
+    url: PINNED_URL,
     archive: nestedArchive,
     files: nestedFiles,
     executable: 'linkd/llama-server.exe',
@@ -1045,7 +1050,7 @@ test('ZIP64, multi-disk, encrypted and unsafe archive names fail closed', async 
   const entries = runtimeFiles('zipflags');
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const make = (badArchive) => makeSidecar({ url: 'https://example.com/llama.zip', archive: badArchive, files });
+  const make = (badArchive) => makeSidecar({ url: PINNED_URL, archive: badArchive, files });
   const dir = path.join(tempDir(t), 'runtime');
 
   const zip64 = patchEocd(patchEocd(archive, 8, 0xffff), 10, 0xffff);
@@ -1063,7 +1068,7 @@ test('ZIP64, multi-disk, encrypted and unsafe archive names fail closed', async 
   const encrypted = makeZip(entries.map((entry) => ({ ...entry, flags: 1 })));
   const encryptedFiles = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
   await expectFailure(installSidecar(makeSidecar({
-    url: 'https://example.com/llama.zip',
+    url: PINNED_URL,
     archive: encrypted,
     files: encryptedFiles,
   }), { platformKey: 'win32-x64',
@@ -1089,7 +1094,7 @@ test('a nested executable path is installed inside the target directory only', a
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
   const sidecar = makeSidecar({
-    url: 'https://example.com/llama.zip',
+    url: PINNED_URL,
     archive,
     files,
     executable: 'bin/llama-server.exe',
@@ -1220,7 +1225,7 @@ test('the archive request is one credential-free GET and only an allowed final U
   const entries = runtimeFiles('request');
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
   const dir = path.join(tempDir(t), 'runtime');
   const calls = [];
   const result = await installSidecar(sidecar, { platformKey: 'win32-x64',
@@ -1232,7 +1237,7 @@ test('the archive request is one credential-free GET and only an allowed final U
   });
   assert.equal(result.installed, true);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, 'https://example.com/llama.zip');
+  assert.equal(calls[0].url, PINNED_URL);
   assert.equal(calls[0].init.method, 'GET');
   assert.equal(calls[0].init.redirect, 'follow');
   assert.deepEqual(calls[0].init.headers, { accept: 'application/zip' });
@@ -1265,14 +1270,14 @@ test('a streamed archive that exceeds or falls short of the pin fails and leaves
   const entries = runtimeFiles('stream');
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
 
   const overDir = path.join(tempDir(t), 'over');
   await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: overDir,
     fetchImpl: async () => ({
       status: 200,
-      url: 'https://example.com/llama.zip',
+      url: PINNED_URL,
       headers: { get: () => null },
       body: (async function* body() {
         yield archive;
@@ -1288,7 +1293,7 @@ test('a streamed archive that exceeds or falls short of the pin fails and leaves
     targetDir: underDir,
     fetchImpl: async () => ({
       status: 200,
-      url: 'https://example.com/llama.zip',
+      url: PINNED_URL,
       headers: { get: () => null },
       body: (async function* body() {
         yield archive.subarray(0, archive.length - 1);
@@ -1371,7 +1376,7 @@ test('a successful install removes the archive and leaves no temporary file', as
   const entries = runtimeFiles('clean');
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
   const dir = path.join(tempDir(t), 'runtime');
   const result = await installSidecar(sidecar, { platformKey: 'win32-x64',
     targetDir: dir,
@@ -1386,7 +1391,7 @@ test('a failed rename leaves no temporary file and no unverified file; the skip 
   const entries = runtimeFiles('rename');
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
   const dir = path.join(tempDir(t), 'runtime');
   mkdirSync(path.join(dir, 'llama.dll'), { recursive: true });
   await expectFailure(installSidecar(sidecar, { platformKey: 'win32-x64',
@@ -1405,7 +1410,7 @@ test('an unsafe archive entry name is not echoed in the error', async (t) => {
   const entries = runtimeFiles('echo');
   const archive = makeZip([...entries, { name: '/secret/evil.dll', data: 'x' }]);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/secret-path/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_SECRET_URL, archive, files });
   const dir = path.join(tempDir(t), 'runtime');
   let message = '';
   await assert.rejects(installSidecar(sidecar, { platformKey: 'win32-x64',
@@ -1418,7 +1423,7 @@ test('an unsafe archive entry name is not echoed in the error', async (t) => {
   });
   assert.ok(!message.includes('secret'));
   assert.ok(!message.includes('evil.dll'));
-  assert.ok(!message.includes('example.com'));
+  assert.ok(!message.includes('github.com'));
   assertNoInstalledFiles(dir);
 });
 
@@ -1483,7 +1488,7 @@ test('ownedRoot is required or exclusive and never accepts a caller directory', 
   const entries = runtimeFiles('owned-options');
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
   const root = tempDir(t);
   const targetDir = path.join(root, 'runtime');
 
@@ -1505,7 +1510,7 @@ test('an ownedRoot the installer cannot own is refused as invalid-destination', 
   const entries = runtimeFiles('owned-escape');
   const archive = makeZip(entries);
   const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
-  const sidecar = makeSidecar({ url: 'https://example.com/llama.zip', archive, files });
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
   const root = tempDir(t);
   let fetched = 0;
   const fetchImpl = async () => {

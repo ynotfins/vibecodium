@@ -202,8 +202,7 @@ directories outside the target before the write is refused. The part file is rea
 writer could swap it before the read; the same buffer is hashed and parsed, so nothing unverified is
 installed, but the read is not bound to the file that was hashed. The `busy` guard is process-local, so
 two application instances are not serialized and one can unlink the other's part file (every byte is
-re-verified, so integrity holds). `publishedAt` is format-checked only: the seven-day adoption rule is a
-process control (radar review), not enforced at load. `source` is recorded but not tied to the URL host.
+re-verified, so integrity holds). `publishedAt` is now enforced, not just format-checked: `assertIntakePolicy`, `installSidecar` and the `sidecar-intake` verify step refuse a pin that has not been public for the seven-day window (`intake-too-recent`), and a pin dated in the future fails closed the same way; an invalid or unusable `now` is refused as `invalid-options` by the policy and the CLI, and a clock set before the pin's eligible date blocks the install rather than admitting a fresh nightly, while a forward-skewed clock (one set past the eligible date) still admits a pin younger than seven days (`installSidecar` takes no injectable `now`, so that skew is a residual risk). `source` and `version` are now bound to every remote archive URL: the loader requires exactly `https://github.com/<source>/releases/download/<version>/<file>.zip` with a plain `.zip` asset name (a loopback `http` pin is the local test seam and is exempt), so a rewritten manifest cannot keep the digests and point the installer at another repository. The binding is a loader-side validator and the window is a policy and installer check, not a signature: a caller who can rewrite the manifest can still name a different canonical upstream asset and rewrite its digest too, so a signed manifest would still close that residual risk, although the decision-7 manifest branch is already met by this binding and the enforced rule.
 `targetDir` is a trusted caller surface (any absolute local directory, including a drive root) and
 `verifySidecarInstall` resolves it through the same helper, which creates the directory. The owned path
 narrows this: with `ownedRoot` the installer derives and proves the directory itself, so no caller path
@@ -222,7 +221,12 @@ follows a symlink; the Windows target is unaffected.
 The gates before enabling the installer by default or bundling the binary: an authenticated manifest
 (or a `source`-to-URL binding plus an enforced seven-day rule) because the digest protects only the
 pinned URL; and, for multi-process or POSIX use, a cross-process lock and a descriptor-bound part-file
-read. The installer-owned directory capability is delivered as code: `app-data.mjs` resolves the root,
+read. The binding and the enforced seven-day rule are delivered as code (amended 2026-11-27): the loader
+binds each remote archive URL to the recorded source and tag, `assertIntakePolicy` and `installSidecar`
+refuse a pin younger than seven days, and `node vibe/tools/sidecar-intake.mjs` runs that check as its own
+`verify` step. A signed or authenticated manifest would additionally stop a rewritten manifest from
+choosing its own canonical asset, while the lock and descriptor-bound read remain open. The
+installer-owned directory capability is delivered as code: `app-data.mjs` resolves the root,
 derives `<root>/runtime/<platformKey>/<id>-<version>` and proves containment, the sidecar installer
 accepts `ownedRoot` and refuses a caller `targetDir` alongside it, and the wizard accepts
 `sidecar.appDataRoot` and hands both effects `{ ownedRoot, platformKey }` (the installer also gets its
@@ -246,6 +250,19 @@ traversal/absolute/backslash/symlink archive entries, duplicate entries, an unsu
 truncated and a non-ZIP archive, an oversized entry, ignored directory and unlisted entries, bounded
 errors with no URL/body/injected-text echo and the supervisor executable contract.
 
+`tests/vibe/sidecar-intake.test.mjs` covers the source-to-URL binding (another host, owner, repository,
+tag, an extra segment, a non-`.zip` asset, a missing or encoded asset name, an explicit port, a
+non-canonical host spelling, a trailing slash and a non-release path), the loopback `http` exemption and
+the `https` loopback boundary, the exact seven-day boundary and a pin dated in the future, an unusable or
+accessor-backed `now`, the installer's refusal before any fetch or write, offline verification staying
+independent of the window, and the `sidecar-intake` CLI pass, fail and `--now` cases.
+
+The `sidecar-intake` verify step reads the host clock: it fails on a host clocked before a pin's eligible
+date and, because `verify` runs it without `--now`, it gates slices unrelated to the runtime for seven
+days after every re-pin until the window passes. That is the intended consequence of ADR-0011
+decision 2, and `--now YYYY-MM-DD` reproduces a recorded date. `installSidecar` takes no injectable
+`now`, so a forward-skewed host clock would still admit a pin younger than seven days, as recorded above.
+
 The full acceptance uses `node vibe/tools/verify.mjs --strict` and
 `node vibe/tools/docs-check.mjs --strict`.
 
@@ -258,4 +275,8 @@ Microsoft VC++ 2015-2022 x64 redistributable to the radar and pin it,
 supply the Microsoft VC++ runtime, and run one live install/start smoke on a clean Windows machine.
 The first-run start action now calls `installSidecar` when no host-supplied `runtimePath` exists (see
 [m3-first-run-wizard.md](m3-first-run-wizard.md)), so the installer is no longer only a library. Keep the pin current from the radar, and
-re-check the seven-day rule and the per-file digests whenever the nightly advances. The nightly intake policy and the CPU/GPU backend matrix are decided in [ADR-0011](../adr/0011-nightly-llama-cpp-intake.md); the signing route remains owner-parked there and the Microsoft runtime pin remains M12 work.
+re-check the seven-day rule and the per-file digests whenever the nightly advances. The loader
+enforces the binding, and `assertIntakePolicy`, `installSidecar` and the `sidecar-intake` verify step
+enforce the wait, so a re-pin must also keep the URL exactly at
+`https://github.com/<source>/releases/download/<version>/<file>.zip` and will fail `verify` until the
+pin is seven days public; the radar row stays the human-readable evidence. The nightly intake policy and the CPU/GPU backend matrix are decided in [ADR-0011](../adr/0011-nightly-llama-cpp-intake.md); the signing route remains owner-parked there and the Microsoft runtime pin remains M12 work.
