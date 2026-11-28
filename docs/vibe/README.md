@@ -58,4 +58,4 @@ Vibecodium is a standalone, Windows-first AI IDE built on VSCodium. This folder 
 
 ## Checks
 
-`node vibe/tools/verify.mjs` runs the governance, agent-definition, documentation and third-party notices checks, then every test under `tests/vibe/`. It must pass before any commit.
+`node vibe/tools/verify.mjs` runs the governance, agent-definition, documentation, third-party notices and nightly-intake checks, then every test under `tests/vibe/`. It must pass before any commit.

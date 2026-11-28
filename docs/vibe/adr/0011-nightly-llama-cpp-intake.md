@@ -32,9 +32,11 @@ review decide the pin instead.
    because the loader does not.
 2. Choose a nightly whose publication is at least seven days old at review (the supply-chain rule in
    `ARCHITECTURE.md` principle 9), preferring the build a recent stable release names when one is
-   eligible. The seven-day gap is a review-time process control recorded in the radar row and the
-   review note; it is not enforced when the manifest loads (the loader only checks the date format), so
-   a re-pin without a review would not be caught by the product.
+   eligible. The seven-day gap is recorded in the radar row and the review note and is also enforced
+   by the intake policy, not by the loader's format check (amended 2026-11-27: `assertIntakePolicy`,
+   `installSidecar` and the `sidecar-intake` verify step refuse a pin younger than seven days as
+   `intake-too-recent`, and a pin dated in the future fails closed), so a re-pin without a review now
+   fails in the product instead of relying on the radar row alone.
 3. Ship CPU builds first (`win32-x64` today), because a CPU build runs
    on every machine the hardware probe can recommend and carries no GPU runtime of its own. A later
    target (for example `win32-arm64`) joins only with its own pin, size and license review, and a GPU
@@ -57,10 +59,15 @@ review decide the pin instead.
    default or the binary is bundled: an authenticated manifest, or a `source`-to-URL binding plus an
    enforced seven-day rule; an installer-owned directory under the application-data root, never a
    webview-supplied path; and, for multi-process or POSIX use, a cross-process lock and a
-   descriptor-bound part-file read. This decision relaxes and defers none of them. The loader-side
-   seven-day enforcement and the chosen manifest-authentication route (an authenticated manifest, or the
-   binding plus its enforced check) are hardening that must land before either the installer is enabled by
-   default or the binary is bundled; the signing route stays owner-parked and the notices file ships. The
+   descriptor-bound part-file read. This decision relaxes and defers none of them. Amended 2026-11-27:
+   the `source`-to-URL binding (every remote archive URL must be exactly
+   `https://github.com/<source>/releases/download/<version>/<file>.zip`; a loopback `http` pin is the
+   local test seam and is exempt) and the enforced seven-day rule are delivered in
+   `src/stable/runtime/sidecar.mjs` and `vibe/tools/sidecar-intake.mjs`, which `verify` runs as its own
+   step, so the manifest branch of this gate is met by the binding plus the enforced rule, while the
+   cross-process lock remains open. A signed or authenticated manifest remains an optional hardening
+   route that would also stop a rewritten manifest from naming another canonical asset and rewriting its
+   digest; the signing route stays owner-parked and the notices file ships. The
    owned-directory capability is now delivered as code (`../design/m3-sidecar-binary.md`,
    `src/stable/runtime/app-data.mjs`): the installer derives and proves `<root>/runtime/<platformKey>/<id>-<version>`
    from an `ownedRoot` and the wizard accepts `sidecar.appDataRoot`; the gate stays open until the wired
@@ -87,12 +94,13 @@ review decide the pin instead.
    data plus a documented review, not a build-time guess.
 - Residual risks accepted: the tag is an upstream prerelease build with no upstream code signature
    (the review-time digest and the reviewed manifest are the current trust anchor, and the manifest is
-   not authenticated until the authenticated-manifest gate lands), and the extracted
+   not authenticated, so a swapped manifest can still name another canonical upstream asset and rewrite
+   its digest; a signed manifest remains the optional route that would close this), and the extracted
    directory must be product-owned because a local writer could replace the binary after adoption.
 - The ADR does not approve a binary version; `vibe/sidecars.json` and `TECH_RADAR.md` do. The next
    review is 2026-12-03, when the `v1.1.0` build (`b12774`) becomes eligible if its digests verify; the
-   review must also confirm that the radar row still carries the seven-day evidence, because the loader
-   does not check it.
+   review must still update the radar row with the seven-day evidence, because the row is the readable
+   record, while the intake policy and the installer now refuse a pin younger than seven days on their own.
 - The signing route, the manifest-authentication route, the Microsoft runtime pin, the host wiring that
    supplies the installer-owned application-data root and the cross-process lock with its
    descriptor-bound part-file read remain open M3/M12 work, with the signing route parked for the owner.
