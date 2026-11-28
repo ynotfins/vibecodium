@@ -60,8 +60,8 @@ Three kinds of id are deliberately absent, because none of them is a pinnable ch
 - the apply models `morph-v3-fast` and `morph-v3-large` (Fast Apply is its own module);
 - the decision model `reflex`, whose only output modality is typed decisions;
 - the floating aliases `kimi-latest` and `deepseek-flash-latest`, which silently move to the newest
-  model of their family and so cannot be a pinned product default; neither alias appears in the
-  public feed read on 2026-11-28 at all, so neither is even a row to refuse.
+   model of their family and so cannot be a pinned product default; neither alias appears in the
+   public feed read on 2026-11-28 at all, so neither is even a row to refuse.
 
 ## Tier map and default
 
