@@ -420,7 +420,12 @@ function assertResponseUrl(value, allowLoopback) {
   } catch {
     fail('insecure-redirect', 'the download did not end on a validated URL');
   }
-  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+  // A query is allowed on the final hop only: Hugging Face answers `resolve/` with a redirect to its
+  // signed CDN (`*.cdn.hf.co?Policy=...&Signature=...`), and rejecting the query made every real model
+  // download fail while the mocked tests kept passing. The query cannot change what is installed -
+  // the bytes still have to match the pinned size and SHA-256 - and the value is never stored,
+  // logged or echoed, so a signature cannot leak through an error message.
+  if (parsed.username || parsed.password || parsed.hash) {
     fail('insecure-redirect', 'the download did not end on a validated URL');
   }
   const secure = parsed.protocol === 'https:';

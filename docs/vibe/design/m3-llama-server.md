@@ -352,5 +352,9 @@ resets the streak so a later crash restarts again, while `stableMs: 0` never res
 the back-off cancels the pending restart and spawns nothing; and a crash during an explicit `start()`
 still rejects with `server-exited` and never auto-restarts.
 
+The live loopback run against the pinned `b12426` binary - the authenticated start, the 401/200 key
+proof, chat, stream, a tool definition and the embedding vectors - is recorded in
+[m3-local-smoke.md](m3-local-smoke.md); the fixture above remains the offline acceptance.
+
 The full acceptance uses `node vibe/tools/verify.mjs --strict` and
 `node vibe/tools/docs-check.mjs --strict`.

@@ -551,12 +551,11 @@ test('a progress callback that throws does not break the download', async (t) =>
   assert.deepEqual(await readFile(result.path), content);
 });
 
-test('a final URL with a query or userinfo is refused', async (t) => {
+test('a final URL with a fragment or userinfo is refused', async (t) => {
   const content = Buffer.from('payload');
   const dir = await tempDir(t);
   const model = modelFor(content);
   const cases = [
-    'https://example.com/model.gguf' + '?token=abc',
     'https://example.com/model.gguf' + '#' + 'access_token=abc',
     'https://' + 'user' + ':' + 'pw' + '@example.com/model.gguf',
   ];
@@ -576,9 +575,38 @@ test('a final URL with a query or userinfo is refused', async (t) => {
     const error = await downloadModel(model, { destinationDir: dir, fetchImpl }).then(() => null, (caught) => caught);
     assert.equal(error.code, 'insecure-redirect');
     assert.ok(!error.message.includes('abc'));
-    assert.ok(!error.message.includes('supersecret'));
+    assert.ok(!error.message.includes('user') && !error.message.includes('example.com'));
   }
   assert.deepEqual(await readdir(dir), []);
+});
+
+test('a signed CDN query on the final URL is accepted', async (t) => {
+  const content = Buffer.from('payload');
+  const dir = await tempDir(t);
+  const model = modelFor(content);
+  // Hugging Face redirects `resolve/` to `*.cdn.hf.co?Policy=...&Signature=...`; the bytes still have to
+  // match the pinned digest, so the signature in the final URL is not a trust decision.
+  const finalUrl = 'https://us.aws.cdn.hf.co/models/model.gguf' + '?Policy=p&Signature=s&Key-Pair-Id=k';
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    url: finalUrl,
+    headers: new Headers({ 'content-type': 'application/octet-stream' }),
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(content);
+        controller.close();
+      },
+    }),
+  });
+  const events = [];
+  const result = await downloadModel(model, { destinationDir: dir, fetchImpl, onProgress: (event) => events.push(event) });
+  assert.deepEqual(await readFile(result.path), content);
+  assert.equal(result.verified, true);
+  assert.ok(events.length > 0);
+  for (const event of events) assert.deepEqual(Object.keys(event).sort(), ['received', 'resumedFrom', 'total']);
+  const serialized = JSON.stringify(result) + JSON.stringify(events);
+  assert.ok(!serialized.includes('us.aws.cdn.hf.co') && !serialized.includes('Signature'));
 });
 
 test('a symlinked destination or partial file is refused', async (t) => {
