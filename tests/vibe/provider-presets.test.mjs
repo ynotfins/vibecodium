@@ -57,7 +57,8 @@ test('the provider details match the verified contracts', () => {
   assert.equal(byId.get('openrouter').baseUrl, 'https://openrouter.ai/api/v1');
   assert.equal(byId.get('deepinfra').baseUrl, 'https://api.deepinfra.com/v1/openai');
   assert.equal(byId.get('requesty').baseUrl, 'https://router.requesty.ai/v1');
-  assert.equal(byId.get('llama-cpp').auth, 'none');
+  assert.equal(byId.get('llama-cpp').auth, 'bearer');
+  assert.equal(byId.get('llama-cpp').apiKeyRequired, false);
   assert.equal(byId.get('llama-cpp').local, true);
   assert.equal(byId.get('ollama').auth, 'none');
   assert.equal(byId.get('ollama').local, true);

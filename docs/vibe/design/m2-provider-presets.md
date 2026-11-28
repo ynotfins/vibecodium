@@ -1,6 +1,6 @@
 # M2 B1 provider presets and request client
 
-> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-25
+> Doc class: living - Owner: vibe-overseer - Last reviewed: 2026-11-27
 >
 > The dependency-free provider catalog and request client that M2 builds on. The catalog lives in
 > [provider-presets.mjs](../../../src/stable/gateway/provider-presets.mjs), the client in
@@ -32,13 +32,15 @@ environment-variable name, an `apiKeyRequired` flag, a frozen capability list an
 | `openrouter` | `openai-chat` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | none | chat, stream, tools, embeddings |
 | `requesty` | `openai-chat` | `https://router.requesty.ai/v1` | `REQUESTY_API_KEY` | none | chat, stream, tools, embeddings |
 | `openai-compatible` | `openai-chat` | `OPENAI_COMPATIBLE_BASE_URL` | `OPENAI_COMPATIBLE_API_KEY` (optional) | none | chat, stream, tools, embeddings |
-| `llama-cpp` | `openai-chat` | `http://127.0.0.1:8080/v1` | none | none | chat, stream, tools, embeddings |
+| `llama-cpp` | `openai-chat` | `http://127.0.0.1:8080/v1` | caller `apiKey` (optional) | none | chat, stream, tools, embeddings |
 | `ollama` | `openai-chat` | `http://127.0.0.1:11434/v1` | none | none | chat, stream, tools, embeddings |
 
 Built-in presets are normalized through the same validator as custom ones, so a built-in cannot
 carry an unvalidated URL, auth mode, capability, environment-variable name or model. A provider
 that requires a key must name the environment variable that holds it; a local preset defaults to
-no key requirement.
+no key requirement. A local preset can still authenticate as `bearer`: since M3 the `llama-cpp`
+preset is `auth: 'bearer'` with `apiKeyRequired: false`, so a client given the supervisor's
+`auth().apiKey` sends it while a plain unkeyed `llama-server` still works.
 
 ## Settings JSON
 
