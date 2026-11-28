@@ -70,9 +70,12 @@ supervisor boundary, not a binary version.
    bind-then-close race (wider on a caller-supplied fixed port) remains and a client that checks only
    `/health` would still accept a foreign listener between the child's exit and the next start.
 - The key must reach the B1 client: the `llama-cpp` preset uses `auth: 'bearer'` with
-   `apiKeyRequired: false`, and the host wiring that passes `runtime.auth().apiKey` to that client is
-   the next M3 slice. Until it lands, the product's own local chat path is unauthenticated against
-   this supervisor.
+   `apiKeyRequired: false`, and the local provider host
+   ([local-provider.mjs](../../../src/stable/runtime/local-provider.mjs),
+   [m3-local-provider.md](../design/m3-local-provider.md)) starts this controller from the first-run
+   plan, reads `runtime.auth().apiKey` and hands a ready `llama-cpp` client to the host, so the
+   product's own local chat path authenticates against this supervisor while the key stays in the
+   controller and the client closure, never in a snapshot or an error.
 - The caller-supplied executable is trusted to live in a directory an attacker cannot replace. The
    bundled binary will be installer-owned, which closes that gap.
 - Only the direct child is terminated on Windows; a server that spawns descendants would leave them

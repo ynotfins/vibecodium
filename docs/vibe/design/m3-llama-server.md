@@ -18,7 +18,9 @@ first-run wizard, proxy chat itself or manage descendants. The model downloader 
 supplies the weights; the first-run wizard now hands this module its chat start options through
 `runtimeOptions()` and a separate embedding start through `embeddingRuntimeOptions()`, the hardware
 probe is a sibling module, and the pin and verified installer
-are delivered in [m3-sidecar-binary.md](m3-sidecar-binary.md).
+are delivered in [m3-sidecar-binary.md](m3-sidecar-binary.md). The local provider host
+([m3-local-provider.md](m3-local-provider.md)) is the first consumer of `auth()`: it starts the
+controller from the wizard plan and builds the B1 client with the key.
 
 ## Contract
 
@@ -205,9 +207,12 @@ the start as `readiness-mismatch`; a listener that answers 200 on both endpoints
 and that port race is recorded as a residual risk. `auth()` is the only read path, so a snapshot, a
 log line or a crash report cannot carry the key. The `llama-cpp` preset now uses
 `auth: 'bearer'` with `apiKeyRequired: false`, so a client that is given the key sends
-`Authorization: Bearer <key>` while a plain `llama-server` without a key still works. The host
-wiring that passes `runtime.auth().apiKey` to that client is the next M3 slice; until it lands the
-local chat path is unauthenticated against this supervisor.
+`Authorization: Bearer <key>` while a plain `llama-server` without a key still works. The local
+provider host ([local-provider.mjs](../../../src/stable/runtime/local-provider.mjs),
+[m3-local-provider.md](m3-local-provider.md)) is that wiring: it starts this controller from the
+first-run plan, reads the key through `auth()` and hands a ready `llama-cpp` client (base URL, model and
+key) to the host process, so the local chat path now authenticates against this supervisor without the
+key ever leaving the supervisor or the client closure.
 
 The executable and model paths are resolved through `realpathSync.native` and must equal their
 `path.resolve` form, so a symlink or junction anywhere in the path is rejected; on POSIX the

@@ -685,6 +685,8 @@ export function createFirstRunWizard(options) {
       kind: 'llama-server',
       executablePath: runtimePath,
       modelPath: path.join(destinationDir, chat.entry.file),
+      // The B1 model name the host sends with a request; the supervisor takes the path instead.
+      model: chat.entry.id,
       embeddingModelPath: path.join(destinationDir, embedding.entry.file),
       contextSize: state.plan.contextSize,
       threads: state.plan.threads,
