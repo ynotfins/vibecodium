@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { deflateRawSync } from 'node:zlib';
 import {
@@ -13,6 +15,7 @@ import {
   rmSync,
   symlinkSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -26,6 +29,8 @@ import {
   resolveSidecarTarget,
   verifySidecarInstall,
   validateSidecarManifest,
+  LOCK_STALE_MS,
+  LOCK_WAIT_MS,
   SidecarError,
 } from '../../src/stable/runtime/sidecar.mjs';
 
@@ -782,6 +787,402 @@ test('a second concurrent install of the same directory is refused', async (t) =
   release();
   const result = await first;
   assert.equal(result.installed, true);
+});
+
+// --- Cross-process install lock and descriptor-bound archive read (M3: the last two gates) ---
+
+const SIDECAR_MODULE_URL = new URL('../../src/stable/runtime/sidecar.mjs', import.meta.url).href;
+
+function installLockPath(dir) {
+  return path.join(dir, '.vibecodium-install.lock');
+}
+
+// `process.ppid` is a live process owned by the same user, so a record naming it cannot be broken by
+// pid liveness; the tests use it to stand in for another application instance.
+function lockRecord(overrides = {}) {
+  return JSON.stringify({ pid: process.ppid, createdAt: Date.now(), token: 'f'.repeat(16), ...overrides });
+}
+
+function lockedInstall(sidecar, dir, archive, counter = { fetched: 0 }) {
+  return installSidecar(sidecar, {
+    platformKey: 'win32-x64',
+    targetDir: dir,
+    fetchImpl: async () => {
+      counter.fetched += 1;
+      return archiveResponse(archive);
+    },
+  });
+}
+
+test('a lock held by a live foreign process refuses the install without a request or a write', async (t) => {
+  const entries = runtimeFiles('foreign-lock');
+  const archive = makeZip(entries);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
+  const dir = path.join(tempDir(t), 'runtime');
+  mkdirSync(dir, { recursive: true });
+  const lock = installLockPath(dir);
+  const record = lockRecord();
+  writeFileSync(lock, record);
+  const counter = { fetched: 0 };
+  const started = Date.now();
+  await assert.rejects(lockedInstall(sidecar, dir, archive, counter), (error) => {
+    assert.ok(error instanceof SidecarError);
+    assert.equal(error.code, 'busy');
+    assert.ok(!error.message.includes(dir));
+    assert.ok(!error.message.includes(record));
+    return true;
+  });
+  assert.ok(Date.now() - started >= LOCK_WAIT_MS - 250);
+  assert.equal(counter.fetched, 0);
+  assert.deepEqual(readdirSync(dir), ['.vibecodium-install.lock']);
+  assert.equal(readFileSync(lock, 'utf8'), record);
+});
+
+test('a lock left by a dead process is broken and the install proceeds', async (t) => {
+  const entries = runtimeFiles('dead-lock');
+  const archive = makeZip(entries);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
+  const dir = path.join(tempDir(t), 'runtime');
+  mkdirSync(dir, { recursive: true });
+  const child = spawn(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'ignore' });
+  await once(child, 'exit');
+  writeFileSync(installLockPath(dir), lockRecord({ pid: child.pid }));
+  const counter = { fetched: 0 };
+  const result = await lockedInstall(sidecar, dir, archive, counter);
+  assert.equal(result.installed, true);
+  assert.equal(counter.fetched, 1);
+  assert.equal(lstatSync(installLockPath(dir), { throwIfNoEntry: false }), undefined);
+  assert.deepEqual(readdirSync(dir).filter((name) => name.startsWith('.vibecodium')), []);
+});
+
+test('a stale lock is broken, one in-process install runs, the second is busy and no break file remains', async (t) => {
+  const entries = runtimeFiles('shared-stale-lock');
+  const archive = makeZip(entries);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
+  const dir = path.join(tempDir(t), 'runtime');
+  mkdirSync(dir, { recursive: true });
+  const child = spawn(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'ignore' });
+  await once(child, 'exit');
+  writeFileSync(installLockPath(dir), lockRecord({ pid: child.pid }));
+  const counter = { fetched: 0 };
+  const settled = await Promise.allSettled([
+    lockedInstall(sidecar, dir, archive, counter),
+    lockedInstall(sidecar, dir, archive, counter),
+  ]);
+  const fulfilled = settled.filter((entry) => entry.status === 'fulfilled');
+  const rejected = settled.filter((entry) => entry.status === 'rejected');
+  assert.equal(fulfilled.length, 1);
+  assert.equal(fulfilled[0].value.installed, true);
+  assert.equal(rejected.length, 1);
+  assert.equal(rejected[0].reason.code, 'busy');
+  assert.deepEqual(readdirSync(dir).filter((name) => name.includes('.break-')), []);
+  assert.equal(lstatSync(installLockPath(dir), { throwIfNoEntry: false }), undefined);
+  assert.equal(counter.fetched, 1);
+});
+
+test('a lock record older than the hard stale bound is broken even for a live pid', async (t) => {
+  const entries = runtimeFiles('stale-lock');
+  const archive = makeZip(entries);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
+  const dir = path.join(tempDir(t), 'runtime');
+  mkdirSync(dir, { recursive: true });
+  const lock = installLockPath(dir);
+  writeFileSync(lock, lockRecord({ createdAt: Date.now() - LOCK_STALE_MS - 60_000 }));
+  const past = new Date(Date.now() - LOCK_STALE_MS - 120_000);
+  utimesSync(lock, past, past);
+  const counter = { fetched: 0 };
+  const result = await lockedInstall(sidecar, dir, archive, counter);
+  assert.equal(result.installed, true);
+  assert.equal(counter.fetched, 1);
+  assert.equal(lstatSync(lock, { throwIfNoEntry: false }), undefined);
+});
+
+test('a malformed, oversized or symlinked lock record is never followed and fails closed', async (t) => {
+  const entries = runtimeFiles('hostile-lock');
+  const archive = makeZip(entries);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
+  const base = tempDir(t);
+  const dir = path.join(base, 'runtime');
+  mkdirSync(dir, { recursive: true });
+  const lock = installLockPath(dir);
+  const counter = { fetched: 0 };
+
+  writeFileSync(lock, 'not a lock record');
+  await expectFailure(lockedInstall(sidecar, dir, archive, counter), 'busy');
+
+  writeFileSync(lock, 'x'.repeat(4096));
+  await expectFailure(lockedInstall(sidecar, dir, archive, counter), 'busy');
+  assert.equal(counter.fetched, 0);
+
+  unlinkSync(lock);
+  const target = path.join(base, 'foreign-record');
+  const record = lockRecord();
+  writeFileSync(target, record);
+  let linked = false;
+  try {
+    symlinkSync(target, lock, 'file');
+    linked = lstatSync(lock).isSymbolicLink();
+  } catch (error) {
+    if (error && (error.code === 'EPERM' || error.code === 'EACCES')) {
+      t.diagnostic('this host cannot create a file symlink without elevation');
+    } else {
+      throw error;
+    }
+  }
+  if (linked) {
+    await expectFailure(lockedInstall(sidecar, dir, archive, counter), 'busy');
+    assert.equal(readFileSync(target, 'utf8'), record);
+    unlinkSync(lock);
+  }
+
+  // A record that names this process can only be a leftover or a reused pid, so it is stale.
+  writeFileSync(lock, lockRecord({ pid: process.pid }));
+  const result = await lockedInstall(sidecar, dir, archive, counter);
+  assert.equal(result.installed, true);
+  assert.equal(counter.fetched, 1);
+  assert.equal(lstatSync(lock, { throwIfNoEntry: false }), undefined);
+});
+
+test('a second process inside installSidecar blocks this one until it is gone', async (t) => {
+  const entries = runtimeFiles('cross-process');
+  const archive = makeZip(entries);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
+  const dir = path.join(tempDir(t), 'runtime');
+  mkdirSync(dir, { recursive: true });
+  const script = [
+    'const { installSidecar } = await import(' + JSON.stringify(SIDECAR_MODULE_URL) + ');',
+    'const manifest = ' + JSON.stringify(sidecar) + ';',
+    'await installSidecar(manifest, { platformKey: "win32-x64", targetDir: ' + JSON.stringify(dir) + ',',
+    '  fetchImpl: async () => { console.log("locked"); return new Promise(() => {}); } })',
+    '  .catch((error) => { console.log("failed " + (error && error.code)); });',
+  ].join('\n');
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  t.after(() => {
+    try { child.kill(); } catch { /* already gone */ }
+  });
+  await new Promise((resolve, reject) => {
+    let output = '';
+    const timer = setTimeout(() => reject(new Error('the child never entered the installer')), 30_000);
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      output += chunk;
+      if (output.includes('locked')) {
+        clearTimeout(timer);
+        resolve();
+      }
+    });
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      reject(new Error('the child exited before holding the lock: ' + code));
+    });
+  });
+  const counter = { fetched: 0 };
+  await expectFailure(lockedInstall(sidecar, dir, archive, counter), 'busy');
+  assert.equal(counter.fetched, 0);
+  assert.ok(lstatSync(installLockPath(dir), { throwIfNoEntry: false }));
+  child.kill();
+  await once(child, 'exit');
+  const result = await lockedInstall(sidecar, dir, archive, counter);
+  assert.equal(result.installed, true);
+  assert.equal(counter.fetched, 1);
+  assert.equal(lstatSync(installLockPath(dir), { throwIfNoEntry: false }), undefined);
+});
+
+test('the archive is read through the descriptor that received it, not by path', async (t) => {
+  const entries = runtimeFiles('descriptor');
+  const archive = makeZip(entries);
+  const evil = makeZip(runtimeFiles('descriptor-evil'));
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
+  const dir = path.join(tempDir(t), 'runtime');
+  const partPath = path.join(dir, '.llama-server-b12426.zip.part');
+  let swapped = false;
+  const result = await installSidecar(sidecar, {
+    platformKey: 'win32-x64',
+    targetDir: dir,
+    fetchImpl: async () => ({
+      status: 200,
+      url: PINNED_URL,
+      headers: { get: (name) => (name.toLowerCase() === 'content-length' ? String(archive.length) : null) },
+      body: (async function* body() {
+        yield archive;
+        // Runs while the installer still holds the part-file descriptor and before it reads the
+        // archive, so a path-based read would see this different ZIP.
+        try {
+          unlinkSync(partPath);
+          writeFileSync(partPath, evil);
+          swapped = true;
+        } catch {
+          /* this host cannot replace an open part file */
+        }
+      })(),
+    }),
+  });
+  assert.equal(result.installed, true);
+  if (!swapped) {
+    t.diagnostic('this host cannot replace an open part file; the descriptor binding was not exercised dynamically');
+  }
+  for (const entry of entries) {
+    assert.deepEqual(readFileSync(path.join(dir, entry.name)), Buffer.from(entry.data));
+  }
+  const pinnedNames = new Set(files.map((file) => path.basename(file.path)));
+  assert.deepEqual(readdirSync(dir).filter((name) => !pinnedNames.has(name)), []);
+});
+
+test('the install lock is released after a failed or aborted install', async (t) => {
+  const entries = runtimeFiles('release');
+  const archive = makeZip(entries);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
+  const bad = makeSidecar({
+    url: PINNED_URL,
+    archive,
+    files,
+    targetOverrides: { sha256: '0'.repeat(64) },
+  });
+  const dir = path.join(tempDir(t), 'runtime');
+  const lock = installLockPath(dir);
+  await expectFailure(lockedInstall(bad, dir, archive), 'checksum-mismatch');
+  assert.equal(lstatSync(lock, { throwIfNoEntry: false }), undefined);
+  assert.deepEqual(readdirSync(dir), []);
+
+  const controller = new AbortController();
+  controller.abort();
+  await expectFailure(installSidecar(sidecar, {
+    platformKey: 'win32-x64',
+    targetDir: dir,
+    signal: controller.signal,
+    fetchImpl: async () => archiveResponse(archive),
+  }), 'aborted');
+  assert.equal(lstatSync(lock, { throwIfNoEntry: false }), undefined);
+
+  const result = await lockedInstall(sidecar, dir, archive);
+  assert.equal(result.installed, true);
+  assert.equal(lstatSync(lock, { throwIfNoEntry: false }), undefined);
+});
+
+test('the lock is released only when the on-disk token still matches', async (t) => {
+  const entries = runtimeFiles('token');
+  const archive = makeZip(entries);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
+  const dir = path.join(tempDir(t), 'runtime');
+  const lock = installLockPath(dir);
+  const foreign = JSON.stringify({ pid: process.ppid, createdAt: Date.now(), token: 'different-token' });
+  const result = await installSidecar(sidecar, {
+    platformKey: 'win32-x64',
+    targetDir: dir,
+    fetchImpl: async () => {
+      // A local writer replaces the record while this process still holds the lock.
+      writeFileSync(lock, foreign);
+      return archiveResponse(archive);
+    },
+  });
+  assert.equal(result.installed, true);
+  // The token no longer matches this process's, so the release must not delete the file.
+  assert.equal(readFileSync(lock, 'utf8'), foreign);
+  unlinkSync(lock);
+});
+
+test('a verified install is skipped before the lock, so a live lock never delays an offline refresh', async (t) => {
+  const entries = runtimeFiles('skip-before-lock');
+  const archive = makeZip(entries);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
+  const dir = path.join(tempDir(t), 'runtime');
+  const first = await lockedInstall(sidecar, dir, archive);
+  assert.equal(first.installed, true);
+  // A live foreign holder must not turn the offline skip into a one-second wait or a `busy`.
+  const lock = installLockPath(dir);
+  const record = lockRecord();
+  writeFileSync(lock, record);
+  const counter = { fetched: 0 };
+  const started = Date.now();
+  const result = await lockedInstall(sidecar, dir, archive, counter);
+  assert.equal(result.verified, true);
+  assert.equal(result.installed, false);
+  assert.equal(result.skipped, true);
+  assert.equal(counter.fetched, 0);
+  assert.ok(Date.now() - started < LOCK_WAIT_MS / 2, 'the offline skip must not wait for the lock');
+  assert.equal(readFileSync(lock, 'utf8'), record);
+  unlinkSync(lock);
+});
+
+test('an install that waited adopts the runtime another process installed meanwhile', async (t) => {
+  const entries = runtimeFiles('adopt');
+  const archive = makeZip(entries);
+  const files = entries.map((entry) => fileEntry(entry.name, Buffer.from(entry.data)));
+  const sidecar = makeSidecar({ url: PINNED_URL, archive, files });
+  const dir = path.join(tempDir(t), 'runtime');
+  mkdirSync(dir, { recursive: true });
+  const script = [
+    'const { installSidecar } = await import(' + JSON.stringify(SIDECAR_MODULE_URL) + ');',
+    'const manifest = ' + JSON.stringify(sidecar) + ';',
+    'const archive = Buffer.from(' + JSON.stringify(archive.toString('base64')) + ', "base64");',
+    'process.stdin.setEncoding("utf8");',
+    'let go; const gate = new Promise((resolve) => { go = resolve; });',
+    'process.stdin.on("data", (chunk) => { if (chunk.includes("go")) go(); });',
+    'await installSidecar(manifest, { platformKey: "win32-x64", targetDir: ' + JSON.stringify(dir) + ',',
+    '  fetchImpl: async () => { console.log("locked"); await gate;',
+    '    return { status: 200, url: ' + JSON.stringify(PINNED_URL) + ',',
+    '      headers: { get: (name) => (name.toLowerCase() === "content-length" ? String(archive.length) : null) },',
+    '      body: (async function* () { yield archive; })() }; } })',
+    '  .catch((error) => { console.log("failed " + (error && error.code)); });',
+  ].join('\n');
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  t.after(() => {
+    try { child.kill(); } catch { /* already gone */ }
+  });
+  await new Promise((resolve, reject) => {
+    let output = '';
+    const timer = setTimeout(() => reject(new Error('the child never held the lock')), 30_000);
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      output += chunk;
+      if (output.includes('locked')) {
+        clearTimeout(timer);
+        resolve();
+      }
+    });
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      reject(new Error('the child exited before holding the lock: ' + code));
+    });
+  });
+  let fetched = 0;
+  const started = Date.now();
+  const pending = installSidecar(sidecar, { platformKey: 'win32-x64',
+    targetDir: dir,
+    fetchImpl: async () => {
+      fetched += 1;
+      return archiveResponse(archive);
+    },
+  });
+  // Give the second installer time to finish its pre-lock inspection and enter the bounded wait.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.ok(lstatSync(installLockPath(dir), { throwIfNoEntry: false }), 'the child must still hold the lock');
+  child.stdin.end('go\n');
+  await once(child, 'exit');
+  const result = await pending;
+  assert.equal(result.verified, true);
+  assert.equal(result.installed, false);
+  assert.equal(result.skipped, true);
+  assert.equal(fetched, 0);
+  assert.ok(Date.now() - started >= 250, 'the installer must have waited for the lock');
+  assert.equal(lstatSync(installLockPath(dir), { throwIfNoEntry: false }), undefined);
+  for (const entry of entries) {
+    assert.deepEqual(readFileSync(path.join(dir, entry.name)), Buffer.from(entry.data));
+  }
 });
 
 test('install options and verification options are validated', async (t) => {
