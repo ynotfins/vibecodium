@@ -253,6 +253,10 @@ export const PROVIDER_PRESETS = Object.freeze([
     baseUrl: 'https://api.morphllm.com/v1',
     auth: 'bearer',
     apiKeyEnv: 'MORPH_API_KEY',
+    // B6: the cheap tier of Morph's hosted Fast Models (morph-models.mjs records the rows, the
+    // tier map and the prices), so a provider definition has a pinnable model without a second
+    // choice having to be invented. A caller can still name another hosted row explicitly.
+    defaultModel: 'morph-dsv41flash',
     capabilities: ['chat', 'stream', 'tools', 'embeddings'],
   }),
   definePreset({
