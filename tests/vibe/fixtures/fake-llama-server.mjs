@@ -1,6 +1,8 @@
 // Stand-in for a caller-supplied llama.cpp llama-server, used by the llama-server supervisor tests. It
-// speaks the loopback contract the supervisor and the B1 client rely on: GET /health, then
+// speaks the loopback contract the supervisor and the B1 client rely on: GET /health and /props, then
 // /v1/chat/completions (plain, streaming and tool calls), /v1/embeddings, /v1/models and /infill.
+// When LLAMA_API_KEY is set it enforces the llama.cpp rule: /health stays public, every other path
+// needs `Authorization: Bearer <key>` or `X-Api-Key`.
 // Environment switches control a never-ready, unhealthy, early-exit or SIGTERM-ignoring failure. It
 // writes the argv and selected environment to FAKE_LLAMA_LOG so the test can prove exactly what it
 // received, and appends one boot line to FAKE_LLAMA_STARTS so a restart can be counted.
@@ -21,6 +23,19 @@ const mode = (process.env.FAKE_LLAMA_MODE ?? 'ok').trim().toLowerCase();
 const log = process.env.FAKE_LLAMA_LOG;
 const startsFile = process.env.FAKE_LLAMA_STARTS;
 const crashMs = Number.parseInt(process.env.FAKE_LLAMA_CRASH_MS ?? '150', 10);
+// Never written to the log: the test only needs to know that a key reached the child.
+const apiKey = process.env.LLAMA_API_KEY ?? '';
+
+function presentedKey(request) {
+  const bearer = request.headers.authorization;
+  if (typeof bearer === 'string' && bearer.startsWith('Bearer ')) return bearer.slice('Bearer '.length);
+  const header = request.headers['x-api-key'];
+  return typeof header === 'string' ? header : '';
+}
+
+function authorized(request) {
+  return apiKey.length === 0 || presentedKey(request) === apiKey;
+}
 
 let startCount = 1;
 if (startsFile) {
@@ -46,6 +61,7 @@ if (log) {
       LC_ALL: process.env.LC_ALL ?? '',
       FAKE_LLAMA_MODE: process.env.FAKE_LLAMA_MODE ?? '',
       FAKE_LLAMA_LOG: process.env.FAKE_LLAMA_LOG ?? '',
+      HAS_API_KEY: apiKey.length === 0 ? 'absent' : 'present',
       HAS_LEAK: process.env.VIBECODIUM_TEST_LEAK === undefined ? 'absent' : 'present',
       VIBECODIUM_TEST_SECRET: process.env.VIBECODIUM_TEST_SECRET ?? '',
     },
@@ -78,7 +94,19 @@ function sendEvent(response, body) {
 
 function startServer() {
   const server = http.createServer(async (request, response) => {
+    // /health is public in llama.cpp so a supervisor can poll it before the key is accepted; every
+    // other path is authenticated.
     if (request.url === '/health') return sendJson(response, 200, { status: 'ok' });
+    if (!authorized(request)) {
+      return sendJson(response, 401, { error: { message: 'Invalid API Key', type: 'authentication_error' } });
+    }
+    if (request.url === '/props') {
+      return sendJson(response, 200, {
+        default_generation_settings: { n_ctx: 4096 },
+        model_path: 'fake-gguf',
+        total_slots: 1,
+      });
+    }
     if (request.url === '/v1/models') return sendJson(response, 200, { data: [{ id: 'fake-gguf', object: 'model' }] });
     if (request.url === '/infill') return sendJson(response, 200, { content: 'filled', stop: true });
     if (request.url === '/v1/embeddings') {

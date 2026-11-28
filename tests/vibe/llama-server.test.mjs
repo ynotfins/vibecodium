@@ -9,6 +9,8 @@ import test from 'node:test';
 import {
   LOOPBACK_HOST,
   LlamaServerError,
+  MAX_API_KEY_CHARS,
+  MIN_API_KEY_CHARS,
   buildLlamaServerArgs,
   createLlamaServer,
   reserveLoopbackPort,
@@ -88,11 +90,15 @@ async function waitGone(pid, timeoutMs = 3000) {
 test('arguments pin the model, loopback host and port and append bounded options', (t) => {
   const { modelPath } = makeModel(t);
   const base = buildLlamaServerArgs({ modelPath, port: 8080 });
-  assert.deepEqual([...base], ['--model', modelPath, '--host', LOOPBACK_HOST, '--port', '8080']);
+  assert.deepEqual([...base], [
+    '--model', modelPath, '--host', LOOPBACK_HOST, '--port', '8080',
+    '--no-webui', '--cors-origins', 'localhost',
+  ]);
   assert.ok(Object.isFrozen(base));
   const full = buildLlamaServerArgs({ modelPath, port: 8080, contextSize: 4096, threads: 8, gpuLayers: 0 });
   assert.deepEqual([...full], [
     '--model', modelPath, '--host', LOOPBACK_HOST, '--port', '8080',
+    '--no-webui', '--cors-origins', 'localhost',
     '--ctx-size', '4096', '--threads', '8', '--n-gpu-layers', '0',
   ]);
   for (const bad of [
@@ -130,9 +136,27 @@ test('start waits for health, serves the B1 llama-cpp client and stop terminates
   assert.deepEqual(await server.health(), { ok: true, status: 200 });
   const argv = readArgv(log);
   assert.deepEqual(argv.args.slice(0, 6), ['--model', modelPath, '--host', LOOPBACK_HOST, '--port', String(running.port)]);
-  assert.equal(argv.args.length, 6);
+  assert.deepEqual(argv.args.slice(6, 9), ['--no-webui', '--cors-origins', 'localhost']);
+  assert.equal(argv.args.length, 9);
+  assert.equal(argv.env.HAS_API_KEY, 'present');
+  assert.ok(!argv.args.some((arg) => arg.includes(server.auth().apiKey)), 'the key is not in the argument list');
 
-  const client = createProviderClient('llama-cpp', { baseUrl: running.baseUrl, model: 'fake-gguf', env: {} });
+  const auth = server.auth();
+  assert.equal(Object.isFrozen(auth), true);
+  assert.match(auth.apiKey, /^[A-Za-z0-9_-]{32,128}$/);
+  for (const snapshot of [server.status(), server.describe(), server.config]) {
+    assert.ok(!JSON.stringify(snapshot).includes(auth.apiKey), 'the key is not in a snapshot');
+  }
+  const denied = await fetch(running.baseUrl.replace(/\/v1$/, '/props'));
+  assert.equal(denied.status, 401);
+  const allowed = await fetch(running.baseUrl.replace(/\/v1$/, '/props'), {
+    headers: { authorization: 'Bearer ' + auth.apiKey },
+  });
+  assert.equal(allowed.status, 200);
+
+  const client = createProviderClient('llama-cpp', {
+    baseUrl: running.baseUrl, model: 'fake-gguf', apiKey: auth.apiKey, env: {},
+  });
   const chat = await client.chat({ messages: MESSAGES });
   assert.equal(chat.text, 'local answer');
   const streamed = await client.chat({ messages: MESSAGES, stream: true });
@@ -147,7 +171,12 @@ test('start waits for health, serves the B1 llama-cpp client and stop terminates
   const embedded = await client.embeddings({ input: ['a'] });
   assert.deepEqual([...embedded.vectors[0]], [0.1, 0.2, 0.3]);
 
-  const infill = await fetch(running.baseUrl.replace(/\/v1$/, '/infill'), { method: 'POST' });
+  const infillDenied = await fetch(running.baseUrl.replace(/\/v1$/, '/infill'), { method: 'POST' });
+  assert.equal(infillDenied.status, 401);
+  const infill = await fetch(running.baseUrl.replace(/\/v1$/, '/infill'), {
+    method: 'POST',
+    headers: { authorization: 'Bearer ' + auth.apiKey },
+  });
   assert.equal(infill.status, 200);
   assert.equal((await infill.json()).content, 'filled');
 
@@ -172,6 +201,147 @@ test('commandArgs reach the child literally before the server flags', async (t) 
   assert.equal(argv.args[3], modelPath);
   assert.equal(argv.args[4], '--host');
   assert.equal(argv.args[5], LOOPBACK_HOST);
+});
+
+test('a caller-supplied apiKey is validated and used on every request', async (t) => {
+  const key = 'caller-key-' + 'k'.repeat(33);
+  const { server, log } = makeServer(t, { apiKey: key });
+  assert.equal(server.auth().apiKey, key);
+  const running = await server.start();
+  assert.equal(running.state, 'running');
+  const argv = readArgv(log);
+  assert.equal(argv.env.HAS_API_KEY, 'present');
+  assert.ok(!argv.args.includes(key), 'the key is not passed as an argument');
+  const client = createProviderClient('llama-cpp', {
+    baseUrl: running.baseUrl, model: 'fake-gguf', apiKey: key, env: {},
+  });
+  assert.equal((await client.chat({ messages: MESSAGES })).text, 'local answer');
+  assert.equal((await server.health()).ok, true, 'health speaks the same key');
+  assert.equal(server.auth().apiKey, key, 'the key is unchanged after start');
+  await server.stop();
+  assert.equal(server.auth().apiKey, key, 'the key survives a stop');
+});
+
+test('an unusable apiKey fails closed without echoing the value', (t) => {
+  const { modelPath } = makeModel(t);
+  const base = { executablePath: NODE, commandArgs: [FIXTURE], modelPath };
+  const marker = 'Q'.repeat(30);
+  for (const apiKey of [
+    'short', 'k'.repeat(129), marker + ',', marker + ' ', marker + '\n', marker + '\u0007',
+    marker + '\u202E', marker + '"', marker + '\\', 42, null,
+  ]) {
+    try {
+      createLlamaServer({ ...base, apiKey });
+      assert.fail('expected a rejection');
+    } catch (error) {
+      assert.equal(error.code, 'invalid-api-key');
+      if (typeof apiKey === 'string' && apiKey.includes(marker)) {
+        assert.ok(!error.message.includes(marker), 'the rejected key is never echoed');
+      }
+    }
+  }
+  const accessor = { ...base };
+  Object.defineProperty(accessor, 'apiKey', {
+    enumerable: true,
+    get() { throw new Error('getter invoked'); },
+  });
+  assert.throws(() => createLlamaServer(accessor), isCode('invalid-options'));
+});
+
+test('an apiKey of valid length is still rejected for an unsafe character, without echoing it', (t) => {
+  const { modelPath } = makeModel(t);
+  const base = { executablePath: NODE, commandArgs: [FIXTURE], modelPath };
+  // Keep the sample inside the 32-128 window so the length check cannot mask the character check.
+  const atLength = (suffix) => 'a'.repeat(40 - suffix.length) + suffix;
+  for (const suffix of [',', ' ', '\n', '\u0007', '\u007f', '\u202E', '\u00e9', '"', '\\']) {
+    const apiKey = atLength(suffix);
+    assert.ok(
+      apiKey.length >= MIN_API_KEY_CHARS && apiKey.length <= MAX_API_KEY_CHARS,
+      'the sample is inside the length window',
+    );
+    try {
+      createLlamaServer({ ...base, apiKey });
+      assert.fail('expected a rejection for ' + JSON.stringify(apiKey));
+    } catch (error) {
+      assert.equal(error.code, 'invalid-api-key');
+      assert.ok(!error.message.includes(apiKey), 'the rejected key is never echoed');
+    }
+  }
+});
+
+test('an apiKey at either length bound is accepted and each controller generates its own key', (t) => {
+  const { modelPath } = makeModel(t);
+  const base = { executablePath: NODE, commandArgs: [FIXTURE], modelPath };
+  for (const apiKey of ['k'.repeat(MIN_API_KEY_CHARS), 'k'.repeat(MAX_API_KEY_CHARS)]) {
+    assert.equal(createLlamaServer({ ...base, apiKey }).auth().apiKey, apiKey);
+  }
+  const first = createLlamaServer(base).auth().apiKey;
+  const second = createLlamaServer(base).auth().apiKey;
+  assert.match(first, /^[A-Za-z0-9_-]{43}$/, 'the generated key is 32 random bytes in base64url');
+  assert.notEqual(first, second, 'each controller generates its own key');
+});
+
+test('a 403 from the authenticated probe is a foreign listener and the child is reaped', async (t) => {
+  let logPath = null;
+  const { server, log } = makeServer(t, {
+    fetch: async (url) => {
+      const deadlineAt = Date.now() + 3000;
+      while (logPath !== null && !existsSync(logPath) && Date.now() < deadlineAt) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      if (String(url).endsWith('/health')) return new Response('{}', { status: 200 });
+      return new Response('{}', { status: 403 });
+    },
+    startupTimeoutMs: 5000,
+    healthIntervalMs: 20,
+  });
+  logPath = log;
+  const key = server.auth().apiKey;
+  let caught = null;
+  try {
+    await server.start();
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(caught instanceof LlamaServerError && caught.code === 'readiness-mismatch');
+  assert.ok(!caught.message.includes(key), 'the readiness error never echoes the key');
+  assert.equal(server.status().state, 'stopped');
+  assert.equal(server.status().pid, null);
+  assert.equal(server.status().port, null);
+  assert.equal(await waitGone(readArgv(log).pid), true, 'a 403 listener is treated as foreign and the child is killed');
+});
+
+test('a listener that rejects the generated key fails readiness and is reaped', async (t) => {
+  const seen = [];
+  // The child boots asynchronously; answer only once it has written its argv log, so the pid is
+  // known and the "reaped" assertion is meaningful.
+  let logPath = null;
+  const { server, log } = makeServer(t, {
+    fetch: async (url, init) => {
+      const deadlineAt = Date.now() + 3000;
+      while (logPath !== null && !existsSync(logPath) && Date.now() < deadlineAt) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      const target = String(url);
+      const headers = new Headers(init?.headers ?? {});
+      seen.push({ path: new URL(target).pathname, authorization: headers.get('authorization') });
+      if (target.endsWith('/health')) return new Response('{}', { status: 200 });
+      return new Response('{}', { status: 401 });
+    },
+    startupTimeoutMs: 5000,
+    healthIntervalMs: 20,
+  });
+  logPath = log;
+  const key = server.auth().apiKey;
+  await assert.rejects(server.start(), isCode('readiness-mismatch'));
+  assert.equal(server.status().state, 'stopped');
+  assert.equal(server.status().pid, null);
+  assert.equal(server.status().port, null);
+  assert.ok(
+    seen.some((entry) => entry.path === '/props' && entry.authorization === 'Bearer ' + key),
+    'the readiness probe authenticates itself',
+  );
+  assert.equal(await waitGone(readArgv(log).pid), true, 'a server that rejects the key is killed');
 });
 
 test('a never-ready server fails as startup-timeout and is killed', async (t) => {
@@ -264,7 +434,9 @@ test('health reports a non-200 answer and a failed request while running', async
     healthIntervalMs: 20,
     stopTimeoutMs: 3000,
     fetch: async (url, init) => {
-      if (String(url).endsWith('/health')) {
+      const target = String(url);
+      if (target.endsWith('/health')) return new Response('{}', { status: 200 });
+      if (target.endsWith('/props')) {
         if (mode === 'throw') throw new Error('network down');
         return new Response('{}', { status: mode === 'ok' ? 200 : 503 });
       }
@@ -352,6 +524,7 @@ test('options fail closed without spawning', (t) => {
     { startupTimeoutMs: 0 }, { healthIntervalMs: 0 }, { stopTimeoutMs: 0 }, { unknown: true },
     { commandArgs: 'nope' }, { env: [] }, { fetch: 'nope' },
     { commandArgs: ['--host', '[8.8.8.8]'] }, { commandArgs: ['--port=1'] },
+    { commandArgs: ['--port', '1'] },
     { commandArgs: ['--host=[8.8.8.8]'] },
     { commandArgs: Array(17).fill('x') },
     { commandArgs: ['x'.repeat(1025)] },
@@ -376,12 +549,82 @@ test('options fail closed without spawning', (t) => {
     { commandArgs: ['--agent'] },
     { commandArgs: ['-ag'] },
     { commandArgs: ['--ui-agent'] },
+    { commandArgs: ['--ui_mcp_proxy'] },
     { commandArgs: ['--ui-mcp-proxy'] },
     { commandArgs: ['--tools'] },
     { commandArgs: ['--MCP-servers', 'x'] },
-    { env: { 'BAD-KEY': 'x' } },
+    { commandArgs: ['--mcp_servers', 'x'] },
+    { commandArgs: ['-mu', 'https://example.invalid/model.gguf'] },
+    { commandArgs: ['--model-url', 'https://example.invalid/model.gguf'] },
+    { commandArgs: ['--model-url=https://example.invalid/model.gguf'] },
+    { commandArgs: ['-hf', 'owner/repo'] },
+    { commandArgs: ['--hf-repo', 'owner/repo'] },
+    { commandArgs: ['--hf_repo', 'owner/repo'] },
+    { commandArgs: ['-dr', 'owner/repo'] },
+    { commandArgs: ['--docker-repo', 'owner/repo'] },
+    { commandArgs: ['--connect', 'peer.invalid:50052'] },
+    { commandArgs: ['--connect=peer.invalid:50052'] },
+    { commandArgs: ['--api-key', 'x'] },
+    { commandArgs: ['--api_key', 'x'] },
+    { commandArgs: ['--api-key=secret'] },
+    { commandArgs: ['--api_key=secret'] },
+    { commandArgs: ['--API-KEY', 'x'] },
+    { commandArgs: ['--api-key-file', 'x'] },
+    { commandArgs: ['--api_key_file', 'x'] },
+    { commandArgs: ['--api_key_file=x'] },
+    { commandArgs: ['--model', 'x'] },
+    { commandArgs: ['--model=x'] },
+    { commandArgs: ['-m', 'x'] },
+    { commandArgs: ['--no-webui'] },
+    { commandArgs: ['--no_webui'] },
+    { commandArgs: ['--no-webui=true'] },
+    { commandArgs: ['--no_webui=true'] },
+    { commandArgs: ['--webui'] },
+    { commandArgs: ['--webui=true'] },
+    { commandArgs: ['--ui'] },
+    { commandArgs: ['--ui=true'] },
+    { commandArgs: ['--no-ui'] },
+    { commandArgs: ['--no_ui'] },
+    { commandArgs: ['--no-ui=true'] },
+    { commandArgs: ['--no_ui=true'] },
+    { commandArgs: ['--cors-origins', 'localhost'] },
+    { commandArgs: ['--cors_origins', 'localhost'] },
+    { commandArgs: ['--cors-origins=*'] },
+    { commandArgs: ['--cors_origins=*'] },
+    { commandArgs: ['--cors-methods', 'GET'] },
+    { commandArgs: ['--cors_methods', 'GET'] },
+    { commandArgs: ['--cors-methods=GET'] },
+    { commandArgs: ['--cors_methods=GET'] },
+    { commandArgs: ['--cors-headers', 'x'] },
+    { commandArgs: ['--cors_headers', 'x'] },
+    { commandArgs: ['--cors-headers=Authorization'] },
+    { commandArgs: ['--cors_headers=Authorization'] },
+    { commandArgs: ['--cors-credentials'] },
+    { commandArgs: ['--cors_credentials'] },
+    { commandArgs: ['--cors-credentials=true'] },
+    { commandArgs: ['--cors_credentials=true'] },
+    { commandArgs: ['--no-cors-credentials'] },
+    { commandArgs: ['--no_cors_credentials'] },
+    { commandArgs: ['--no-cors-credentials=true'] },
+    { commandArgs: ['--no_cors_credentials=true'] },
+    { commandArgs: ['--allow-unauthenticated-tools'] },
+    { commandArgs: ['--allow_unauthenticated_tools'] },
+    { commandArgs: ['--allow-unauthenticated-tools=true'] },
+    { commandArgs: ['--allow_unauthenticated_tools=true'] },
+    { commandArgs: ['--host=0.0.0.0'] },
+    { commandArgs: ['--cors_origins', '*', '--cors-credentials'] },
+    { env: { LLAMA_API_KEY: 'x' } },
+    { env: { llama_api_key: 'x' } },
+    { env: { Llama_Api_Key: 'x' } },
   ]) {
     assert.throws(() => createLlamaServer({ ...valid, ...overrides }), (error) => error instanceof LlamaServerError);
+  }
+  // A non-reserved flag is still accepted in either spelling: underscore normalisation only widens
+  // the refusal, it must not refuse legitimate flags such as `--chat_template`.
+  for (const commandArgs of [
+    ['--chat_template', 'x'], ['--chat-template', 'x'], ['--lora_init', 'x'], ['--keep', '8'],
+  ]) {
+    assert.doesNotThrow(() => createLlamaServer({ ...valid, commandArgs }));
   }
   const accessor = { ...valid };
   Object.defineProperty(accessor, 'modelPath', {
@@ -592,6 +835,7 @@ test('a crash while running restarts on the same port after the back-off', async
     crashMs: 150,
     restart: { maxRestarts: 2, baseDelayMs: 200, maxDelayMs: 500, stableMs: 60_000 },
   });
+  const key = server.auth().apiKey;
   const first = await server.start();
   assert.equal(await waitForState(server, 'restarting'), true);
   assert.equal(server.status().port, first.port, 'the restart keeps the target port');
@@ -603,9 +847,12 @@ test('a crash while running restarts on the same port after the back-off', async
   assert.notEqual(second.pid, first.pid);
   assert.equal(second.restarts, 1);
   assert.equal(second.failure, null);
+  assert.equal(server.auth().apiKey, key, 'the key is unchanged across the restart');
   assert.equal(startsCount(starts), 2);
   assert.deepEqual(await server.health(), { ok: true, status: 200 });
-  const client = createProviderClient('llama-cpp', { baseUrl: second.baseUrl, model: 'fake-gguf', env: {} });
+  const client = createProviderClient('llama-cpp', {
+    baseUrl: second.baseUrl, model: 'fake-gguf', apiKey: server.auth().apiKey, env: {},
+  });
   assert.equal((await client.chat({ messages: MESSAGES })).text, 'local answer');
 });
 

@@ -317,7 +317,9 @@ export const PROVIDER_PRESETS = Object.freeze([
     label: 'llama.cpp',
     transport: 'openai-chat',
     baseUrl: 'http://' + LOOPBACK + ':8080/v1',
-    auth: 'none',
+    // The M3 supervisor always starts llama-server with an API key, so a client that is given one
+    // must send it. No key is required, so a plain llama-server without one still works.
+    auth: 'bearer',
     apiKeyRequired: false,
     capabilities: ['chat', 'stream', 'tools', 'embeddings'],
     local: true,

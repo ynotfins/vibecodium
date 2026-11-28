@@ -1,6 +1,6 @@
 # ADR-0010: Local models run under a caller-supplied llama-server supervisor
 
-> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-26
+> Doc class: living - Owner: docs-keeper - Last reviewed: 2026-11-27
 
 - Status: accepted
 - Date: 2026-11-25
@@ -28,10 +28,17 @@ Ship `src/stable/runtime/llama-server.mjs` as a dependency-free supervisor for a
 - The child is spawned directly (`shell: false`) on loopback `[127.0.0.1]` with a loopback port
    (ephemeral by default, or a caller-supplied one), `windowsHide`, the executable directory as its working directory, and
    no process group of its own.
-- The server flags are fixed: `--model`, `--host`, `--port`, plus optional bounded `--ctx-size`,
-   `--threads` and `--n-gpu-layers`. Caller prefix arguments may not set the bind host or port.
-- Readiness means `GET /health` returned 200 before the startup deadline. A never-ready or exited
-   child is stopped before the start error surfaces.
+- The server flags are fixed: `--model`, `--host`, `--port`, `--no-webui`,
+   `--cors-origins localhost`, plus optional bounded `--ctx-size`, `--threads` and `--n-gpu-layers`.
+   Caller prefix arguments may not set the bind host, port, model, API key, web UI or CORS posture.
+- Every controller owns one API key for its lifetime (32 random bytes in base64url, or a validated
+   caller-supplied one), reused across stops and restarts. The child receives it only as
+   `LLAMA_API_KEY`, the web UI is off, and a client that is given the key authenticates with
+   `Authorization: Bearer <key>`.
+- Readiness means the public `GET /health` returned 200 and an authenticated `GET /props` with the
+   key returned 200 before the startup deadline. A listener that answers `/health` but rejects the
+   key is not our child: the start stops the child and fails as `readiness-mismatch`. A never-ready
+   or exited child is stopped before the start error surfaces.
 - The child environment is an allowlist (`SystemRoot`/`TEMP`/`TMP` on Windows, `TMPDIR`/`LANG`/
    `LC_ALL` elsewhere) with `PATH` pinned empty and loader/system names refused, so provider keys and
    user-writable search paths do not reach the local server.
@@ -53,9 +60,19 @@ supervisor boundary, not a binary version.
    wizard has one small API to drive.
 - A local model server runs on loopback only and inherits no provider credential or user `PATH`.
 - The supervisor is a process boundary, not a content boundary: request bodies and model output do
-   not pass through it. It also adds no API key and no CORS restriction to `llama-server` yet, and it
-   accepts a health 200 from any listener on the chosen port; the client-wiring slice must add an
-   ownership or authenticated readiness check before prompts flow through the port.
+   not pass through it.
+- The loopback port is authenticated, so a local process cannot drive the model without the key, and
+   the web UI is off, so a visited web page has nothing to scrape; `--cors-origins localhost` makes
+   the API same-origin only for a page. The key lives in the controller's closure and the child's
+   environment, so a debugger or an administrator can still read it. Readiness and `health()` reject a
+   listener that answers `/health` but rejects the key; a listener that binds the reserved port and
+   answers 200 on `/props` too is still accepted, and the probe sends it the key, so a narrow
+   bind-then-close race (wider on a caller-supplied fixed port) remains and a client that checks only
+   `/health` would still accept a foreign listener between the child's exit and the next start.
+- The key must reach the B1 client: the `llama-cpp` preset uses `auth: 'bearer'` with
+   `apiKeyRequired: false`, and the host wiring that passes `runtime.auth().apiKey` to that client is
+   the next M3 slice. Until it lands, the product's own local chat path is unauthenticated against
+   this supervisor.
 - The caller-supplied executable is trusted to live in a directory an attacker cannot replace. The
    bundled binary will be installer-owned, which closes that gap.
 - Only the direct child is terminated on Windows; a server that spawns descendants would leave them
